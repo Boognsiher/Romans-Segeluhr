@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Segeluhr</title>
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a1420">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230a1420'/%3E%3Cpath d='M50 15 L50 70 M50 70 L30 85 L70 85 Z M35 30 Q50 25 65 30 L60 55 Q50 50 40 55 Z' fill='none' stroke='%232dd4bf' stroke-width='4'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%230a1420'/%3E%3Cpath d='M50 15 L50 70 M50 70 L30 85 L70 85 Z M35 30 Q50 25 65 30 L60 55 Q50 50 40 55 Z' fill='none' stroke='%232dd4bf' stroke-width='5'/%3E%3C/svg%3E">
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiU2VnZWx1aHIiLCJzaG9ydF9uYW1lIjoiU2VnZWx1aHIiLCJzdGFydF91cmwiOiIuIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiIzBhMTQyMCIsInRoZW1lX2NvbG9yIjoiIzBhMTQyMCJ9">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a1420;
+  --panel:#0f1f2e;
+  --panel2:#132638;
+  --line:#1e3a4f;
+  --text:#e8eef2;
+  --text-dim:#7d97a8;
+  --teal:#2dd4bf;
+  --teal-dim:#1a5f57;
+  --amber:#f5a623;
+  --red:#ef4444;
+  --green:#34d399;
+  --font-ui:'Inter',system-ui,sans-serif;
+  --font-num:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--font-ui);overscroll-behavior:none;}
+body{display:flex;justify-content:center;}
+#app{width:100%;max-width:520px;min-height:100vh;display:flex;flex-direction:column;position:relative;padding-bottom:env(safe-area-inset-bottom);}
+
+/* ---- Top bar ---- */
+#topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px calc(8px + env(safe-area-inset-top,0px));padding-top:calc(10px + env(safe-area-inset-top,0px));border-bottom:1px solid var(--line);background:var(--panel);}
+#topbar h1{font-size:15px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;margin:0;color:var(--teal);}
+#gpsStatus{display:flex;align-items:center;gap:6px;font-family:var(--font-num);font-size:12px;color:var(--text-dim);}
+#gpsDot{width:9px;height:9px;border-radius:50%;background:var(--red);transition:background .3s;flex-shrink:0;}
+#gpsDot.ok{background:var(--green);}
+#gpsDot.warn{background:var(--amber);}
+
+/* ---- Tab content ---- */
+#content{flex:1;overflow-y:auto;padding:14px 14px 90px;}
+.panel{display:none;}
+.panel.active{display:block;}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;}
+.card h2{font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim);margin:0 0 10px;font-weight:600;}
+.row{display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line);}
+.row:last-child{border-bottom:none;}
+.row .label{font-size:13px;color:var(--text-dim);}
+.row .val{font-family:var(--font-num);font-size:18px;font-weight:600;}
+.val.big{font-size:26px;}
+.val.amber{color:var(--amber);}
+.val.green{color:var(--green);}
+.val.red{color:var(--red);}
+.val.teal{color:var(--teal);}
+.val.dim{color:var(--text-dim);font-size:14px;font-weight:400;}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.tile{background:var(--panel2);border-radius:12px;padding:12px;text-align:center;}
+.tile .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin-bottom:4px;}
+.tile .num{font-family:var(--font-num);font-size:28px;font-weight:700;}
+.tile .unit{font-size:11px;color:var(--text-dim);margin-left:2px;}
+
+button{font-family:var(--font-ui);border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:600;cursor:pointer;width:100%;transition:transform .1s,opacity .2s;}
+button:active{transform:scale(0.97);}
+button.primary{background:var(--teal);color:#04201c;}
+button.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--line);}
+button.danger{background:transparent;color:var(--red);border:1px solid var(--red);}
+button.small{padding:10px;font-size:12px;}
+button:disabled{opacity:.4;}
+.btnrow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;}
+.btnrow3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;}
+
+#statusBanner{margin-bottom:12px;padding:12px 14px;border-radius:12px;background:var(--panel2);border-left:4px solid var(--teal);font-size:14px;font-weight:600;min-height:20px;}
+#statusBanner.amber{border-left-color:var(--amber);}
+#statusBanner.red{border-left-color:var(--red);}
+#statusBanner.green{border-left-color:var(--green);}
+
+.countdown{font-family:var(--font-num);font-size:64px;font-weight:800;text-align:center;letter-spacing:0.02em;margin:14px 0;color:var(--teal);}
+.countdown.late{color:var(--red);}
+
+.waypointRow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);}
+.waypointRow:last-child{border-bottom:none;}
+.waypointRow .wpinfo{font-size:13px;}
+.waypointRow .wpinfo .coord{color:var(--text-dim);font-family:var(--font-num);font-size:11px;display:block;}
+.waypointRow .wpbtns{display:flex;gap:6px;}
+.wpbtn{width:auto;padding:8px 12px;font-size:12px;}
+.clearx{background:transparent;border:1px solid var(--line);color:var(--text-dim);width:34px;height:34px;padding:0;border-radius:8px;font-size:16px;line-height:1;}
+
+.modeSwitch{display:flex;gap:6px;}
+.modeSwitch button{flex:1;padding:10px 4px;font-size:11px;}
+.modeSwitch button.on{background:var(--teal);color:#04201c;}
+.modeSwitch button.off{background:var(--panel2);color:var(--text-dim);}
+
+table{width:100%;border-collapse:collapse;font-size:12px;}
+th,td{text-align:right;padding:6px 4px;border-bottom:1px solid var(--line);font-family:var(--font-num);}
+th{color:var(--text-dim);font-weight:600;text-transform:uppercase;font-size:10px;}
+td:first-child,th:first-child{text-align:left;font-family:var(--font-ui);}
+
+#windChart{width:100%;height:160px;display:block;}
+
+/* ---- Bottom tab nav ---- */
+#tabnav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:520px;display:flex;background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:10;}
+#tabnav button{flex:1;background:none;border-radius:0;padding:10px 2px 8px;font-size:9px;font-weight:600;color:var(--text-dim);display:flex;flex-direction:column;align-items:center;gap:3px;text-transform:uppercase;letter-spacing:.02em;}
+#tabnav button.active{color:var(--teal);}
+#tabnav button .ic{font-size:17px;}
+
+.hint{font-size:12px;color:var(--text-dim);line-height:1.5;margin-top:6px;}
+.toggleRow{display:flex;justify-content:space-between;align-items:center;padding:10px 0;}
+.switch{position:relative;width:44px;height:26px;background:var(--panel2);border-radius:13px;border:1px solid var(--line);cursor:pointer;flex-shrink:0;}
+.switch.on{background:var(--teal-dim);}
+.switch .knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--text-dim);transition:transform .2s,background .2s;}
+.switch.on .knob{transform:translateX(18px);background:var(--teal);}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="topbar">
+    <h1>⛵ Segeluhr</h1>
+    <div id="gpsStatus"><span id="gpsDot"></span><span id="gpsText">Kein Fix</span></div>
+  </div>
+
+  <div id="content">
+
+    <div id="statusBanner">Bereit.</div>
+
+    <!-- ===================== NORMAL / TELEMETRIE ===================== -->
+    <div class="panel active" data-panel="normal">
+      <div class="grid2">
+        <div class="tile"><div class="lbl">SOG</div><div class="num" id="t_sog">--</div><span class="unit">kn</span></div>
+        <div class="tile"><div class="lbl">COG</div><div class="num" id="t_cog">--</div><span class="unit">°</span></div>
+      </div>
+      <div class="grid2" style="margin-top:10px;">
+        <div class="tile"><div class="lbl">Wind (scheinbar)</div><div class="num" id="t_wind">--</div><span class="unit">°</span></div>
+        <div class="tile"><div class="lbl">VMG</div><div class="num" id="t_vmg">--</div><span class="unit">kn</span></div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <h2>Startlinie</h2>
+        <div class="row"><span class="label">Line-Bias</span><span class="val" id="t_bias">--</span></div>
+      </div>
+
+      <div class="card">
+        <h2>Ziel</h2>
+        <div class="row"><span class="label">Peilung</span><span class="val" id="t_zielpeil">--</span></div>
+        <div class="row"><span class="label">Distanz</span><span class="val" id="t_zieldist">--</span></div>
+      </div>
+
+      <div class="card">
+        <h2>Racemode-Boje</h2>
+        <div class="row"><span class="label">Aktives Ziel</span><span class="val dim" id="t_bojeaktiv">--</span></div>
+        <div class="row"><span class="label">Peilung</span><span class="val" id="t_bojepeil">--</span></div>
+        <div class="row"><span class="label">Distanz</span><span class="val" id="t_bojedist">--</span></div>
+      </div>
+
+      <div class="card">
+        <h2>See-Rand</h2>
+        <div class="row"><span class="label">Abstand</span><span class="val" id="t_seerand">--</span></div>
+      </div>
+    </div>
+
+    <!-- ===================== START ===================== -->
+    <div class="panel" data-panel="start">
+      <div class="card">
+        <h2>Start-Countdown</h2>
+        <div class="countdown" id="startCountdown">5:00</div>
+        <div class="btnrow">
+          <button class="primary" id="btnStartCountdown">Start (5:00)</button>
+          <button class="secondary" id="btnResetCountdown">Reset</button>
+        </div>
+        <p class="hint">Signal bei 4:00 und 1:00 (kurz), starkes Signal bei 0:00 (Start). Danach läuft die Zeit als Race-Timer weiter.</p>
+      </div>
+    </div>
+
+    <!-- ===================== WIND ===================== -->
+    <div class="panel" data-panel="wind">
+      <div class="card">
+        <h2>Windkalibrierung (Amwind-Methode)</h2>
+        <div class="row"><span class="label">Status</span><span class="val dim" id="w_calibstatus">Nicht kalibriert</span></div>
+        <div class="row"><span class="label">Windrichtung</span><span class="val teal" id="w_winddir">--</span></div>
+        <button class="primary" id="btnStartCalib" style="margin-top:10px;">Amwind-Kalibrierung starten</button>
+        <button class="secondary small" id="btnAbortCalib" style="margin-top:8px;display:none;">Abbrechen</button>
+        <p class="hint">Ablauf: 1) Ruhigen Amwind-Kurs halten. 2) Bei Signal wenden. 3) Neuen ruhigen Kurs auf dem anderen Bug halten. Wendewinkel muss zwischen 60° und 110° liegen.</p>
+      </div>
+
+      <div class="card">
+        <h2>Windverlauf (Trend)</h2>
+        <svg id="windChart" viewBox="0 0 300 160"></svg>
+        <div class="grid2" style="margin-top:8px;">
+          <div class="tile"><div class="lbl">Netto-Drehung</div><div class="num" id="w_net" style="font-size:20px;">--</div><span class="unit">°</span></div>
+          <div class="tile"><div class="lbl">Schwankung</div><div class="num" id="w_range" style="font-size:20px;">--</div><span class="unit">°</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== TRAINING ===================== -->
+    <div class="panel" data-panel="training">
+      <div class="card">
+        <h2>Trainingsmodus</h2>
+        <div class="modeSwitch">
+          <button data-mode="OFF" class="off">Aus</button>
+          <button data-mode="TACK_ONLY" class="off">Wenden</button>
+          <button data-mode="JIBE_ONLY" class="off">Halsen</button>
+          <button data-mode="RACE" class="off">Race</button>
+        </div>
+        <p class="hint" id="trainReq"></p>
+      </div>
+
+      <div class="card">
+        <h2>Boje setzen (Racemode)</h2>
+        <div class="waypointRow">
+          <div class="wpinfo">Boje 1<span class="coord" id="wp_boje1">nicht gesetzt</span></div>
+          <div class="wpbtns"><button class="secondary wpbtn" data-wp="buoy1">Setzen</button><button class="clearx" data-wpclear="buoy1">×</button></div>
+        </div>
+        <div class="waypointRow">
+          <div class="wpinfo">Boje 2<span class="coord" id="wp_boje2">nicht gesetzt</span></div>
+          <div class="wpbtns"><button class="secondary wpbtn" data-wp="buoy2">Setzen</button><button class="clearx" data-wpclear="buoy2">×</button></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>See-Geofence</h2>
+        <div class="waypointRow">
+          <div class="wpinfo">Mitte<span class="coord" id="wp_lakecenter">nicht gesetzt</span></div>
+          <div class="wpbtns"><button class="secondary wpbtn" data-wp="lakeCenter">Setzen</button><button class="clearx" data-wpclear="lakeCenter">×</button></div>
+        </div>
+        <div class="waypointRow">
+          <div class="wpinfo">Rand (mehrfach möglich)<span class="coord" id="wp_lakeradius">Radius: --</span></div>
+          <div class="wpbtns"><button class="secondary wpbtn" data-wp="lakeEdge">Setzen</button><button class="clearx" data-wpclear="lakeRadius">×</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== AUSWERTUNG ===================== -->
+    <div class="panel" data-panel="log">
+      <div class="card">
+        <h2>Durchschnitt</h2>
+        <div class="grid2">
+          <div class="tile"><div class="lbl">Ø Wende-Score</div><div class="num" id="l_avgtack" style="font-size:22px;">--</div></div>
+          <div class="tile"><div class="lbl">Ø Halse-Score</div><div class="num" id="l_avgjibe" style="font-size:22px;">--</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Letzte Manöver</h2>
+        <table>
+          <thead><tr><th>Typ</th><th>Dauer</th><th>V-Verlust</th><th>Score</th></tr></thead>
+          <tbody id="l_table"></tbody>
+        </table>
+        <button class="danger small" id="btnClearLog" style="margin-top:10px;">Log löschen</button>
+      </div>
+    </div>
+
+    <!-- ===================== SETUP ===================== -->
+    <div class="panel" data-panel="setup">
+      <div class="card">
+        <h2>Startlinie</h2>
+        <div class="waypointRow">
+          <div class="wpinfo">Pin-Ende<span class="coord" id="wp_pin">nicht gesetzt</span></div>
+          <div class="wpbtns"><button class="secondary wpbtn" data-wp="pin">Setzen</button><button class="clearx" data-wpclear="pin">×</button></div>
+        </div>
+        <div class="waypointRow">
+          <div class="wpinfo">Boot-Ende<span class="coord" id="wp_boat">nicht gesetzt</span></div>
+          <div class="wpbtns"><button class="secondary wpbtn" data-wp="boat">Setzen</button><button class="clearx" data-wpclear="boat">×</button></div>
+        </div>
+        <p class="hint">⚠️ Vorzeichen von Line-Bias hängt von Pin/Boot-Zuordnung ab — einmal mit bekanntem Wind gegenprüfen.</p>
+      </div>
+      <div class="card">
+        <h2>Regatta-Ziel</h2>
+        <div class="waypointRow">
+          <div class="wpinfo">Ziel-Wegpunkt<span class="coord" id="wp_target">nicht gesetzt</span></div>
+          <div class="wpbtns"><button class="secondary wpbtn" data-wp="target">Setzen</button><button class="clearx" data-wpclear="target">×</button></div>
+        </div>
+        <p class="hint">Wird für Header/Lift-Alarm beim Wind-Tracking verwendet (3× Vibration = Header).</p>
+      </div>
+      <div class="card">
+        <h2>Bildschirm</h2>
+        <div class="toggleRow">
+          <span>Display wach halten</span>
+          <div class="switch" id="wakeToggle"><div class="knob"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>GPS</h2>
+        <button class="primary" id="btnGpsStart">GPS starten</button>
+        <p class="hint" id="gpsHint">Benötigt HTTPS oder localhost. Vibration & GPS funktionieren nicht bei lokal geöffneter Datei (file://).</p>
+      </div>
+      <div class="card">
+        <h2>Alles zurücksetzen</h2>
+        <button class="danger" id="btnResetAll">Alle Daten löschen</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="tabnav">
+    <button class="active" data-tab="normal"><span class="ic">📊</span>Normal</button>
+    <button data-tab="start"><span class="ic">⏱</span>Start</button>
+    <button data-tab="wind"><span class="ic">🧭</span>Wind</button>
+    <button data-tab="training"><span class="ic">🎯</span>Training</button>
+    <button data-tab="log"><span class="ic">📈</span>Log</button>
+    <button data-tab="setup"><span class="ic">⚙️</span>Setup</button>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+/* ======================================================================
+   KONSTANTEN (Abschnitt 10 der Spezifikation)
+   ====================================================================== */
+const MIN_SPEED_KN = 1.5;
+const WINDOW_SIZE = 8;
+const STEADY_COURSE_MAX_DEV = 8;
+const TRAIN_STEADY_MAX_DEV_MANEUVER = 14;
+const RACE_COURSE_MAX_DEV = 10;
+const POSITION_CHECK_MIN_DIST_M = 15;
+const POSITION_CHECK_MAX_DEV_DEG = 20;
+const METHOD_TIMEOUT_MS = 90000;
+const TACK_CHANGE_MIN_DEG = 50;
+const MIN_TACK_ANGLE_DEG = 60;
+const MAX_TACK_ANGLE_DEG = 110;
+const WIND_SHIFT_THRESHOLD_DEG = 6;
+const TACK_SIGN_DEADZONE_DEG = 5;
+const WIND_LOG_INTERVAL_MS = 60000;
+const WIND_LOG_SIZE = 30;
+const TRAIN_MIN_INTERVAL_MS = 20000;
+const TRAIN_MAX_INTERVAL_MS = 60000;
+const TRAIN_MANEUVER_TIMEOUT_MS = 60000;
+const TRAIN_TURN_START_DEG = 15;
+const MANEUVER_LOG_SIZE = 20;
+const ROUNDING_RADIUS_M = 20;
+const RACE_TURN_MIN_DEG = 25;
+const RACE_AIM_TOLERANCE_DEG = 30;
+const LAKE_WARN_FACTOR = 0.80;
+const LAKE_CLEAR_FACTOR = 0.65;
+const LAKE_WARN_REPEAT_MS = 15000;
+
+/* ======================================================================
+   HELFER-FORMELN (Abschnitt 9)
+   ====================================================================== */
+function normalize360(d){ return ((d % 360) + 360) % 360; }
+function angleDiff(a,b){ let d = a - b; while(d > 180) d -= 360; while(d < -180) d += 360; return d; }
+function toRad(d){ return d * Math.PI / 180; }
+function toDeg(r){ return r * 180 / Math.PI; }
+function circularMean(values){
+  let sx = 0, sy = 0;
+  for(const v of values){ sx += Math.cos(toRad(v)); sy += Math.sin(toRad(v)); }
+  return normalize360(toDeg(Math.atan2(sy, sx)));
+}
+function bearingDeg(lat1, lon1, lat2, lon2){
+  const p1 = toRad(lat1), p2 = toRad(lat2), dl = toRad(lon2 - lon1);
+  const y = Math.sin(dl) * Math.cos(p2);
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+  return normalize360(toDeg(Math.atan2(y, x)));
+}
+function distanceMeters(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const p1 = toRad(lat1), p2 = toRad(lat2);
+  const dphi = toRad(lat2 - lat1), dl = toRad(lon2 - lon1);
+  const a = Math.sin(dphi/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+function rand(min, max){ return min + Math.random() * (max - min); }
+function fmtDeg(v){ return v == null ? "--" : Math.round(normalize360(v)) + "°"; }
+function fmtNum(v, digits){ return v == null ? "--" : v.toFixed(digits); }
+function fmtDist(m){
+  if(m == null) return "--";
+  return m >= 1000 ? (m/1000).toFixed(2) + " km" : Math.round(m) + " m";
+}
+
+/* ======================================================================
+   VIBRATION (Abschnitt 7)
+   ====================================================================== */
+function pulses(n, dur, gap){
+  dur = dur || 80; gap = gap || 80;
+  const arr = [];
+  for(let i = 0; i < n; i++){ if(i > 0) arr.push(gap); arr.push(dur); }
+  return arr;
+}
+function vib(pattern){ if(navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){} } }
+const VIB = {
+  step1: () => vib(pulses(1)),          // Zwischenschritt
+  done2: () => vib(pulses(2)),          // Vorgang abgeschlossen
+  header3: () => vib(pulses(3)),        // ungünstiger Wind-Shift
+  error4: () => vib(pulses(4)),         // Fehler/Timeout
+  lakeWarn5: () => vib(pulses(5)),      // See-Rand-Warnung
+  rounding6: () => vib(pulses(6)),      // Boje gerundet
+  maneuverCmd: () => vib([700]),        // Manöver-Kommando, kräftig/lang
+  startSignal: () => vib([900]),        // Start 0:00, kräftig
+};
+
+/* ======================================================================
+   COURSE TRACKER (Abschnitt 3) — jede Instanz unabhängig!
+   ====================================================================== */
+class CourseTracker{
+  constructor(windowSize){
+    this.windowSize = windowSize || WINDOW_SIZE;
+    this.buffer = [];
+    this.firstFix = null;
+    this.lastFix = null;
+  }
+  reset(){ this.buffer = []; this.firstFix = null; this.lastFix = null; }
+  sample(cog, lat, lon, sogKn, minSpeed){
+    minSpeed = minSpeed == null ? MIN_SPEED_KN : minSpeed;
+    if(cog == null || sogKn == null || sogKn < minSpeed || lat == null || lon == null){
+      this.reset();
+      return;
+    }
+    if(this.buffer.length === 0){ this.firstFix = {lat, lon}; }
+    this.buffer.push(cog);
+    if(this.buffer.length > this.windowSize) this.buffer.shift();
+    this.lastFix = {lat, lon};
+  }
+  steady(maxDevDeg, posCheck){
+    posCheck = posCheck == null ? true : posCheck;
+    if(this.buffer.length < this.windowSize) return null;
+    const avg = circularMean(this.buffer);
+    let maxDev = 0;
+    for(const v of this.buffer){ const d = Math.abs(angleDiff(v, avg)); if(d > maxDev) maxDev = d; }
+    if(maxDev > maxDevDeg) return null;
+    if(posCheck && this.firstFix && this.lastFix){
+      const dist = distanceMeters(this.firstFix.lat, this.firstFix.lon, this.lastFix.lat, this.lastFix.lon);
+      if(dist >= POSITION_CHECK_MIN_DIST_M){
+        const posBearing = bearingDeg(this.firstFix.lat, this.firstFix.lon, this.lastFix.lat, this.lastFix.lon);
+        if(Math.abs(angleDiff(posBearing, avg)) > POSITION_CHECK_MAX_DEV_DEG) return null;
+      }
+    }
+    return avg;
+  }
+}
+
+/* ======================================================================
+   STATE
+   ====================================================================== */
+const S = {
+  // GPS
+  fix: { lat: null, lon: null, cog: null, sogKn: null, t: 0, valid: false },
+  gpsWatchId: null,
+
+  // Wind
+  windCalibrated: false,
+  windDir: null,
+  windCalibState: 'IDLE', // IDLE | WAIT_TACK1 | WAIT_TACK_CHANGE | WAIT_TACK2
+  calibTack1: null,
+  calibStartedAt: 0,
+  calibTracker: new CourseTracker(WINDOW_SIZE),
+
+  windContinuousTracker: new CourseTracker(WINDOW_SIZE),
+  lastSteadyCOG: null,
+  tackSign: null,
+
+  windLog: [], // cumulative deg values
+  lastRawWind: null,
+  lastWindLogAt: 0,
+
+  // Start countdown
+  raceState: 'MENU', // MENU | COUNTDOWN | RACE
+  countdownEndsAt: null,
+  countdownFiredMarks: {},
+
+  // Training
+  trainMode: 'OFF', // OFF | TACK_ONLY | JIBE_ONLY | RACE
+  trainState: 'OFF', // OFF | WAITING | COMMANDED | TURNING
+  trainWaitTracker: new CourseTracker(WINDOW_SIZE),
+  trainTurnTracker: new CourseTracker(WINDOW_SIZE),
+  waitUntil: 0,
+  preCOG: null,
+  preSOG: null,
+  minSOG: null,
+  commandedAt: 0,
+  turnStartTime: null,
+  isTackManeuver: null,
+  maneuverLog: [], // {isTack, durationS, speedLossPct, score, ts}
+
+  // Racemode navigation
+  raceNavTracker: new CourseTracker(WINDOW_SIZE),
+  raceLastSteady: null,
+  activeBuoyIdx: null, // 0 or 1
+
+  // Lake geofence
+  lakeWarnActive: false,
+  lakeLastWarnAt: 0,
+
+  // Waypoints
+  pin: null, boat: null, target: null, buoy1: null, buoy2: null,
+  lakeCenter: null, lakeRadius: null,
+
+  // misc
+  wakeLock: null,
+  statusText: 'Bereit.',
+  statusLevel: 'normal',
+};
+
+/* ======================================================================
+   PERSISTENZ (LocalStorage)
+   ====================================================================== */
+const STORAGE_KEY = 'segeluhr_v1';
+function saveState(){
+  try{
+    const data = {
+      pin: S.pin, boat: S.boat, target: S.target, buoy1: S.buoy1, buoy2: S.buoy2,
+      lakeCenter: S.lakeCenter, lakeRadius: S.lakeRadius,
+      maneuverLog: S.maneuverLog,
+      windDir: S.windDir, windCalibrated: S.windCalibrated,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }catch(e){ console.warn('Speichern fehlgeschlagen', e); }
+}
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return;
+    const data = JSON.parse(raw);
+    Object.assign(S, {
+      pin: data.pin || null, boat: data.boat || null, target: data.target || null,
+      buoy1: data.buoy1 || null, buoy2: data.buoy2 || null,
+      lakeCenter: data.lakeCenter || null, lakeRadius: data.lakeRadius || null,
+      maneuverLog: data.maneuverLog || [],
+      windDir: data.windDir != null ? data.windDir : null,
+      windCalibrated: !!data.windCalibrated,
+    });
+  }catch(e){ console.warn('Laden fehlgeschlagen', e); }
+}
+
+/* ======================================================================
+   STATUS BANNER
+   ====================================================================== */
+function setStatus(text, level){
+  S.statusText = text;
+  S.statusLevel = level || 'normal';
+  const el = document.getElementById('statusBanner');
+  el.textContent = text;
+  el.className = level ? level : '';
+}
+
+/* ======================================================================
+   GPS
+   ====================================================================== */
+function startGps(){
+  if(!('geolocation' in navigator)){
+    setStatus('Geolocation wird von diesem Browser nicht unterstützt.', 'red');
+    return;
+  }
+  if(!window.isSecureContext){
+    setStatus('Kein sicherer Kontext (HTTPS/localhost nötig) — GPS wird evtl. blockiert.', 'amber');
+  }
+  if(S.gpsWatchId != null) return;
+  S.gpsWatchId = navigator.geolocation.watchPosition(onGpsUpdate, onGpsError, {
+    enableHighAccuracy: true, maximumAge: 1000, timeout: 10000
+  });
+  setStatus('GPS wird gestartet…', 'normal');
+}
+function onGpsUpdate(pos){
+  const c = pos.coords;
+  S.fix.lat = c.latitude;
+  S.fix.lon = c.longitude;
+  S.fix.sogKn = (c.speed != null) ? c.speed * 1.943844 : 0;
+  S.fix.cog = (c.heading != null && !isNaN(c.heading)) ? c.heading : null;
+  S.fix.t = Date.now();
+  S.fix.valid = true;
+}
+function onGpsError(err){
+  setStatus('GPS-Fehler: ' + err.message, 'red');
+}
+function updateGpsStatusUI(){
+  const dot = document.getElementById('gpsDot');
+  const txt = document.getElementById('gpsText');
+  const fresh = S.fix.t && (Date.now() - S.fix.t < 5000);
+  if(!fresh){
+    dot.className = ''; txt.textContent = 'Kein Fix';
+  } else if(S.fix.sogKn != null && S.fix.sogKn >= MIN_SPEED_KN && S.fix.cog != null){
+    dot.className = 'ok'; txt.textContent = 'Fix · Fahrt';
+  } else {
+    dot.className = 'warn'; txt.textContent = 'Fix · langsam';
+  }
+}
+function currentlyValid(){
+  return S.fix.valid && (Date.now() - S.fix.t < 5000);
+}
+
+/* ======================================================================
+   WEGPUNKTE
+   ====================================================================== */
+function captureWaypoint(key){
+  if(!currentlyValid() || S.fix.lat == null){
+    setStatus('Kein gültiger GPS-Fix — Wegpunkt kann nicht gesetzt werden.', 'red');
+    return;
+  }
+  const point = { lat: S.fix.lat, lon: S.fix.lon };
+  if(key === 'lakeEdge'){
+    if(!S.lakeCenter){
+      setStatus('Bitte zuerst See-Mitte setzen.', 'amber');
+      return;
+    }
+    const d = distanceMeters(S.lakeCenter.lat, S.lakeCenter.lon, point.lat, point.lon);
+    S.lakeRadius = (S.lakeRadius == null) ? d : Math.min(S.lakeRadius, d);
+    setStatus('See-Rand erfasst · Radius = ' + Math.round(S.lakeRadius) + ' m', 'green');
+  } else {
+    S[key] = point;
+    setStatus('Wegpunkt gesetzt: ' + key, 'green');
+  }
+  saveState();
+  renderWaypoints();
+}
+function clearWaypoint(key){
+  if(key === 'lakeRadius'){ S.lakeRadius = null; }
+  else { S[key] = null; }
+  saveState();
+  renderWaypoints();
+}
+function renderWaypoints(){
+  const fmt = (p) => p ? p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) : 'nicht gesetzt';
+  document.getElementById('wp_pin').textContent = fmt(S.pin);
+  document.getElementById('wp_boat').textContent = fmt(S.boat);
+  document.getElementById('wp_target').textContent = fmt(S.target);
+  document.getElementById('wp_boje1').textContent = fmt(S.buoy1);
+  document.getElementById('wp_boje2').textContent = fmt(S.buoy2);
+  document.getElementById('wp_lakecenter').textContent = fmt(S.lakeCenter);
+  document.getElementById('wp_lakeradius').textContent = 'Radius: ' + (S.lakeRadius != null ? Math.round(S.lakeRadius) + ' m' : '--');
+}
+
+/* ======================================================================
+   WIND — KALIBRIERUNG (Amwind-Methode, Abschnitt 4.1)
+   ====================================================================== */
+function startAmwindCalib(){
+  if(!currentlyValid()){
+    setStatus('Kein GPS-Fix — Kalibrierung nicht möglich.', 'red');
+    return;
+  }
+  S.windCalibState = 'WAIT_TACK1';
+  S.calibTack1 = null;
+  S.calibStartedAt = Date.now();
+  S.calibTracker.reset();
+  document.getElementById('btnAbortCalib').style.display = 'block';
+  setStatus('Ruhigen Amwind-Kurs halten…', 'normal');
+}
+function abortCalib(){
+  S.windCalibState = 'IDLE';
+  document.getElementById('btnAbortCalib').style.display = 'none';
+  setStatus('Kalibrierung abgebrochen.', 'amber');
+}
+function handleCalibTick(){
+  const timedOut = (Date.now() - S.calibStartedAt) > METHOD_TIMEOUT_MS;
+  if(timedOut){
+    VIB.error4();
+    setStatus('Kalibrierung: Timeout — bitte erneut versuchen.', 'red');
+    S.windCalibState = 'IDLE';
+    document.getElementById('btnAbortCalib').style.display = 'none';
+    return;
+  }
+
+  if(S.windCalibState === 'WAIT_TACK1'){
+    S.calibTracker.sample(S.fix.cog, S.fix.lat, S.fix.lon, S.fix.sogKn);
+    const avg = S.calibTracker.steady(STEADY_COURSE_MAX_DEV);
+    if(avg != null){
+      S.calibTack1 = avg;
+      S.calibTracker.reset();
+      S.windCalibState = 'WAIT_TACK_CHANGE';
+      S.calibStartedAt = Date.now();
+      VIB.step1();
+      setStatus('Jetzt wenden!', 'amber');
+    }
+  } else if(S.windCalibState === 'WAIT_TACK_CHANGE'){
+    if(S.fix.cog != null && S.fix.sogKn >= MIN_SPEED_KN){
+      if(Math.abs(angleDiff(S.fix.cog, S.calibTack1)) >= TACK_CHANGE_MIN_DEG){
+        S.windCalibState = 'WAIT_TACK2';
+        S.calibStartedAt = Date.now();
+        S.calibTracker.reset();
+        setStatus('Neuen ruhigen Kurs auf anderem Bug halten…', 'normal');
+      }
+    }
+  } else if(S.windCalibState === 'WAIT_TACK2'){
+    S.calibTracker.sample(S.fix.cog, S.fix.lat, S.fix.lon, S.fix.sogKn);
+    const avg = S.calibTracker.steady(STEADY_COURSE_MAX_DEV);
+    if(avg != null){
+      const tack2 = avg;
+      const diff = Math.abs(angleDiff(S.calibTack1, tack2));
+      if(diff >= MIN_TACK_ANGLE_DEG && diff <= MAX_TACK_ANGLE_DEG){
+        S.windDir = circularMean([S.calibTack1, tack2]);
+        S.windCalibrated = true;
+        S.windCalibState = 'IDLE';
+        S.windContinuousTracker.reset();
+        S.lastSteadyCOG = null;
+        S.tackSign = null;
+        VIB.done2();
+        setStatus('Wind kalibriert: ' + Math.round(S.windDir) + '°', 'green');
+        saveState();
+      } else {
+        VIB.error4();
+        setStatus('Wendewinkel unplausibel (' + diff.toFixed(0) + '°) — erneut versuchen.', 'red');
+        S.windCalibState = 'IDLE';
+      }
+      document.getElementById('btnAbortCalib').style.display = 'none';
+    }
+  }
+}
+
+/* ======================================================================
+   WIND — KONTINUIERLICHES TRACKING (Abschnitt 4.2)
+   ====================================================================== */
+function handleContinuousWindTick(){
+  S.windContinuousTracker.sample(S.fix.cog, S.fix.lat, S.fix.lon, S.fix.sogKn);
+  const avg = S.windContinuousTracker.steady(STEADY_COURSE_MAX_DEV);
+  if(avg == null) return;
+
+  const AWA = angleDiff(avg, S.windDir);
+  if(Math.abs(AWA) < TACK_SIGN_DEADZONE_DEG) return; // Bug-Zuordnung unsicher
+  const newTackSign = AWA > 0 ? 1 : -1;
+
+  if(S.tackSign === null){
+    S.tackSign = newTackSign;
+    S.lastSteadyCOG = avg;
+    return;
+  }
+  if(newTackSign !== S.tackSign){
+    S.tackSign = newTackSign;
+    S.lastSteadyCOG = avg;
+    return;
+  }
+  const shift = angleDiff(avg, S.lastSteadyCOG);
+  if(Math.abs(shift) >= WIND_SHIFT_THRESHOLD_DEG){
+    const prevSteady = S.lastSteadyCOG;
+    S.windDir = normalize360(S.windDir + shift);
+    S.lastSteadyCOG = avg;
+    if(S.target && S.fix.lat != null){
+      const targetBearing = bearingDeg(S.fix.lat, S.fix.lon, S.target.lat, S.target.lon);
+      const angleBefore = Math.abs(angleDiff(prevSteady, targetBearing));
+      const angleAfter = Math.abs(angleDiff(avg, targetBearing));
+      if(angleAfter > angleBefore){
+        VIB.header3();
+        setStatus('Wind-Shift: Header zum Ziel (' + (shift>0?'+':'') + shift.toFixed(0) + '°)', 'amber');
+      } else {
+        setStatus('Wind-Shift: Lift (' + (shift>0?'+':'') + shift.toFixed(0) + '°)', 'normal');
+      }
+    }
+    saveState();
+  }
+}
+function handleWindLogTick(){
+  if(!S.windCalibrated) return;
+  const now = Date.now();
+  if(now - S.lastWindLogAt < WIND_LOG_INTERVAL_MS) return;
+  S.lastWindLogAt = now;
+  if(S.windLog.length === 0){
+    S.windLog.push(0);
+    S.lastRawWind = S.windDir;
+  } else {
+    const prevVal = S.windLog[S.windLog.length - 1];
+    const newVal = prevVal + angleDiff(S.windDir, S.lastRawWind);
+    S.windLog.push(newVal);
+    if(S.windLog.length > WIND_LOG_SIZE) S.windLog.shift();
+    S.lastRawWind = S.windDir;
+  }
+}
+
+/* ======================================================================
+   START-COUNTDOWN (Abschnitt 5, 5-4-1)
+   ====================================================================== */
+function startCountdown(){
+  S.countdownEndsAt = Date.now() + 5 * 60 * 1000;
+  S.countdownFiredMarks = {};
+  S.raceState = 'COUNTDOWN';
+  document.getElementById('btnStartCountdown').textContent = 'Läuft…';
+}
+function resetCountdown(){
+  S.countdownEndsAt = null;
+  S.raceState = 'MENU';
+  S.countdownFiredMarks = {};
+  document.getElementById('btnStartCountdown').textContent = 'Start (5:00)';
+  document.getElementById('startCountdown').textContent = '5:00';
+  document.getElementById('startCountdown').classList.remove('late');
+}
+function tickCountdown(){
+  const el = document.getElementById('startCountdown');
+  if(S.countdownEndsAt == null){ return; }
+  const remainingMs = S.countdownEndsAt - Date.now();
+  const remainingS = Math.ceil(remainingMs / 1000);
+
+  if(S.raceState === 'COUNTDOWN'){
+    if(remainingS <= 240 && !S.countdownFiredMarks['240']){ S.countdownFiredMarks['240'] = true; VIB.step1(); }
+    if(remainingS <= 60 && !S.countdownFiredMarks['60']){ S.countdownFiredMarks['60'] = true; VIB.step1(); }
+    if(remainingS <= 0 && !S.countdownFiredMarks['0']){
+      S.countdownFiredMarks['0'] = true;
+      VIB.startSignal();
+      S.raceState = 'RACE';
+    }
+    const m = Math.floor(Math.abs(remainingS) / 60);
+    const s = Math.abs(remainingS) % 60;
+    el.textContent = (remainingS < 0 ? '+' : '') + m + ':' + String(s).padStart(2, '0');
+    el.classList.toggle('late', remainingS <= 60);
+  } else if(S.raceState === 'RACE'){
+    const elapsedS = Math.floor(-remainingMs / 1000);
+    const m = Math.floor(elapsedS / 60);
+    const s = elapsedS % 60;
+    el.textContent = '+' + m + ':' + String(s).padStart(2, '0');
+  }
+}
+
+/* ======================================================================
+   TRAINING (Abschnitt 6)
+   ====================================================================== */
+function setTrainMode(mode){
+  S.trainMode = mode;
+  if(mode === 'OFF'){
+    S.trainState = 'OFF';
+  } else {
+    S.trainState = 'WAITING';
+    S.waitUntil = Date.now() + rand(TRAIN_MIN_INTERVAL_MS, TRAIN_MAX_INTERVAL_MS);
+    S.trainWaitTracker.reset();
+    if(mode === 'RACE' && S.buoy1 && S.buoy2 && S.activeBuoyIdx == null){
+      chooseNearerBuoy();
+    }
+  }
+  renderTrainModeButtons();
+}
+function renderTrainModeButtons(){
+  document.querySelectorAll('.modeSwitch button').forEach(btn => {
+    const on = btn.dataset.mode === S.trainMode;
+    btn.className = on ? 'on' : 'off';
+  });
+  const reqEl = document.getElementById('trainReq');
+  if(!S.windCalibrated){
+    reqEl.textContent = '⚠️ Wind muss kalibriert sein (siehe Tab "Wind").';
+  } else if(S.trainMode === 'RACE' && (!S.buoy1 || !S.buoy2)){
+    reqEl.textContent = '⚠️ Racemode benötigt beide Bojen gesetzt.';
+  } else {
+    reqEl.textContent = '';
+  }
+}
+function newWaitTimer(){
+  S.waitUntil = Date.now() + rand(TRAIN_MIN_INTERVAL_MS, TRAIN_MAX_INTERVAL_MS);
+  S.trainState = 'WAITING';
+  S.trainWaitTracker.reset();
+}
+function handleTrainingTick(){
+  if(S.trainMode === 'OFF' || !S.windCalibrated) return;
+
+  if(S.trainState === 'WAITING'){
+    S.trainWaitTracker.sample(S.fix.cog, S.fix.lat, S.fix.lon, S.fix.sogKn);
+    const avg = S.trainWaitTracker.steady(STEADY_COURSE_MAX_DEV);
+    if(avg != null && Date.now() >= S.waitUntil){
+      const awa = angleDiff(avg, S.windDir);
+      let modeOk = false, isTack = true;
+      if(S.trainMode === 'TACK_ONLY'){ isTack = true; modeOk = Math.abs(awa) < 90; }
+      else if(S.trainMode === 'JIBE_ONLY'){ isTack = false; modeOk = Math.abs(awa) >= 90; }
+      else if(S.trainMode === 'RACE'){ isTack = Math.abs(awa) < 90; modeOk = true; }
+      if(modeOk){
+        S.preCOG = avg;
+        S.preSOG = S.fix.sogKn;
+        S.minSOG = S.fix.sogKn;
+        S.commandedAt = Date.now();
+        S.isTackManeuver = isTack;
+        S.trainState = 'COMMANDED';
+        VIB.maneuverCmd();
+        setStatus(isTack ? 'Jetzt WENDEN!' : 'Jetzt HALSEN!', 'amber');
+        S.trainWaitTracker.reset();
+      }
+    }
+  } else if(S.trainState === 'COMMANDED'){
+    if(Date.now() - S.commandedAt > TRAIN_MANEUVER_TIMEOUT_MS){
+      VIB.error4();
+      setStatus('Manöver verpasst.', 'red');
+      newWaitTimer();
+      return;
+    }
+    if(S.fix.cog != null && Math.abs(angleDiff(S.fix.cog, S.preCOG)) >= TRAIN_TURN_START_DEG){
+      S.turnStartTime = Date.now();
+      S.trainState = 'TURNING';
+      S.trainTurnTracker.reset();
+    }
+  } else if(S.trainState === 'TURNING'){
+    if(S.fix.sogKn != null) S.minSOG = Math.min(S.minSOG, S.fix.sogKn);
+    if(Date.now() - S.commandedAt > TRAIN_MANEUVER_TIMEOUT_MS){
+      VIB.error4();
+      setStatus('Manöver verpasst (Timeout während Drehung).', 'red');
+      newWaitTimer();
+      return;
+    }
+    S.trainTurnTracker.sample(S.fix.cog, S.fix.lat, S.fix.lon, S.fix.sogKn);
+    const avg = S.trainTurnTracker.steady(TRAIN_STEADY_MAX_DEV_MANEUVER);
+    if(avg != null && Math.abs(angleDiff(avg, S.preCOG)) >= TRAIN_TURN_START_DEG){
+      const turnEndTime = Date.now();
+      const durationS = (turnEndTime - S.turnStartTime) / 1000;
+      const speedLossPct = S.preSOG > 0 ? (S.preSOG - S.minSOG) / S.preSOG * 100 : 0;
+      const overTime = Math.max(0, durationS - 5);
+      const score = clamp(100 - speedLossPct * 2 - overTime * 3, 0, 100);
+      S.maneuverLog.push({ isTack: S.isTackManeuver, durationS, speedLossPct, score, ts: Date.now() });
+      if(S.maneuverLog.length > MANEUVER_LOG_SIZE) S.maneuverLog.shift();
+      saveState();
+      VIB.done2();
+      setStatus('Manöver abgeschlossen — Score ' + score.toFixed(0), 'green');
+      newWaitTimer();
+      renderLog();
+    }
+  }
+}
+
+/* ======================================================================
+   RACEMODE — BOJEN-NAVIGATION (Abschnitt 6.4)
+   ====================================================================== */
+function chooseNearerBuoy(){
+  if(!S.buoy1 || !S.buoy2 || S.fix.lat == null) return;
+  const d1 = distanceMeters(S.fix.lat, S.fix.lon, S.buoy1.lat, S.buoy1.lon);
+  const d2 = distanceMeters(S.fix.lat, S.fix.lon, S.buoy2.lat, S.buoy2.lon);
+  S.activeBuoyIdx = d1 <= d2 ? 0 : 1;
+}
+function activeBuoy(){
+  if(S.activeBuoyIdx == null) return null;
+  return S.activeBuoyIdx === 0 ? S.buoy1 : S.buoy2;
+}
+function otherBuoy(){
+  if(S.activeBuoyIdx == null) return null;
+  return S.activeBuoyIdx === 0 ? S.buoy2 : S.buoy1;
+}
+function roundBuoy(){
+  S.activeBuoyIdx = S.activeBuoyIdx === 0 ? 1 : 0;
+  S.raceNavTracker.reset();
+  S.raceLastSteady = null;
+  VIB.rounding6();
+  setStatus('Boje gerundet!', 'green');
+}
+function handleRaceNavTick(){
+  if(S.trainMode !== 'RACE' || !S.buoy1 || !S.buoy2) return;
+  if(S.trainState === 'COMMANDED' || S.trainState === 'TURNING') return; // pausiert während Manöver
+  if(S.activeBuoyIdx == null) chooseNearerBuoy();
+  const target = activeBuoy();
+  if(!target || S.fix.lat == null) return;
+
+  // a) Distanzbasierte Rundung
+  const dist = distanceMeters(S.fix.lat, S.fix.lon, target.lat, target.lon);
+  if(dist <= ROUNDING_RADIUS_M){ roundBuoy(); return; }
+
+  // b) Manöver-basierte Rundung
+  S.raceNavTracker.sample(S.fix.cog, S.fix.lat, S.fix.lon, S.fix.sogKn);
+  const avg = S.raceNavTracker.steady(RACE_COURSE_MAX_DEV);
+  if(avg != null){
+    if(S.raceLastSteady == null){
+      S.raceLastSteady = avg;
+    } else {
+      const turn = angleDiff(avg, S.raceLastSteady);
+      if(Math.abs(turn) >= RACE_TURN_MIN_DEG){
+        const other = otherBuoy();
+        if(other){
+          const bearingToOther = bearingDeg(S.fix.lat, S.fix.lon, other.lat, other.lon);
+          if(Math.abs(angleDiff(avg, bearingToOther)) <= RACE_AIM_TOLERANCE_DEG){
+            roundBuoy();
+            return;
+          }
+        }
+      }
+      S.raceLastSteady = avg;
+    }
+  }
+}
+
+/* ======================================================================
+   SEE-GEOFENCE (Abschnitt 6.5)
+   ====================================================================== */
+function handleLakeGeofenceTick(){
+  if(S.trainMode === 'OFF' || !S.lakeCenter || !S.lakeRadius || S.fix.lat == null) return;
+  const dist = distanceMeters(S.fix.lat, S.fix.lon, S.lakeCenter.lat, S.lakeCenter.lon);
+  const warnThresh = LAKE_WARN_FACTOR * S.lakeRadius;
+  const clearThresh = LAKE_CLEAR_FACTOR * S.lakeRadius;
+  if(dist >= warnThresh){
+    const now = Date.now();
+    if(!S.lakeWarnActive || (now - S.lakeLastWarnAt) >= LAKE_WARN_REPEAT_MS){
+      VIB.lakeWarn5();
+      S.lakeLastWarnAt = now;
+      S.lakeWarnActive = true;
+      setStatus('See-Rand-Warnung!', 'red');
+    }
+  } else if(dist < clearThresh){
+    S.lakeWarnActive = false;
+  }
+}
+
+/* ======================================================================
+   TELEMETRIE-RENDERING
+   ====================================================================== */
+function renderTelemetry(){
+  document.getElementById('t_sog').textContent = fmtNum(S.fix.sogKn, 1);
+  document.getElementById('t_cog').textContent = S.fix.cog != null ? Math.round(S.fix.cog) : '--';
+  document.getElementById('t_wind').textContent = S.windCalibrated ? Math.round(S.windDir) : '--';
+
+  const vmgEl = document.getElementById('t_vmg');
+  if(S.windCalibrated && S.fix.sogKn != null && S.fix.cog != null){
+    const vmg = S.fix.sogKn * Math.cos(toRad(S.fix.cog - S.windDir));
+    vmgEl.textContent = vmg.toFixed(1);
+    vmgEl.className = 'val ' + (vmg >= 0 ? 'green' : 'amber');
+  } else { vmgEl.textContent = '--'; vmgEl.className = 'val'; }
+
+  const biasEl = document.getElementById('t_bias');
+  if(S.pin && S.boat && S.windCalibrated){
+    const lineBearing = bearingDeg(S.pin.lat, S.pin.lon, S.boat.lat, S.boat.lon);
+    const squareBearing = normalize360(S.windDir + 90);
+    const bias = angleDiff(lineBearing, squareBearing);
+    biasEl.textContent = (bias > 0 ? '+' : '') + bias.toFixed(0) + '° (' + (bias > 0 ? 'Boot bevorzugt' : bias < 0 ? 'Pin bevorzugt' : 'neutral') + ')';
+    biasEl.className = 'val dim';
+  } else { biasEl.textContent = '--'; biasEl.className = 'val'; }
+
+  const zpEl = document.getElementById('t_zielpeil');
+  const zdEl = document.getElementById('t_zieldist');
+  if(S.target && S.fix.lat != null){
+    zpEl.textContent = fmtDeg(bearingDeg(S.fix.lat, S.fix.lon, S.target.lat, S.target.lon));
+    zdEl.textContent = fmtDist(distanceMeters(S.fix.lat, S.fix.lon, S.target.lat, S.target.lon));
+  } else { zpEl.textContent = '--'; zdEl.textContent = '--'; }
+
+  const baEl = document.getElementById('t_bojeaktiv');
+  const bpEl = document.getElementById('t_bojepeil');
+  const bdEl = document.getElementById('t_bojedist');
+  const ab = activeBuoy();
+  if(S.trainMode === 'RACE' && ab && S.fix.lat != null){
+    baEl.textContent = 'Boje ' + (S.activeBuoyIdx + 1);
+    bpEl.textContent = fmtDeg(bearingDeg(S.fix.lat, S.fix.lon, ab.lat, ab.lon));
+    bdEl.textContent = fmtDist(distanceMeters(S.fix.lat, S.fix.lon, ab.lat, ab.lon));
+  } else { baEl.textContent = '--'; bpEl.textContent = '--'; bdEl.textContent = '--'; }
+
+  const srEl = document.getElementById('t_seerand');
+  if(S.lakeCenter && S.lakeRadius && S.fix.lat != null){
+    const dist = distanceMeters(S.fix.lat, S.fix.lon, S.lakeCenter.lat, S.lakeCenter.lon);
+    const pct = (dist / S.lakeRadius * 100);
+    srEl.textContent = fmtDist(dist) + ' (' + pct.toFixed(0) + '%)';
+    srEl.className = 'val ' + (pct >= 80 ? 'red' : pct >= 65 ? 'amber' : '');
+  } else { srEl.textContent = '--'; srEl.className = 'val'; }
+
+  document.getElementById('w_calibstatus').textContent =
+    S.windCalibState !== 'IDLE' ? ('Kalibriere: ' + S.windCalibState) :
+    (S.windCalibrated ? 'Kalibriert' : 'Nicht kalibriert');
+  document.getElementById('w_winddir').textContent = S.windCalibrated ? Math.round(S.windDir) + '°' : '--';
+
+  updateGpsStatusUI();
+}
+
+function renderWindChart(){
+  const svg = document.getElementById('windChart');
+  const w = 300, h = 160, pad = 20;
+  if(S.windLog.length < 2){
+    svg.innerHTML = '<text x="150" y="80" text-anchor="middle" fill="#7d97a8" font-size="12" font-family="Inter">Noch keine Daten (alle 60s ein Punkt)</text>';
+    document.getElementById('w_net').textContent = '--';
+    document.getElementById('w_range').textContent = '--';
+    return;
+  }
+  const min = Math.min(...S.windLog), max = Math.max(...S.windLog);
+  const range = Math.max(1, max - min);
+  const stepX = (w - 2*pad) / (S.windLog.length - 1);
+  const pts = S.windLog.map((v,i) => {
+    const x = pad + i * stepX;
+    const y = h - pad - ((v - min) / range) * (h - 2*pad);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  svg.innerHTML =
+    '<line x1="'+pad+'" y1="'+(h-pad)+'" x2="'+(w-pad)+'" y2="'+(h-pad)+'" stroke="#1e3a4f" stroke-width="1"/>' +
+    '<polyline points="'+pts+'" fill="none" stroke="#2dd4bf" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+  const net = S.windLog[S.windLog.length-1] - S.windLog[0];
+  document.getElementById('w_net').textContent = (net>0?'+':'') + net.toFixed(0);
+  document.getElementById('w_range').textContent = range.toFixed(0);
+}
+
+function renderLog(){
+  const tacks = S.maneuverLog.filter(m => m.isTack);
+  const jibes = S.maneuverLog.filter(m => !m.isTack);
+  const avg = arr => arr.length ? (arr.reduce((s,m)=>s+m.score,0)/arr.length).toFixed(0) : '--';
+  document.getElementById('l_avgtack').textContent = avg(tacks);
+  document.getElementById('l_avgjibe').textContent = avg(jibes);
+
+  const tbody = document.getElementById('l_table');
+  tbody.innerHTML = '';
+  [...S.maneuverLog].slice().reverse().forEach(m => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + (m.isTack ? 'Wende' : 'Halse') + '</td>' +
+      '<td>' + m.durationS.toFixed(1) + 's</td>' +
+      '<td>' + m.speedLossPct.toFixed(0) + '%</td>' +
+      '<td>' + m.score.toFixed(0) + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+/* ======================================================================
+   HAUPTSCHLEIFE — 1 Hz
+   ====================================================================== */
+function mainTick(){
+  const valid = currentlyValid();
+
+  // Kontinuierliches Wind-Tracking (pausiert während TURNING)
+  if(S.windCalibrated && S.trainState !== 'TURNING'){
+    handleContinuousWindTick();
+  }
+  handleWindLogTick();
+
+  if(S.windCalibState !== 'IDLE'){
+    handleCalibTick();
+  }
+
+  if(S.trainMode !== 'OFF'){
+    handleTrainingTick();
+  }
+  if(S.trainMode === 'RACE'){
+    handleRaceNavTick();
+  }
+  handleLakeGeofenceTick();
+
+  tickCountdown();
+  renderTelemetry();
+  if(document.querySelector('.panel[data-panel="wind"]').classList.contains('active')){
+    renderWindChart();
+  }
+}
+setInterval(mainTick, 1000);
+
+/* ======================================================================
+   UI EVENTS
+   ====================================================================== */
+document.querySelectorAll('#tabnav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#tabnav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelector('.panel[data-panel="' + btn.dataset.tab + '"]').classList.add('active');
+    if(btn.dataset.tab === 'wind') renderWindChart();
+    if(btn.dataset.tab === 'log') renderLog();
+    if(btn.dataset.tab === 'training') renderTrainModeButtons();
+  });
+});
+
+document.getElementById('btnGpsStart').addEventListener('click', startGps);
+document.getElementById('btnStartCalib').addEventListener('click', startAmwindCalib);
+document.getElementById('btnAbortCalib').addEventListener('click', abortCalib);
+document.getElementById('btnStartCountdown').addEventListener('click', startCountdown);
+document.getElementById('btnResetCountdown').addEventListener('click', resetCountdown);
+document.getElementById('btnClearLog').addEventListener('click', () => {
+  if(confirm('Manöver-Log wirklich löschen?')){ S.maneuverLog = []; saveState(); renderLog(); }
+});
+document.getElementById('btnResetAll').addEventListener('click', () => {
+  if(confirm('Wirklich ALLE Daten (Wegpunkte, Log, Windkalibrierung) löschen?')){
+    localStorage.removeItem(STORAGE_KEY);
+    location.reload();
+  }
+});
+
+document.querySelectorAll('.modeSwitch button').forEach(btn => {
+  btn.addEventListener('click', () => setTrainMode(btn.dataset.mode));
+});
+document.querySelectorAll('[data-wp]').forEach(btn => {
+  btn.addEventListener('click', () => captureWaypoint(btn.dataset.wp));
+});
+document.querySelectorAll('[data-wpclear]').forEach(btn => {
+  btn.addEventListener('click', () => clearWaypoint(btn.dataset.wpclear));
+});
+
+const wakeToggle = document.getElementById('wakeToggle');
+let wakeEnabled = false;
+wakeToggle.addEventListener('click', async () => {
+  wakeEnabled = !wakeEnabled;
+  wakeToggle.classList.toggle('on', wakeEnabled);
+  if(wakeEnabled && 'wakeLock' in navigator){
+    try{ S.wakeLock = await navigator.wakeLock.request('screen'); }catch(e){ console.warn(e); }
+  } else if(S.wakeLock){
+    try{ await S.wakeLock.release(); }catch(e){}
+    S.wakeLock = null;
+  }
+});
+document.addEventListener('visibilitychange', async () => {
+  if(wakeEnabled && document.visibilityState === 'visible' && 'wakeLock' in navigator && !S.wakeLock){
+    try{ S.wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+  }
+});
+
+/* ======================================================================
+   INIT
+   ====================================================================== */
+loadState();
+renderWaypoints();
+renderLog();
+renderTrainModeButtons();
+if(S.windCalibrated){
+  document.getElementById('w_calibstatus').textContent = 'Kalibriert';
+  document.getElementById('w_winddir').textContent = Math.round(S.windDir) + '°';
+}
+</script>
+</body>
+</html>
