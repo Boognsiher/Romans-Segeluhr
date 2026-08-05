@@ -24,12 +24,15 @@
 constexpr size_t AES_KEY_LEN = 16;
 constexpr size_t LORA_NONCE_LEN = 8; // wird jedem Paket vorangestellt
 
-// TODO(Claude Code / Roman): eigenen, zufälligen 16-Byte-Schlüssel eintragen
-// (z.B. per `openssl rand -hex 16` erzeugen) - dieser Platzhalter ist NICHT
-// sicher, nur ein Beispiel-Byte-Array in der richtigen Länge.
+// Zufällig generiert für dieses Projekt (05.08.2026, Claude Code auf
+// Wunsch von Roman). Schützt wie oben beschrieben nur gegen zufälliges
+// Mitlesen, nicht gegen einen gezielten Angreifer - für diesen Zweck reicht
+// das. MUSS auf Ultra- und S3-Firmware identisch sein (beide binden
+// dieselbe shared/Crypto.h ein, also automatisch der Fall, solange diese
+// Datei nicht pro Firmware kopiert/verändert wird).
 static const uint8_t AES_KEY[AES_KEY_LEN] = {
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
+    0xA9, 0xD2, 0x93, 0x43, 0x8A, 0x3D, 0x12, 0x0D,
+    0xFF, 0x9C, 0xF5, 0xD6, 0x5E, 0x07, 0xBB, 0x01
 };
 
 // Maximale Nutzlast, die wir verschlüsseln - großzügig bemessen, unsere

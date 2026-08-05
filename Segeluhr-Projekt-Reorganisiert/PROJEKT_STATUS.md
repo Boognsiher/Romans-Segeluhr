@@ -14,9 +14,9 @@ gerade läuft, was Baustelle und was nur Test ist.
 | Komponente | Hardware | Status | Zuletzt getestet | Bemerkung |
 |---|---|---|---|---|
 | Android-App | Handy (Samsung) | ✅ | 28.07.2026 | Master: GATT-Server, alle Engines, BLE-Protokoll |
-| `Segeluhr_TWatch_S3` | T-Watch S3 | ✅ | 28.07.2026 | BLE Central, Alltags-/Segelmodus, Auto-Focus, Zeit-Sync |
-| `Segeluhr_TWatch_Ultra` | T-Watch Ultra | 📋 | — | Solo-GPS + LoRa-Sender, siehe `Segeluhr-Firmware/ECHT/Segeluhr_TWatch_Ultra/README.md` |
-| `Segeluhr_WatchS_LoRaEmpfaenger` | Watch S | 📋 | — | reiner LoRa-Empfänger an Land |
+| `Segeluhr_TWatch_S3` (ALT) | T-Watch S3 | 🗄️ | 28.07.2026 | Ursprüngliche Boots-Uhr-Rolle (BLE Central, Alltags-/Segelmodus, Auto-Focus, Zeit-Sync) — Code jetzt nach `Segeluhr_TWatch_Ultra.ino` portiert, physische S3-Hardware wird zur Land-Uhr (siehe Zeile unten) |
+| `Segeluhr_TWatch_Ultra` | T-Watch Ultra | 🔧 | 05.08.2026 (nur Boot) | Boots-Uhr, aus S3-Firmware + LoRa-Sender/Quick-Messages zusammengeführt, kompiliert + geflasht (COM17), bootet sauber bis Alltags-Screen (Uhrzeit/Datum sichtbar). LoRa-Funk zur Land-Uhr, BLE zum Handy, Touch/Gesten noch NICHT getestet, siehe README im Ordner |
+| `Segeluhr_TWatch_S3` (Land) | T-Watch S3 | 🔧 | 05.08.2026 (nur Boot) | Land-Uhr (neue Rolle, ersetzt bisherige BLE-Central-Rolle), kompiliert + geflasht (COM16), bootet sauber bis Status-Screen. LoRa-Funk zur Boots-Uhr, Touch-Bedienung noch NICHT getestet, siehe README im Ordner |
 | `segeluhr_ble_tester` | ESP32-C3/XIAO | 🗄️ | — | nur lokal vorhanden, nicht in diesem Repo, siehe `Segeluhr-Firmware/TESTING/README.md` |
 | `Segeluhr_Basis_Solo` | (für Ultra gedacht) | 🗄️ | — | nur lokal vorhanden, nie auf echter Hardware getestet |
 
