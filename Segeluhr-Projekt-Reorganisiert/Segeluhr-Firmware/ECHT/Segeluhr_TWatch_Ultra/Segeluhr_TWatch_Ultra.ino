@@ -568,8 +568,15 @@ void buildAndSendStatusPacket() {
     uint8_t encBuf[CRYPTO_MAX_BUFFER];
     size_t encLen;
     if (encryptLoRaPacket((uint8_t *)&pkt, sizeof(pkt), encBuf, encLen)) {
-        radio.transmit(encBuf, encLen); // blockierend (~200-500ms alle 30s) - unkritisch für die UI
+        int16_t txState = radio.transmit(encBuf, encLen); // blockierend (~200-500ms alle 30s) - unkritisch für die UI
         radio.startReceive();           // transmit() beendet den Empfangsmodus, wieder aktivieren
+        // Direkt nach dem eigenen Senden ein evtl. durch den TX-Vorgang selbst
+        // ausgelöstes Empfangs-Flag verwerfen (DIO1 wird von RadioLib sowohl für
+        // "Paket empfangen" als auch für "Senden fertig" genutzt - beobachtet
+        // beim Test: Gerät empfing sein eigenes gerade gesendetes Paket zurück).
+        loraReceivedFlag = false;
+        // TODO(Test-Debug): entfernen, sobald LoRa-Verbindung verifiziert ist
+        Serial.printf("[LoRa TX] seq=%d state=%d txResult=%d\n", pkt.sequence, (int)pkt.state, txState);
     }
 }
 
@@ -587,6 +594,7 @@ static void sendEncrypted(const uint8_t *data, size_t len) {
     if (encryptLoRaPacket(data, len, encBuf, encLen)) {
         radio.transmit(encBuf, encLen);
         radio.startReceive();
+        loraReceivedFlag = false; // siehe Kommentar in buildAndSendStatusPacket()
     }
 }
 
@@ -639,6 +647,7 @@ void handleIncomingQuickMessageRequest(const QuickMessageRequest &req) {
 }
 
 void onButtonShortPress() {
+    Serial.println("[Taster] kurz");
     if (haveIncomingQuestion) {
         // Fallback, falls Gestenerkennung unzuverlässig ist:
         sendQuickAnswer(QuickAnswer::JA);
@@ -646,10 +655,12 @@ void onButtonShortPress() {
     }
     // Sonst: im Auswahlmenü zur nächsten Frage blättern
     selectedQuestion = (QuickQuestion)(((uint8_t)selectedQuestion + 1) % (uint8_t)QuickQuestion::COUNT);
+    Serial.printf("[Quick-Msg] Frage ausgewaehlt: %s\n", quickQuestionText(selectedQuestion));
     updateQuickOverlay();
 }
 
 void onButtonLongPress() {
+    Serial.println("[Taster] lang");
     if (haveIncomingQuestion) {
         // Fallback, falls Gestenerkennung unzuverlässig ist:
         sendQuickAnswer(QuickAnswer::NEIN);
@@ -664,6 +675,7 @@ void onButtonLongPress() {
     waitingForAnswer = true;
     pendingRequestSequence = req.sequence;
     pendingRequestSentMillis = millis();
+    Serial.printf("[Quick-Msg TX] Frage gesendet: seq=%d %s\n", req.sequence, quickQuestionText(req.question));
     updateQuickOverlay();
 }
 
@@ -717,10 +729,18 @@ void loraReceiveTick() {
     if (msgType == 0x10 && plainLen >= sizeof(QuickMessageRequest)) {
         QuickMessageRequest req;
         memcpy(&req, plainBuf, sizeof(req));
+        // Absender-Check: nur Anfragen von der Land-Uhr akzeptieren. Schützt
+        // gegen Selbstempfang der eigenen gerade gesendeten Pakete (siehe
+        // Kommentar bei sendEncrypted()/buildAndSendStatusPacket()).
+        if (req.sender != DeviceId::LAND) return;
+        Serial.printf("[Quick-Msg RX] Frage von Land: seq=%d %s\n", req.sequence, quickQuestionText(req.question));
         handleIncomingQuickMessageRequest(req);
     } else if (msgType == 0x11 && plainLen >= sizeof(QuickMessageResponse)) {
         QuickMessageResponse resp;
         memcpy(&resp, plainBuf, sizeof(resp));
+        if (resp.responder != DeviceId::LAND) return; // siehe Absender-Check oben
+        Serial.printf("[Quick-Msg RX] Antwort von Land: inResponseTo=%d %s (erwartet=%d wartend=%d)\n",
+                       resp.inResponseToSequence, quickAnswerText(resp.answer), pendingRequestSequence, waitingForAnswer);
         if (waitingForAnswer && resp.inResponseToSequence == pendingRequestSequence) {
             waitingForAnswer = false;
             lastReceivedAnswer = resp.answer;
@@ -772,8 +792,12 @@ static bool bhi260Online = false;
 
 // Lokale Platzhalter-Schwellenwerte (sensor-/einheitenabhängig, siehe
 // QuickMessages.h-Kommentar - deshalb hier und nicht dort definiert).
-static const float GESTURE_TILT_TARGET_ANGLE_DEG = 45.0f; // TODO: auf dem Wasser kalibrieren
-static const float GESTURE_TILT_TOLERANCE_DEG = 20.0f;    // TODO: auf dem Wasser kalibrieren
+// Erster echter Messwert (05.08.2026, Roman): beim "Hochschauen" ging Pitch
+// auf ca. -30° (nicht +45° wie urspruenglich vermutet - falsches Vorzeichen
+// geraten). Immer noch nur EIN Datenpunkt am Schreibtisch, siehe Doku-
+// Warnung: auf dem Wasser mit echter Trageposition/Krängung nachschärfen.
+static const float GESTURE_TILT_TARGET_ANGLE_DEG = -30.0f; // TODO: weiter kalibrieren
+static const float GESTURE_TILT_TOLERANCE_DEG = 20.0f;     // TODO: weiter kalibrieren
 static const float GESTURE_SHAKE_MIN_AMPLITUDE = 8.0f;    // m/s^2, TODO: auf dem Wasser kalibrieren
 
 struct ShakeDetectorState {
@@ -789,31 +813,56 @@ static void setupGestureSensor() {
         return;
     }
     bhi260Online = true;
+    Serial.println("[Gesten] BHI260AP online, Sensoren aktiviert"); // TODO(Test-Debug)
     float sampleRate = 50.0;       // reicht für Handgelenk-Gesten, spart Strom ggü. 100Hz
     uint32_t reportLatencyMs = 0;
     gestureAccel.enable(sampleRate, reportLatencyMs);
     gestureQuat.enable(sampleRate, reportLatencyMs);
 }
 
+// TODO(Test-Debug): Kalibrier-Logging, alle Zeilen mit diesem Kommentar nach
+// erfolgreicher Kalibrierung wieder entfernen. Läuft absichtlich AUSSERHALB
+// des haveIncomingQuestion-Gates, damit man die Rohwerte auch ohne offene
+// Frage live beobachten kann - ausgewertet/ausgelöst wird trotzdem nur bei
+// haveIncomingQuestion==true (siehe Doku-Warnung: Fehlauslösung beim Segeln).
+static unsigned long lastGestureLogMs = 0;
+static const unsigned long GESTURE_LOG_INTERVAL_MS = 1000; // Serial-Flut vermeiden (200ms hat den Monitor geflutet)
+
 static void gestureTick() {
-    if (!bhi260Online || !haveIncomingQuestion) return; // Gate: nur bei offener Frage auswerten
+    if (!bhi260Online) return;
+
+    bool doLog = (millis() - lastGestureLogMs) >= GESTURE_LOG_INTERVAL_MS;
 
     if (gestureQuat.hasUpdated()) {
         gestureQuat.toEuler();
         float pitch = gestureQuat.getPitch();
-        if (fabsf(pitch - GESTURE_TILT_TARGET_ANGLE_DEG) <= GESTURE_TILT_TOLERANCE_DEG) {
+        if (doLog) {
+            Serial.printf("[Gesten] Pitch=%.1f Roll=%.1f Heading=%.1f (Ziel fuer JA: %.0f +-%.0f)\n",
+                          pitch, gestureQuat.getRoll(), gestureQuat.getHeading(),
+                          GESTURE_TILT_TARGET_ANGLE_DEG, GESTURE_TILT_TOLERANCE_DEG);
+        }
+        if (haveIncomingQuestion && fabsf(pitch - GESTURE_TILT_TARGET_ANGLE_DEG) <= GESTURE_TILT_TOLERANCE_DEG) {
             onGestureTiltUp();
+            lastGestureLogMs = millis();
             return;
         }
     }
 
     if (gestureAccel.hasUpdated()) {
+        float ax = gestureAccel.getX();
+        if (doLog) {
+            Serial.printf("[Gesten] Accel X=%.2f Y=%.2f Z=%.2f (Schwelle: %.1f)\n",
+                          ax, gestureAccel.getY(), gestureAccel.getZ(), GESTURE_SHAKE_MIN_AMPLITUDE);
+            lastGestureLogMs = millis();
+        }
+
+        if (!haveIncomingQuestion) return; // Shake-Logik nur auswerten, wenn tatsächlich eine Frage offen ist
+
         unsigned long now = millis();
         if (now - shakeDetector.windowStartMs > GESTURE_SHAKE_WINDOW_MS) {
             shakeDetector.reversals = 0;
             shakeDetector.windowStartMs = now;
         }
-        float ax = gestureAccel.getX();
         if (fabsf(ax) >= GESTURE_SHAKE_MIN_AMPLITUDE) {
             int8_t sign = (ax > 0) ? 1 : -1;
             if (shakeDetector.lastSign != 0 && sign != shakeDetector.lastSign) {
@@ -828,7 +877,9 @@ static void gestureTick() {
     }
 }
 #else
-static void setupGestureSensor() {}
+static void setupGestureSensor() {
+    Serial.println("[Gesten] USING_BHI260_SENSOR nicht definiert - Gestencode nicht mitkompiliert"); // TODO(Test-Debug)
+}
 static void gestureTick() {}
 #endif
 
@@ -1019,40 +1070,50 @@ static void cbClearWaypoint(lv_event_t *e) {
 static void cbQuickNext(lv_event_t *e) { onButtonShortPress(); }
 static void cbQuickSend(lv_event_t *e) { onButtonLongPress(); }
 
+// Feedback nach erstem Hardware-Test: Standard-LVGL-Buttongroesse/-Font ist
+// auf dem echten Bildschirm zu klein/schmal - deshalb hier fest auf eine
+// grosszuegige Mindesthoehe + groesseren Font.
 static lv_obj_t *addMenuButton(lv_obj_t *parent, const char *label, lv_event_cb_t cb, void *userData = nullptr) {
     lv_obj_t *btn = lv_button_create(parent);
-    lv_obj_set_width(btn, LV_PCT(90));
+    lv_obj_set_width(btn, LV_PCT(94));
+    lv_obj_set_height(btn, 64);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, userData);
     lv_obj_t *lbl = lv_label_create(btn);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_28, 0);
     lv_label_set_text(lbl, label);
     lv_obj_center(lbl);
     return btn;
+}
+
+// text_font vererbt sich nicht zuverlässig - Section-Header bekommen ihre
+// Schrift deshalb hier zentral über diesen kleinen Helfer statt einzeln.
+static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
+    lv_obj_t *lbl = lv_label_create(parent);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_24, 0);
+    lv_label_set_text(lbl, text);
+    return lbl;
 }
 
 static void buildMenuTab(lv_obj_t *parent) {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(parent, 6, 0);
 
-    lv_obj_t *sub1 = lv_label_create(parent);
-    lv_label_set_text(sub1, "-- Countdown --");
+    addSubHeader(parent, "-- Countdown --");
     addMenuButton(parent, "Start", cbCountdownStart);
     addMenuButton(parent, "Reset", cbCountdownReset);
     addMenuButton(parent, "Sync naechste Minute", cbCountdownSync);
 
-    lv_obj_t *sub2 = lv_label_create(parent);
-    lv_label_set_text(sub2, "-- Wind --");
+    addSubHeader(parent, "-- Wind --");
     addMenuButton(parent, "Kalibrierung starten", cbWindCalStart);
     addMenuButton(parent, "Kalibrierung abbrechen", cbWindCalAbort);
 
-    lv_obj_t *sub3 = lv_label_create(parent);
-    lv_label_set_text(sub3, "-- Training --");
+    addSubHeader(parent, "-- Training --");
     addMenuButton(parent, "Aus", cbTrainOff);
     addMenuButton(parent, "Nur Wende", cbTrainTack);
     addMenuButton(parent, "Nur Halse", cbTrainJibe);
     addMenuButton(parent, "Race (2 Bojen)", cbTrainRace);
 
-    lv_obj_t *sub4 = lv_label_create(parent);
-    lv_label_set_text(sub4, "-- Wegpunkte (an akt. Position) --");
+    addSubHeader(parent, "-- Wegpunkte (an akt. Position) --");
     addMenuButton(parent, "Boje 1 setzen", cbSetWaypoint, (void *)(intptr_t)WP_BUOY1);
     addMenuButton(parent, "Boje 2 setzen", cbSetWaypoint, (void *)(intptr_t)WP_BUOY2);
     addMenuButton(parent, "Ziel setzen", cbSetWaypoint, (void *)(intptr_t)WP_TARGET);
@@ -1061,8 +1122,7 @@ static void buildMenuTab(lv_obj_t *parent) {
     addMenuButton(parent, "Comp.-Marke 2 setzen", cbSetWaypoint, (void *)(intptr_t)WP_COMPETITION_MARK2);
     addMenuButton(parent, "Alle Bojen loeschen", cbClearWaypoint, (void *)(intptr_t)WP_BUOY1);
 
-    lv_obj_t *sub5 = lv_label_create(parent);
-    lv_label_set_text(sub5, "-- Sonstiges --");
+    addSubHeader(parent, "-- Sonstiges --");
     addMenuButton(parent, "Heimweg an/aus", cbHomeToggle);
     addMenuButton(parent, "Wettfahrt beenden", cbCompetitionEnd);
     addMenuButton(parent, "Manoever-Log loeschen", cbClearLog);
@@ -1071,9 +1131,9 @@ static void buildMenuTab(lv_obj_t *parent) {
     // Primärer Weg ist der physische Taster/die Geste (nasse Hände auf dem
     // Boot), diese Buttons sind nur der optionale Touch-Bonus bei ruhigem
     // Wetter, rufen aber exakt dieselben Handler auf.
-    lv_obj_t *sub6 = lv_label_create(parent);
-    lv_label_set_text(sub6, "-- Quick-Message an Land --");
+    addSubHeader(parent, "-- Quick-Message an Land --");
     lblQuickSelected = lv_label_create(parent);
+    lv_obj_set_style_text_font(lblQuickSelected, &lv_font_montserrat_24, 0);
     lv_label_set_text(lblQuickSelected, "Frage: ALLES GUT?");
     addMenuButton(parent, "Naechste Frage", cbQuickNext);
     addMenuButton(parent, "Frage senden", cbQuickSend);
@@ -1094,10 +1154,30 @@ static bool stopwatchRunning = false;
 
 static void buildSegelnScreen() {
     screenSegeln = lv_obj_create(NULL);
+    // Feedback nach erstem Hardware-Test: Schrift generell zu klein. text_font
+    // ist in LVGL eine vererbte Eigenschaft - hier auf Screen-Ebene gesetzt,
+    // wirkt automatisch auf alle Labels, die keine eigene (groessere) Schrift
+    // gesetzt haben (Countdown/Wind/Manöver-Zahlen bleiben bei ihrer extra
+    // grossen Schrift, die haben ihre eigene lokale Font-Einstellung).
+    lv_obj_set_style_text_font(screenSegeln, &lv_font_montserrat_28, 0);
 
     tabview = lv_tabview_create(screenSegeln);
     lv_tabview_set_tab_bar_position(tabview, LV_DIR_BOTTOM);
-    lv_tabview_set_tab_bar_size(tabview, 34);
+    // 70 statt 46: die Tab-Leiste clippt ihre Kinder an der eigenen Höhe -
+    // die gedrehten+hochgeschobenen Eck-Tabs brauchen den zusätzlichen Platz,
+    // sonst wird ihre Schrift oben abgeschnitten (siehe Hardware-Feedback).
+    lv_tabview_set_tab_bar_size(tabview, 94); // 70 war immer noch zu knapp, nochmal um denselben Betrag erhöht
+
+    // Feedback nach erstem Hardware-Test: Bildschirm ist in den Ecken leicht
+    // abgedeckt, die aeussersten Tabs (Nav ganz links, Menu ganz rechts)
+    // waren dadurch nicht lesbar. Kleiner Sicherheitsabstand an der
+    // Tab-Leiste schiebt alle Tabs etwas von den Raendern weg. Tab-Bar hat
+    // ihre eigene Theme-Schrift (erbt nicht automatisch von screenSegeln),
+    // deshalb hier explizit gesetzt - Feedback "UI generell zu klein" galt
+    // auch dafür.
+    lv_obj_t *segelnTabBar = lv_tabview_get_tab_bar(tabview);
+    lv_obj_set_style_pad_hor(segelnTabBar, 30, 0); // fester Gehäuse-Rand, nicht nur ein Rendering-Rand - deutlich grosszuegiger
+    lv_obj_set_style_text_font(segelnTabBar, &lv_font_montserrat_18, 0);
 
     tabNav       = lv_tabview_add_tab(tabview, "Nav");
     tabWind      = lv_tabview_add_tab(tabview, "Wind");
@@ -1105,6 +1185,35 @@ static void buildSegelnScreen() {
     tabCountdown = lv_tabview_add_tab(tabview, "CD");
     tabManeuver  = lv_tabview_add_tab(tabview, "Man");
     tabMenu      = lv_tabview_add_tab(tabview, "Menu");
+
+    // Auf Roman's Vorschlag: die beiden äussersten Tab-Buttons (ganz links/
+    // rechts, genau dort wo das Gehäuse den Bildschirm abdeckt) werden um
+    // 45° zur Bildschirmmitte gedreht - sollten dadurch aus der abgedeckten
+    // Zone "rausschwenken". Erster Test, ob das an echter Hardware wirklich
+    // besser lesbar/antippbar ist, steht noch aus. lv_obj_set_style_
+    // transform_rotation nimmt Zehntelgrad (450 = 45.0°), Drehpunkt auf die
+    // Mitte des jeweiligen Tab-Buttons gelegt.
+    // Feedback: Ausrichtung der gedrehten Tabs passt, aber sie müssen um
+    // ca. eine Schriftgrösse (18px-Font) nach oben verschoben werden, sonst
+    // sind sie weiterhin verdeckt. translate_y ist eine reine Render-
+    // Verschiebung, beeinflusst NICHT das Flex-Layout der anderen Tabs.
+    static const int16_t OUTER_TAB_LIFT_PX = -22;
+
+    uint32_t segelnTabCount = lv_obj_get_child_count(segelnTabBar);
+    if (segelnTabCount > 0) {
+        lv_obj_t *firstTab = lv_obj_get_child(segelnTabBar, 0);
+        lv_obj_set_style_transform_pivot_x(firstTab, lv_pct(50), 0);
+        lv_obj_set_style_transform_pivot_y(firstTab, lv_pct(50), 0);
+        lv_obj_set_style_transform_rotation(firstTab, 450, 0);
+        lv_obj_set_style_translate_y(firstTab, OUTER_TAB_LIFT_PX, 0);
+    }
+    if (segelnTabCount > 1) {
+        lv_obj_t *lastTab = lv_obj_get_child(segelnTabBar, segelnTabCount - 1);
+        lv_obj_set_style_transform_pivot_x(lastTab, lv_pct(50), 0);
+        lv_obj_set_style_transform_pivot_y(lastTab, lv_pct(50), 0);
+        lv_obj_set_style_translate_y(lastTab, OUTER_TAB_LIFT_PX, 0);
+        lv_obj_set_style_transform_rotation(lastTab, -450, 0);
+    }
 
     // -- Nav-Tab --
     arcCompass = lv_arc_create(tabNav);
@@ -1116,11 +1225,17 @@ static void buildSegelnScreen() {
     lv_obj_remove_style(arcCompass, NULL, LV_PART_KNOB); // rein informativ, nicht bedienbar
     lv_obj_clear_flag(arcCompass, LV_OBJ_FLAG_CLICKABLE);
 
+    // Feedback nach Hardware-Test: text_font vererbt sich in dieser
+    // LVGL-Version NICHT wie erwartet vom Screen-Container auf Kind-Labels -
+    // deshalb jetzt an jedem einzelnen Label explizit gesetzt statt über
+    // lv_obj_set_style_text_font(screenSegeln, ...) am Anfang der Funktion.
     lblCogSog = lv_label_create(tabNav);
+    lv_obj_set_style_text_font(lblCogSog, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_align(lblCogSog, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblCogSog, LV_ALIGN_CENTER, 0, 10);
 
     lblGpsDetail = lv_label_create(tabNav);
+    lv_obj_set_style_text_font(lblGpsDetail, &lv_font_montserrat_20, 0);
     lv_obj_align(lblGpsDetail, LV_ALIGN_BOTTOM_MID, 0, -6);
 
     // -- Wind-Tab --
@@ -1128,15 +1243,19 @@ static void buildSegelnScreen() {
     lv_obj_set_style_text_font(lblWindDir, &lv_font_montserrat_28, 0);
     lv_obj_align(lblWindDir, LV_ALIGN_CENTER, 0, -10);
     lblWindTrend = lv_label_create(tabWind);
+    lv_obj_set_style_text_font(lblWindTrend, &lv_font_montserrat_28, 0);
     lv_obj_align(lblWindTrend, LV_ALIGN_CENTER, 0, 30);
 
     // -- Heimweg-Tab --
     lblHomeActive = lv_label_create(tabHome);
+    lv_obj_set_style_text_font(lblHomeActive, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_align(lblHomeActive, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblHomeActive, LV_ALIGN_TOP_MID, 0, 20);
     lblHomeManeuver = lv_label_create(tabHome);
+    lv_obj_set_style_text_font(lblHomeManeuver, &lv_font_montserrat_28, 0);
     lv_obj_align(lblHomeManeuver, LV_ALIGN_CENTER, 0, 0);
     lblHomeEta = lv_label_create(tabHome);
+    lv_obj_set_style_text_font(lblHomeEta, &lv_font_montserrat_28, 0);
     lv_obj_align(lblHomeEta, LV_ALIGN_BOTTOM_MID, 0, -20);
 
     // -- Countdown-Tab -- (bewusst dominant: grösster verfügbarer Font +
@@ -1161,6 +1280,7 @@ static void buildSegelnScreen() {
     lv_obj_set_style_text_align(lblManeuverBig, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblManeuverBig, LV_ALIGN_CENTER, 0, -10);
     lblManeuverSub = lv_label_create(tabManeuver);
+    lv_obj_set_style_text_font(lblManeuverSub, &lv_font_montserrat_28, 0);
     lv_obj_align(lblManeuverSub, LV_ALIGN_CENTER, 0, 30);
 
     // -- Menü-Tab --
@@ -1210,21 +1330,44 @@ static void cbShutdown(lv_event_t *e) {
 
 static void buildAlltagScreen() {
     screenAlltag = lv_obj_create(NULL);
+    lv_obj_set_style_text_font(screenAlltag, &lv_font_montserrat_28, 0); // siehe Kommentar in buildSegelnScreen()
 
     lv_obj_t *tv = lv_tabview_create(screenAlltag);
     lv_tabview_set_tab_bar_position(tv, LV_DIR_BOTTOM);
-    lv_tabview_set_tab_bar_size(tv, 34);
+    lv_tabview_set_tab_bar_size(tv, 94); // siehe Kommentar in buildSegelnScreen() - Clipping der gedrehten Eck-Tabs
+    lv_obj_t *alltagTabBar = lv_tabview_get_tab_bar(tv);
+    lv_obj_set_style_pad_hor(alltagTabBar, 30, 0); // siehe Kommentar in buildSegelnScreen() - fester Gehäuse-Rand
+    lv_obj_set_style_text_font(alltagTabBar, &lv_font_montserrat_18, 0);
 
     lv_obj_t *tabClock = lv_tabview_add_tab(tv, "Uhr");
     lv_obj_t *tabStopwatch = lv_tabview_add_tab(tv, "Timer");
     lv_obj_t *tabBattery = lv_tabview_add_tab(tv, "Akku");
     lv_obj_t *tabSettings = lv_tabview_add_tab(tv, "Setup");
 
+    // Dieselbe 45°-Drehung + Hochschieben der äussersten Tabs wie in
+    // buildSegelnScreen() (siehe dortiger Kommentar zu OUTER_TAB_LIFT_PX)
+    uint32_t alltagTabCount = lv_obj_get_child_count(alltagTabBar);
+    if (alltagTabCount > 0) {
+        lv_obj_t *firstTab = lv_obj_get_child(alltagTabBar, 0);
+        lv_obj_set_style_transform_pivot_x(firstTab, lv_pct(50), 0);
+        lv_obj_set_style_transform_pivot_y(firstTab, lv_pct(50), 0);
+        lv_obj_set_style_transform_rotation(firstTab, 450, 0);
+        lv_obj_set_style_translate_y(firstTab, -22, 0);
+    }
+    if (alltagTabCount > 1) {
+        lv_obj_t *lastTab = lv_obj_get_child(alltagTabBar, alltagTabCount - 1);
+        lv_obj_set_style_transform_pivot_x(lastTab, lv_pct(50), 0);
+        lv_obj_set_style_transform_pivot_y(lastTab, lv_pct(50), 0);
+        lv_obj_set_style_transform_rotation(lastTab, -450, 0);
+        lv_obj_set_style_translate_y(lastTab, -22, 0);
+    }
+
     // -- Uhrzeit-Tab --
     lblClockBig = lv_label_create(tabClock);
-    lv_obj_set_style_text_font(lblClockBig, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(lblClockBig, &lv_font_montserrat_48, 0);
     lv_obj_align(lblClockBig, LV_ALIGN_CENTER, 0, -10);
     lblClockDate = lv_label_create(tabClock);
+    lv_obj_set_style_text_font(lblClockDate, &lv_font_montserrat_28, 0);
     lv_obj_align(lblClockDate, LV_ALIGN_CENTER, 0, 30);
 
     // -- Stoppuhr-Tab --
@@ -1233,36 +1376,45 @@ static void buildAlltagScreen() {
     lv_label_set_text(lblStopwatch, "00:00.0");
     lv_obj_align(lblStopwatch, LV_ALIGN_TOP_MID, 0, 20);
     lv_obj_t *btnToggle = lv_button_create(tabStopwatch);
+    lv_obj_set_size(btnToggle, 160, 60);
     lv_obj_align(btnToggle, LV_ALIGN_CENTER, 0, 10);
     lv_obj_add_event_cb(btnToggle, cbStopwatchToggle, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lblToggle = lv_label_create(btnToggle);
+    lv_obj_set_style_text_font(lblToggle, &lv_font_montserrat_24, 0);
     lv_label_set_text(lblToggle, "Start/Stop");
     lv_obj_center(lblToggle);
     lv_obj_t *btnReset = lv_button_create(tabStopwatch);
+    lv_obj_set_size(btnReset, 160, 60);
     lv_obj_align(btnReset, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_add_event_cb(btnReset, cbStopwatchReset, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lblReset = lv_label_create(btnReset);
+    lv_obj_set_style_text_font(lblReset, &lv_font_montserrat_24, 0);
     lv_label_set_text(lblReset, "Reset");
     lv_obj_center(lblReset);
 
     // -- Akku-Tab (eigener Uhr-Akku, siehe instance.pmu) --
     lblOwnBattery = lv_label_create(tabBattery);
+    lv_obj_set_style_text_font(lblOwnBattery, &lv_font_montserrat_28, 0);
     lv_obj_center(lblOwnBattery);
 
     // -- Setup-Tab: manueller Segelmodus-Schalter --
     lv_obj_t *lblSw = lv_label_create(tabSettings);
+    lv_obj_set_style_text_font(lblSw, &lv_font_montserrat_24, 0);
     lv_label_set_text(lblSw, "Segelmodus erzwingen\n(auch ohne Handy-Verbindung)");
     lv_obj_set_style_text_align(lblSw, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblSw, LV_ALIGN_TOP_MID, 0, 10);
     swForceSegeln = lv_switch_create(tabSettings);
-    lv_obj_align(swForceSegeln, LV_ALIGN_CENTER, 0, 20);
+    lv_obj_set_style_transform_zoom(swForceSegeln, 320, 0); // groesserer Schalter, leichter zu treffen
+    lv_obj_align(swForceSegeln, LV_ALIGN_CENTER, 0, 30);
     lv_obj_add_event_cb(swForceSegeln, cbForceSegelnToggle, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_t *btnShutdown = lv_button_create(tabSettings);
+    lv_obj_set_size(btnShutdown, 180, 60);
     lv_obj_set_style_bg_color(btnShutdown, lv_color_hex(0x802020), 0);
     lv_obj_align(btnShutdown, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_add_event_cb(btnShutdown, cbShutdown, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lblShutdown = lv_label_create(btnShutdown);
+    lv_obj_set_style_text_font(lblShutdown, &lv_font_montserrat_24, 0);
     lv_label_set_text(lblShutdown, "Ausschalten");
     lv_obj_center(lblShutdown);
 }
@@ -1307,16 +1459,21 @@ static void alltagScreenTick() {
 
 static void buildUi() {
     // Statusleiste oben, unabhängig vom aktiven Screen (lv_layer_top liegt
-    // über JEDEM per lv_screen_load() geladenen Screen)
+    // über JEDEM per lv_screen_load() geladenen Screen). Grösserer Rand
+    // (14/10 statt 6/4) aus demselben Grund wie bei der Tab-Leiste unten:
+    // Bildschirm ist in den Ecken leicht abgedeckt.
     lblBleStatus = lv_label_create(lv_layer_top());
-    lv_obj_align(lblBleStatus, LV_ALIGN_TOP_LEFT, 6, 4);
+    lv_obj_set_style_text_font(lblBleStatus, &lv_font_montserrat_20, 0);
+    lv_obj_align(lblBleStatus, LV_ALIGN_TOP_LEFT, 14, 10);
     lblPhoneBattery = lv_label_create(lv_layer_top());
-    lv_obj_align(lblPhoneBattery, LV_ALIGN_TOP_RIGHT, -6, 4);
+    lv_obj_set_style_text_font(lblPhoneBattery, &lv_font_montserrat_20, 0);
+    lv_obj_align(lblPhoneBattery, LV_ALIGN_TOP_RIGHT, -14, 10);
 
     // Quick-Message-Overlay, ebenfalls auf layer_top - standardmässig
     // versteckt, wird nur bei eingehender Frage/frischer Antwort eingeblendet
     lblQuickOverlay = lv_label_create(lv_layer_top());
-    lv_obj_set_width(lblQuickOverlay, LV_PCT(90));
+    lv_obj_set_width(lblQuickOverlay, LV_PCT(85));
+    lv_obj_set_style_text_font(lblQuickOverlay, &lv_font_montserrat_28, 0);
     lv_obj_align(lblQuickOverlay, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_text_align(lblQuickOverlay, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_bg_color(lblQuickOverlay, lv_color_hex(0x203050), 0);

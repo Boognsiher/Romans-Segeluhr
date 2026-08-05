@@ -135,6 +135,11 @@ static void sendEncrypted(const uint8_t *data, size_t len) {
     if (encryptLoRaPacket(data, len, encBuf, encLen)) {
         radio.transmit(encBuf, encLen); // blockierend, aber selten (nur bei Quick-Messages)
         radio.startReceive();           // transmit() beendet den Empfangsmodus, wieder aktivieren
+        // Direkt nach dem eigenen Senden ein evtl. durch den TX-Vorgang selbst
+        // ausgelöstes Empfangs-Flag verwerfen (DIO1 wird von RadioLib sowohl für
+        // "Paket empfangen" als auch für "Senden fertig" genutzt - beobachtet
+        // beim Test: Gerät empfing sein eigenes gerade gesendetes Paket zurück).
+        loraReceivedFlag = false;
     }
 }
 
@@ -167,6 +172,7 @@ static void sendQuickAnswer(QuickAnswer answer) {
     resp.answer = answer;
     sendEncrypted((uint8_t *)&resp, sizeof(resp));
     haveIncomingQuestion = false;
+    Serial.printf("[Quick-Msg TX] Antwort gesendet: inResponseTo=%d %s\n", resp.inResponseToSequence, quickAnswerText(answer));
     updateQuickOverlay();
 }
 
@@ -176,6 +182,7 @@ static void sendQuickAnswer(QuickAnswer answer) {
 static void handleIncomingQuickMessageRequest(const QuickMessageRequest &req) {
     haveIncomingQuestion = true;
     incomingRequest = req;
+    Serial.printf("[Quick-Msg RX] Frage vom Boot: seq=%d %s\n", req.sequence, quickQuestionText(req.question));
     vibrateIncomingQuestion();
     updateQuickOverlay();
 }
@@ -199,6 +206,7 @@ static void cbQuickSend(lv_event_t *e) {
     waitingForAnswer = true;
     pendingRequestSequence = req.sequence;
     pendingRequestSentMillis = millis();
+    Serial.printf("[Quick-Msg TX] Frage gesendet: seq=%d %s\n", req.sequence, quickQuestionText(req.question));
 }
 
 static void checkQuickMessageTimeout() {
@@ -360,11 +368,36 @@ static void cbShutdown(lv_event_t *e) {
     instance.sleep();
 }
 
+// Feedback nach erstem Hardware-Test: Standard-LVGL-Buttongroesse ist auf
+// dem echten Touchscreen zu klein/schmal zum zuverlaessigen Antippen -
+// deshalb hier fest auf eine grosszuegige Mindesthoehe + groesseren Font.
 static lv_obj_t *addMenuButton(lv_obj_t *parent, const char *label, lv_event_cb_t cb) {
     lv_obj_t *btn = lv_button_create(parent);
-    lv_obj_set_width(btn, LV_PCT(90));
+    lv_obj_set_width(btn, LV_PCT(94));
+    lv_obj_set_height(btn, 64);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lbl = lv_label_create(btn);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_28, 0);
+    lv_label_set_text(lbl, label);
+    lv_obj_center(lbl);
+    return btn;
+}
+
+// text_font vererbt sich nicht zuverlässig - Section-Header/Zeit-Buttons
+// bekommen ihre Schrift deshalb hier zentral über einen kleinen Helfer.
+static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
+    lv_obj_t *lbl = lv_label_create(parent);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_24, 0);
+    lv_label_set_text(lbl, text);
+    return lbl;
+}
+
+static lv_obj_t *addSmallButton(lv_obj_t *parent, const char *label, lv_event_cb_t cb) {
+    lv_obj_t *btn = lv_button_create(parent);
+    lv_obj_set_size(btn, 70, 56);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
     lv_label_set_text(lbl, label);
     lv_obj_center(lbl);
     return btn;
@@ -374,54 +407,52 @@ static void buildMenuTab(lv_obj_t *parent) {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(parent, 6, 0);
 
-    lv_obj_t *sub1 = lv_label_create(parent);
-    lv_label_set_text(sub1, "-- Stumm-Modus --");
+    addSubHeader(parent, "-- Stumm-Modus --");
     lv_obj_t *muteRow = lv_obj_create(parent);
-    lv_obj_set_size(muteRow, LV_PCT(90), LV_SIZE_CONTENT);
+    lv_obj_set_size(muteRow, LV_PCT(94), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(muteRow, LV_FLEX_FLOW_ROW);
     lv_obj_t *lblMute = lv_label_create(muteRow);
+    lv_obj_set_style_text_font(lblMute, &lv_font_montserrat_20, 0);
     lv_label_set_text(lblMute, "Vibration/Ton stumm:");
     swMute = lv_switch_create(muteRow);
+    lv_obj_set_style_transform_zoom(swMute, 320, 0); // groesserer Schalter, leichter zu treffen
     lv_obj_add_event_cb(swMute, cbMuteToggle, LV_EVENT_VALUE_CHANGED, NULL);
 
-    lv_obj_t *sub2 = lv_label_create(parent);
-    lv_label_set_text(sub2, "-- Zeit stellen --");
+    addSubHeader(parent, "-- Zeit stellen --");
     lblTimeSetPreview = lv_label_create(parent);
+    lv_obj_set_style_text_font(lblTimeSetPreview, &lv_font_montserrat_28, 0);
     lv_label_set_text(lblTimeSetPreview, "12:00");
     lv_obj_t *timeRow = lv_obj_create(parent);
-    lv_obj_set_size(timeRow, LV_PCT(90), LV_SIZE_CONTENT);
+    lv_obj_set_size(timeRow, LV_PCT(94), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(timeRow, LV_FLEX_FLOW_ROW);
-    lv_obj_t *btnHm = lv_button_create(timeRow);
-    lv_obj_add_event_cb(btnHm, cbTimeHourMinus, LV_EVENT_CLICKED, NULL);
-    lv_label_set_text(lv_label_create(btnHm), "Std-");
-    lv_obj_t *btnHp = lv_button_create(timeRow);
-    lv_obj_add_event_cb(btnHp, cbTimeHourPlus, LV_EVENT_CLICKED, NULL);
-    lv_label_set_text(lv_label_create(btnHp), "Std+");
-    lv_obj_t *btnMm = lv_button_create(timeRow);
-    lv_obj_add_event_cb(btnMm, cbTimeMinuteMinus, LV_EVENT_CLICKED, NULL);
-    lv_label_set_text(lv_label_create(btnMm), "Min-");
-    lv_obj_t *btnMp = lv_button_create(timeRow);
-    lv_obj_add_event_cb(btnMp, cbTimeMinutePlus, LV_EVENT_CLICKED, NULL);
-    lv_label_set_text(lv_label_create(btnMp), "Min+");
+    addSmallButton(timeRow, "Std-", cbTimeHourMinus);
+    addSmallButton(timeRow, "Std+", cbTimeHourPlus);
+    addSmallButton(timeRow, "Min-", cbTimeMinuteMinus);
+    addSmallButton(timeRow, "Min+", cbTimeMinutePlus);
     addMenuButton(parent, "Uebernehmen", cbTimeSetApply);
 
-    lv_obj_t *sub3 = lv_label_create(parent);
-    lv_label_set_text(sub3, "-- Quick-Message ans Boot --");
+    addSubHeader(parent, "-- Quick-Message ans Boot --");
     lblQuickSelected = lv_label_create(parent);
+    lv_obj_set_style_text_font(lblQuickSelected, &lv_font_montserrat_24, 0);
     lv_label_set_text(lblQuickSelected, "Frage: ALLES GUT?");
     addMenuButton(parent, "Naechste Frage", cbQuickNext);
     addMenuButton(parent, "Frage senden", cbQuickSend);
 
-    lv_obj_t *sub4 = lv_label_create(parent);
-    lv_label_set_text(sub4, "-- Sonstiges --");
+    addSubHeader(parent, "-- Sonstiges --");
     lv_obj_t *btnShutdown = addMenuButton(parent, "Ausschalten", cbShutdown);
     lv_obj_set_style_bg_color(btnShutdown, lv_color_hex(0x802020), 0);
 }
 
 static void buildUi() {
     lv_obj_t *tv = lv_tabview_create(lv_screen_active());
+    // Feedback nach erstem Hardware-Test: UI generell zu klein. text_font ist
+    // in LVGL vererbt - hier auf dem Tabview gesetzt, wirkt auf alle Labels
+    // in allen drei Tabs, die keine eigene (groessere) Schrift haben (Uhrzeit/
+    // Status-Text behalten ihre eigene extra grosse Schrift).
+    lv_obj_set_style_text_font(tv, &lv_font_montserrat_24, 0);
     lv_tabview_set_tab_bar_position(tv, LV_DIR_BOTTOM);
-    lv_tabview_set_tab_bar_size(tv, 34);
+    lv_tabview_set_tab_bar_size(tv, 44);
+    lv_obj_set_style_text_font(lv_tabview_get_tab_bar(tv), &lv_font_montserrat_18, 0); // Tab-Bar hat eigene Theme-Schrift
 
     tabMain   = lv_tabview_add_tab(tv, "Status");
     tabDetail = lv_tabview_add_tab(tv, "Detail");
@@ -437,28 +468,40 @@ static void buildUi() {
     lv_obj_set_style_text_font(lblClockBig, &lv_font_montserrat_48, 0);
     lv_obj_align(lblClockBig, LV_ALIGN_CENTER, 0, 10);
 
+    // text_font vererbt sich in dieser LVGL-Version NICHT zuverlässig vom
+    // Tabview auf Kind-Labels - deshalb ab hier überall explizit gesetzt.
     lblConnIndicator = lv_label_create(tabMain);
+    lv_obj_set_style_text_font(lblConnIndicator, &lv_font_montserrat_24, 0);
     lv_obj_align(lblConnIndicator, LV_ALIGN_BOTTOM_MID, 0, -10);
 
     // -- Detail-Tab --
     lblDetailDistance = lv_label_create(tabDetail);
-    lv_obj_align(lblDetailDistance, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_set_style_text_font(lblDetailDistance, &lv_font_montserrat_28, 0);
+    lv_obj_align(lblDetailDistance, LV_ALIGN_TOP_MID, 0, 6);
     lblDetailSog = lv_label_create(tabDetail);
-    lv_obj_align(lblDetailSog, LV_ALIGN_TOP_MID, 0, 40);
+    lv_obj_set_style_text_font(lblDetailSog, &lv_font_montserrat_28, 0);
+    lv_obj_align(lblDetailSog, LV_ALIGN_TOP_MID, 0, 48);
     lblDetailBattery = lv_label_create(tabDetail);
-    lv_obj_align(lblDetailBattery, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_set_style_text_font(lblDetailBattery, &lv_font_montserrat_28, 0);
+    lv_obj_align(lblDetailBattery, LV_ALIGN_TOP_MID, 0, 90);
     lblDetailWind = lv_label_create(tabDetail);
-    lv_obj_align(lblDetailWind, LV_ALIGN_TOP_MID, 0, 100);
+    lv_obj_set_style_text_font(lblDetailWind, &lv_font_montserrat_28, 0);
+    lv_obj_align(lblDetailWind, LV_ALIGN_TOP_MID, 0, 132);
     lblDetailPacketInfo = lv_label_create(tabDetail);
+    lv_obj_set_style_text_font(lblDetailPacketInfo, &lv_font_montserrat_18, 0);
     lv_obj_align(lblDetailPacketInfo, LV_ALIGN_BOTTOM_MID, 0, -10);
 
     // -- Menü-Tab --
     buildMenuTab(tabMenu);
 
     // -- Quick-Message-Overlay (layer_top, über allen Tabs) --
+    // Feedback nach erstem Hardware-Test: JA/NEIN-Buttons waren mit
+    // Standardgroesse zu schmal zum zuverlaessigen Antippen - jetzt fest
+    // gross (140x90), grosser Font, mehr Abstand zueinander.
     lblQuickOverlay = lv_label_create(lv_layer_top());
     lv_obj_set_width(lblQuickOverlay, LV_PCT(90));
-    lv_obj_align(lblQuickOverlay, LV_ALIGN_CENTER, 0, -30);
+    lv_obj_set_style_text_font(lblQuickOverlay, &lv_font_montserrat_28, 0); // layer_top erbt NICHT von tv
+    lv_obj_align(lblQuickOverlay, LV_ALIGN_CENTER, 0, -55);
     lv_obj_set_style_text_align(lblQuickOverlay, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_bg_color(lblQuickOverlay, lv_color_hex(0x203050), 0);
     lv_obj_set_style_bg_opa(lblQuickOverlay, LV_OPA_90, 0);
@@ -466,15 +509,20 @@ static void buildUi() {
     lv_obj_add_flag(lblQuickOverlay, LV_OBJ_FLAG_HIDDEN);
 
     btnAnswerJa = lv_button_create(lv_layer_top());
+    lv_obj_set_size(btnAnswerJa, 140, 90);
     lv_obj_set_style_bg_color(btnAnswerJa, lv_color_hex(0x208030), 0);
-    lv_obj_align(btnAnswerJa, LV_ALIGN_CENTER, -50, 40);
+    lv_obj_align(btnAnswerJa, LV_ALIGN_CENTER, -80, 55);
     lv_obj_add_event_cb(btnAnswerJa, cbAnswerJa, LV_EVENT_CLICKED, NULL);
-    lv_label_set_text(lv_label_create(btnAnswerJa), "JA");
+    lv_obj_t *lblJa = lv_label_create(btnAnswerJa);
+    lv_obj_set_style_text_font(lblJa, &lv_font_montserrat_28, 0);
+    lv_label_set_text(lblJa, "JA");
+    lv_obj_center(lblJa);
     lv_obj_add_flag(btnAnswerJa, LV_OBJ_FLAG_HIDDEN);
 
     btnAnswerNein = lv_button_create(lv_layer_top());
+    lv_obj_set_size(btnAnswerNein, 140, 90);
     lv_obj_set_style_bg_color(btnAnswerNein, lv_color_hex(0x802020), 0);
-    lv_obj_align(btnAnswerNein, LV_ALIGN_CENTER, 50, 40);
+    lv_obj_align(btnAnswerNein, LV_ALIGN_CENTER, 80, 55);
     lv_obj_add_event_cb(btnAnswerNein, cbAnswerNein, LV_EVENT_CLICKED, NULL);
     lv_label_set_text(lv_label_create(btnAnswerNein), "NEIN");
     lv_obj_add_flag(btnAnswerNein, LV_OBJ_FLAG_HIDDEN);
@@ -497,23 +545,38 @@ static void loraReceiveTick() {
     loraReceivedFlag = false;
 
     size_t rawLen = radio.getPacketLength();
+    // TODO(Test-Debug): Zeilen bis Verbindung verifiziert ist
+    Serial.printf("[LoRa RX] Paket da, rawLen=%d RSSI=%.1f SNR=%.1f\n", (int)rawLen, radio.getRSSI(), radio.getSNR());
     if (rawLen == 0 || rawLen > CRYPTO_MAX_BUFFER) return;
     uint8_t rawBuf[CRYPTO_MAX_BUFFER];
     int state = radio.readData(rawBuf, rawLen);
-    if (state != RADIOLIB_ERR_NONE) return;
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.printf("[LoRa RX] readData fehlgeschlagen, Code %d\n", state);
+        return;
+    }
 
     uint8_t plainBuf[CRYPTO_MAX_PAYLOAD];
     size_t plainLen;
-    if (!decryptLoRaPacket(rawBuf, rawLen, plainBuf, plainLen) || plainLen < 1) return;
+    if (!decryptLoRaPacket(rawBuf, rawLen, plainBuf, plainLen) || plainLen < 1) {
+        Serial.println("[LoRa RX] Entschluesselung fehlgeschlagen oder leer");
+        return;
+    }
 
     uint8_t firstByte = plainBuf[0];
     if (firstByte == 0x10 && plainLen >= sizeof(QuickMessageRequest)) {
         QuickMessageRequest req;
         memcpy(&req, plainBuf, sizeof(req));
+        // Absender-Check: nur Anfragen von der Boots-Uhr akzeptieren. Schützt
+        // gegen Selbstempfang der eigenen gerade gesendeten Pakete (siehe
+        // Kommentar bei sendEncrypted()).
+        if (req.sender != DeviceId::BOOT) return;
         handleIncomingQuickMessageRequest(req);
     } else if (firstByte == 0x11 && plainLen >= sizeof(QuickMessageResponse)) {
         QuickMessageResponse resp;
         memcpy(&resp, plainBuf, sizeof(resp));
+        if (resp.responder != DeviceId::BOOT) return; // siehe Absender-Check oben
+        Serial.printf("[Quick-Msg RX] Antwort vom Boot: inResponseTo=%d %s (erwartet=%d wartend=%d)\n",
+                       resp.inResponseToSequence, quickAnswerText(resp.answer), pendingRequestSequence, waitingForAnswer);
         if (waitingForAnswer && resp.inResponseToSequence == pendingRequestSequence) {
             waitingForAnswer = false;
             lastReceivedAnswer = resp.answer;
@@ -526,7 +589,10 @@ static void loraReceiveTick() {
         memcpy(&lastPacket, plainBuf, sizeof(LoRaStatusPacket));
         lastPacketReceivedMillis = millis();
         havePacketYet = true;
+        Serial.printf("[LoRa RX] Status OK: seq=%d state=%d\n", lastPacket.sequence, (int)lastPacket.state);
         refreshActiveScreen(); // sofort aktualisieren, nicht erst beim naechsten 1Hz-Tick
+    } else {
+        Serial.printf("[LoRa RX] unbekanntes Paket, firstByte=0x%02X plainLen=%d\n", firstByte, (int)plainLen);
     }
 }
 

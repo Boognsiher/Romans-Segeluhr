@@ -15,13 +15,16 @@ gerade läuft, was Baustelle und was nur Test ist.
 |---|---|---|---|---|
 | Android-App | Handy (Samsung) | ✅ | 28.07.2026 | Master: GATT-Server, alle Engines, BLE-Protokoll |
 | `Segeluhr_TWatch_S3` (ALT) | T-Watch S3 | 🗄️ | 28.07.2026 | Ursprüngliche Boots-Uhr-Rolle (BLE Central, Alltags-/Segelmodus, Auto-Focus, Zeit-Sync) — Code jetzt nach `Segeluhr_TWatch_Ultra.ino` portiert, physische S3-Hardware wird zur Land-Uhr (siehe Zeile unten) |
-| `Segeluhr_TWatch_Ultra` | T-Watch Ultra | 🔧 | 05.08.2026 (nur Boot) | Boots-Uhr, aus S3-Firmware + LoRa-Sender/Quick-Messages zusammengeführt, kompiliert + geflasht (COM17), bootet sauber bis Alltags-Screen (Uhrzeit/Datum sichtbar). LoRa-Funk zur Land-Uhr, BLE zum Handy, Touch/Gesten noch NICHT getestet, siehe README im Ordner |
-| `Segeluhr_TWatch_S3` (Land) | T-Watch S3 | 🔧 | 05.08.2026 (nur Boot) | Land-Uhr (neue Rolle, ersetzt bisherige BLE-Central-Rolle), kompiliert + geflasht (COM16), bootet sauber bis Status-Screen. LoRa-Funk zur Boots-Uhr, Touch-Bedienung noch NICHT getestet, siehe README im Ordner |
+| `Segeluhr_TWatch_Ultra` | T-Watch Ultra | 🔧 | 05.08.2026 (Boot + LoRa + Quick-Msg, beide Richtungen) | Boots-Uhr, aus S3-Firmware + LoRa-Sender/Quick-Messages zusammengeführt, kompiliert + geflasht (COM17), bootet sauber. **LoRa-Status-Broadcast + Quick-Messages (beide Richtungen, JA per kurzem/NEIN per langem Tasterdruck) Ende-zu-Ende verifiziert.** Selbstempfangs-Bug gefixt. UI-Nacharbeit (Schriftgrösse, gedrehte Eck-Tabs wg. Gehäuse-Abdeckung) mehrfach nachgebessert, **letzter Stand (94px Tab-Leiste) noch ungetestet**. BLE zum Handy und Gesten-Antwort (Schwellenwert nur 1 Messpunkt) noch offen — siehe `docs/Offene_Punkte_Hardware_Test_05_08.md` |
+| `Segeluhr_TWatch_S3` (Land) | T-Watch S3 | 🔧 | 05.08.2026 (Boot + LoRa + Quick-Msg, beide Richtungen) | Land-Uhr (neue Rolle, ersetzt bisherige BLE-Central-Rolle), kompiliert + geflasht (COM16), bootet sauber. **LoRa-Empfang + Quick-Messages (beide Richtungen) Ende-zu-Ende verifiziert**, Buttons/Schrift nach Hardware-Test vergrössert. Ton bei Quick-Messages noch offen — siehe `docs/Offene_Punkte_Hardware_Test_05_08.md` |
 | `segeluhr_ble_tester` | ESP32-C3/XIAO | 🗄️ | — | nur lokal vorhanden, nicht in diesem Repo, siehe `Segeluhr-Firmware/TESTING/README.md` |
 | `Segeluhr_Basis_Solo` | (für Ultra gedacht) | 🗄️ | — | nur lokal vorhanden, nie auf echter Hardware getestet |
 
 ## Bekannte offene Punkte
 
+- **Detaillierter Fahrplan für die nächste Firmware-Session:**
+  `docs/Offene_Punkte_Hardware_Test_05_08.md` (Gesten-Kalibrierung,
+  ungetesteter UI-Fix, BLE-Test, was heute schon gefixt wurde).
 - **Fehlende Root-Dokumente:** `Segeluhr_Spezifikation.md` und
   `BLE_Protokoll.md` (die ursprüngliche Basis-Spezifikation) liegen nicht
   in diesem Repo — nur die `Erweiterung_*.md`-Ergänzungsdokumente unter
