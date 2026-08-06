@@ -789,7 +789,8 @@ static lv_obj_t *addIconTile(lv_obj_t *parent, const char *symbol, const char *l
 // Kleiner +/- -Button, z.B. zum Einstellen der Weckzeit.
 static lv_obj_t *addAdjustButton(lv_obj_t *parent, const char *label, lv_event_cb_t cb) {
     lv_obj_t *btn = lv_button_create(parent);
-    lv_obj_set_size(btn, 70, 56);
+    lv_obj_set_size(btn, 100, 56); // Breiter als frueher (70px) - vier nebeneinander passten
+                                    // nicht auf den 240px-Bildschirm, siehe addRow()-Kommentar
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lbl = lv_label_create(btn);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
@@ -803,11 +804,17 @@ static lv_obj_t *addAdjustButton(lv_obj_t *parent, const char *label, lv_event_c
 static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
     lv_obj_t *lbl = lv_label_create(parent);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_24, 0);
+    // Ohne feste Breite waechst ein Label ueber den 240px-Bildschirm hinaus
+    // statt umzubrechen (Ursache fuer das Hardware-Test-Feedback 06.08.:
+    // "muss nach rechts scrollen") - deshalb Breite + Zeilenumbruch + Zentrierung.
+    lv_obj_set_width(lbl, LV_PCT(94));
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(lbl, text);
     return lbl;
 }
 
-// Vollbild-Container für eine der drei Menü-Unteransichten - randlos, damit
+// Vollbild-Container für eine der Menü-Unteransichten - randlos, damit
 // er optisch mit dem Tab verschmilzt statt als eigene Box aufzufallen.
 static lv_obj_t *addMenuScreenContainer(lv_obj_t *parent) {
     lv_obj_t *screen = lv_obj_create(parent);
@@ -816,7 +823,28 @@ static lv_obj_t *addMenuScreenContainer(lv_obj_t *parent) {
     lv_obj_set_style_border_width(screen, 0, 0);
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 8, 0);
+    // Nur senkrecht scrollen (falls Inhalt mal die Bildschirmhoehe
+    // ueberschreitet) - seitlich soll es NIE noetig sein (Hardware-Test-
+    // Feedback 06.08.: "musste nach rechts scrollen").
+    lv_obj_set_scroll_dir(screen, LV_DIR_VER);
     return screen;
+}
+
+// Randlose, nicht scrollbare Zeile innerhalb eines Menü-Screens (z.B. zwei
+// Icon-Kacheln nebeneinander). Der T-Watch-S3-Bildschirm ist nur 240x240px
+// (siehe pins_arduino.h, DISP_WIDTH/DISP_HEIGHT) - Standard-Container-
+// Padding/-Rahmen von LVGL frisst davon spürbar was weg und hat vorher zu
+// horizontalem Scrollen geführt, obwohl die Prozent-Rechnung an sich
+// aufging. widthPct ist relativ zum jeweiligen Eltern-Screen.
+static lv_obj_t *addRow(lv_obj_t *parent, lv_coord_t widthPct) {
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(widthPct), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_column(row, 8, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE); // soll nie seitlich scrollen, Inhalt muss reinpassen
+    return row;
 }
 
 static void showMenuScreen(lv_obj_t *screen) {
@@ -838,10 +866,7 @@ static void buildMenuTab(lv_obj_t *parent) {
     // -- Icon-Grid (Standardansicht) --
     menuGridScreen = addMenuScreenContainer(parent);
 
-    lv_obj_t *row1 = lv_obj_create(menuGridScreen);
-    lv_obj_set_size(row1, LV_PCT(94), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row1, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(row1, 8, 0);
+    lv_obj_t *row1 = addRow(menuGridScreen, 94);
 
     btnMuteTile = lv_button_create(row1);
     lv_obj_set_width(btnMuteTile, LV_PCT(47));
@@ -865,18 +890,19 @@ static void buildMenuTab(lv_obj_t *parent) {
     addSubHeader(menuFragenScreen, "-- Quick-Message ans Boot --");
     lblQuickSelected = lv_label_create(menuFragenScreen);
     lv_obj_set_style_text_font(lblQuickSelected, &lv_font_montserrat_24, 0);
+    lv_obj_set_width(lblQuickSelected, LV_PCT(94)); // eigene Fragen koennen bis zu 31 Zeichen lang sein
+    lv_label_set_long_mode(lblQuickSelected, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lblQuickSelected, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(lblQuickSelected, "Frage: ALLES GUT?");
     addMenuButton(menuFragenScreen, "Naechste Frage", cbQuickNext);
     addMenuButton(menuFragenScreen, "Frage senden", cbQuickSend);
 
     // BLE-Fragen-Editor Ein/Aus (siehe docs/Erweiterung_S3_BLE_Fragen_Editor.md)
     // - Standard AUS, macht die S3 nur bei Bedarf per BLE sichtbar.
-    lv_obj_t *bleRow = lv_obj_create(menuFragenScreen);
-    lv_obj_set_size(bleRow, LV_PCT(94), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(bleRow, LV_FLEX_FLOW_ROW);
+    lv_obj_t *bleRow = addRow(menuFragenScreen, 94);
     lv_obj_t *lblBle = lv_label_create(bleRow);
     lv_obj_set_style_text_font(lblBle, &lv_font_montserrat_18, 0);
-    lv_label_set_text(lblBle, "BLE Fragen-Editor:");
+    lv_label_set_text(lblBle, "BLE-Editor:"); // kurz gehalten, siehe addRow()-Kommentar (240px-Bildschirm)
     swBleEditor = lv_switch_create(bleRow);
     lv_obj_set_style_transform_zoom(swBleEditor, 320, 0);
     lv_obj_add_event_cb(swBleEditor, cbBleEditorToggle, LV_EVENT_VALUE_CHANGED, NULL);
@@ -888,16 +914,10 @@ static void buildMenuTab(lv_obj_t *parent) {
     // docs/Erweiterung_S3_Alltagsfunktionen.md Abschnitt 2 --
     menuAlltagScreen = addMenuScreenContainer(parent);
     addSubHeader(menuAlltagScreen, "-- Alltag --");
-    lv_obj_t *alltagRow1 = lv_obj_create(menuAlltagScreen);
-    lv_obj_set_size(alltagRow1, LV_PCT(94), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(alltagRow1, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(alltagRow1, 8, 0);
+    lv_obj_t *alltagRow1 = addRow(menuAlltagScreen, 94);
     addIconTile(alltagRow1, LV_SYMBOL_BELL, "Wecker", cbOpenWecker, 47);
     addIconTile(alltagRow1, LV_SYMBOL_PLAY, "Stoppuhr", cbOpenStoppuhr, 47);
-    lv_obj_t *alltagRow2 = lv_obj_create(menuAlltagScreen);
-    lv_obj_set_size(alltagRow2, LV_PCT(94), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(alltagRow2, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(alltagRow2, 8, 0);
+    lv_obj_t *alltagRow2 = addRow(menuAlltagScreen, 94);
     addIconTile(alltagRow2, LV_SYMBOL_GPS, "Schritte", cbOpenSchritte, 47);
     addIconTile(alltagRow2, LV_SYMBOL_EYE_OPEN, "Taschen-\nlampe", cbOpenFlashlight, 47);
     addMenuButton(menuAlltagScreen, LV_SYMBOL_LEFT " Zurueck", cbMenuBack);
@@ -908,13 +928,15 @@ static void buildMenuTab(lv_obj_t *parent) {
     lblAlarmTimePreview = lv_label_create(menuWeckerScreen);
     lv_obj_set_style_text_font(lblAlarmTimePreview, &lv_font_montserrat_48, 0);
     lv_label_set_text_fmt(lblAlarmTimePreview, "%02d:%02d", alarmHour, alarmMinute);
-    lv_obj_t *alarmTimeRow = lv_obj_create(menuWeckerScreen);
-    lv_obj_set_size(alarmTimeRow, LV_PCT(94), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(alarmTimeRow, LV_FLEX_FLOW_ROW);
-    addAdjustButton(alarmTimeRow, "Std-", cbAlarmHourMinus);
-    addAdjustButton(alarmTimeRow, "Std+", cbAlarmHourPlus);
-    addAdjustButton(alarmTimeRow, "Min-", cbAlarmMinuteMinus);
-    addAdjustButton(alarmTimeRow, "Min+", cbAlarmMinutePlus);
+    // Zwei Zeilen (Stunde/Minute) statt vier Knöpfe nebeneinander - vier
+    // Knöpfe passten nicht nebeneinander auf den 240px-Bildschirm, siehe
+    // addRow()-Kommentar.
+    lv_obj_t *alarmHourRow = addRow(menuWeckerScreen, 94);
+    addAdjustButton(alarmHourRow, "Std-", cbAlarmHourMinus);
+    addAdjustButton(alarmHourRow, "Std+", cbAlarmHourPlus);
+    lv_obj_t *alarmMinuteRow = addRow(menuWeckerScreen, 94);
+    addAdjustButton(alarmMinuteRow, "Min-", cbAlarmMinuteMinus);
+    addAdjustButton(alarmMinuteRow, "Min+", cbAlarmMinutePlus);
     btnAlarmToggleTile = lv_button_create(menuWeckerScreen);
     lv_obj_set_width(btnAlarmToggleTile, LV_PCT(94));
     lv_obj_set_height(btnAlarmToggleTile, 90);
@@ -941,6 +963,8 @@ static void buildMenuTab(lv_obj_t *parent) {
     addSubHeader(menuSchritteScreen, "-- Schritte --");
     lblSteps = lv_label_create(menuSchritteScreen);
     lv_obj_set_style_text_font(lblSteps, &lv_font_montserrat_28, 0);
+    lv_obj_set_width(lblSteps, LV_PCT(94));
+    lv_label_set_long_mode(lblSteps, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lblSteps, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(lblSteps, "Schritte heute:\n0");
     addMenuButton(menuSchritteScreen, "Reset", cbStepsReset);
