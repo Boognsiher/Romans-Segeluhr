@@ -44,6 +44,8 @@ Verliert die BLE-Rolle komplett. Wird zur reinen Anzeige-Uhr für die Crew an La
 ## 3. Screens auf der Land-Uhr (S3)
 
 ### Hauptscreen (Default)
+Bewusst schlicht gehalten, keine textuelle "Empfang"-Beschriftung mehr
+(siehe überarbeitetes Mockup im Chat-Verlauf):
 - Großer Status-Text, z.B.:
   - "WARTE AUF START" (Idle)
   - "COUNTDOWN 4:32"
@@ -51,8 +53,12 @@ Verliert die BLE-Rolle komplett. Wird zur reinen Anzeige-Uhr für die Crew an La
   - "WETTFAHRT LÄUFT"
   - "HEIMWEG AKTIV"
   - "MANÖVER!" (kurzzeitig, wenn Wende/Halse-Kommando aktiv war)
-- Aktuelle Uhrzeit (lokale RTC, groß, gut lesbar von Weitem)
-- Kleiner Verbindungsindikator (z.B. Punkt/Balken: Zeit seit letztem Paket)
+- Kleines Richtungs-/Status-Icon passend zum aktuellen Zustand
+- Aktuelle Uhrzeit (lokale RTC, groß, gut lesbar von Weitem), Datum/Wochentag
+  klein darunter (siehe `Erweiterung_S3_Alltagsfunktionen.md`)
+- Dezente Wellengrafik im Hintergrund (nautisches Theme, kein steriler Look)
+- Verbindungsstärke als kleine Signalbalken (visuell, kein Text) statt
+  eines reinen Punkts
 - Bei Verbindungsverlust (> 90s): Status-Text wird durch
   "KEIN SIGNAL (seit Xs)" ersetzt, Uhrzeit bleibt sichtbar
 
@@ -64,12 +70,23 @@ Verliert die BLE-Rolle komplett. Wird zur reinen Anzeige-Uhr für die Crew an La
 - Paket-Sequenznummer + Alter des letzten Pakets (Debug/Vertrauen in Daten)
 
 ### Menü-Screen (dritter Screen, Wechsel per Touch/Knopf)
-- **Stumm-Modus Ein/Aus** (Toggle): unterdrückt Vibration UND Ton bei
-  eingehenden Quick-Messages/Antworten. Der 30s-Status-Broadcast löst
-  ohnehin nie eine Benachrichtigung aus (siehe Abschnitt 6), Stumm betrifft
-  also nur die Quick-Message-Benachrichtigungen.
-- **Ausschalten**: fährt die Uhr herunter (analog zum bestehenden
-  Shutdown-Mechanismus der Boots-Uhr, `instance.sleep()` o.ä.)
+Icon-Grid-Layout statt Liste (siehe Mockup im Chat-Verlauf), platzsparend,
+kein Scrollen nötig:
+```
+[Stumm] [Fragen]
+[Alltag]
+[   Ausschalten   ]
+```
+- **Stumm** (Icon-Toggle): unterdrückt Vibration UND Ton bei eingehenden
+  Quick-Messages/Antworten. Der 30s-Status-Broadcast löst ohnehin nie eine
+  Benachrichtigung aus (siehe Abschnitt 6).
+- **Fragen**: führt zur Fragenverwaltung — vordefinierte 10 Fragen +
+  eigene, per BLE/Web-Bluetooth erstellte Fragen (siehe
+  `Erweiterung_S3_BLE_Fragen_Editor.md`)
+- **Alltag**: führt ins Alltagsfunktionen-Untermenü (Wecker, Stoppuhr,
+  Schrittzähler, Taschenlampe — siehe `Erweiterung_S3_Alltagsfunktionen.md`)
+- **Ausschalten** (breiter Button): fährt die Uhr herunter (analog zum
+  bestehenden Shutdown-Mechanismus der Boots-Uhr, `instance.sleep()` o.ä.)
 
 Navigation: Haupt → Detail → Menü → zurück zu Haupt (zyklisch), per Wischen/
 Antippen (Touch primär, siehe Abschnitt 5) oder Knopf als Fallback.
