@@ -112,8 +112,10 @@ ICACHE_RAM_ATTR static void onLoraPacketReceived(void) {
 void setupLoRaTransceiver() {
     // MUSS exakt mit Segeluhr_TWatch_Ultra.ino übereinstimmen, sonst
     // hören sich Sender/Empfänger nicht (siehe dortige setupLoRaTransceiver()
-    // für dieselben Werte/Begründungen).
-    radio.setFrequency(868.0);
+    // für dieselben Werte/Begründungen). 869.525 MHz (CH/EU-Band
+    // 869.4-869.65 MHz, 10% statt 1% Duty-Cycle erlaubt) statt des alten
+    // Standard-Kanals 868.0 MHz.
+    radio.setFrequency(869.525);
     radio.setBandwidth(125.0);
     radio.setSpreadingFactor(10);
     radio.setCodingRate(6);

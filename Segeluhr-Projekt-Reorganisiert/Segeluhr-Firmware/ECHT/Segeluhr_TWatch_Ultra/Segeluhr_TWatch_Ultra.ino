@@ -520,14 +520,18 @@ ICACHE_RAM_ATTR static void onLoraPacketReceived(void) {
 
 void setupLoRaTransceiver() {
     // LoRa-Parameter — MÜSSEN exakt mit Segeluhr_TWatch_S3.ino
-    // übereinstimmen, sonst hören sich Sender/Empfänger nicht. 868 MHz
-    // (EU/CH-ISM-Band), moderate Bandbreite/SF: Reichweite hat laut Doku
-    // Priorität vor Datenrate, unsere Pakete sind winzig (20-28 Byte) und
-    // selten (alle 30s bzw. sporadische Quick-Messages).
-    // TODO(Roman/Claude Code): Duty-Cycle/Kanalwahl vor dem ersten
-    // Praxiseinsatz gegen BAKOM-Vorgaben prüfen (bekannter offener Punkt,
-    // PROJEKT_STATUS.md).
-    radio.setFrequency(868.0);
+    // übereinstimmen, sonst hören sich Sender/Empfänger nicht.
+    // 869.525 MHz statt des alten Standard-Kanals 868.0 MHz: liegt im
+    // Schweizer/EU-Band 869.4-869.65 MHz, das 10% Duty-Cycle erlaubt
+    // (statt nur 1% im 868.0-868.6-Band) — bei unserem Sendemuster (30s-
+    // Status-Broadcast + sporadische Quick-Messages) unkritisch für 1%,
+    // aber die 10%-Erlaubnis gibt deutlich mehr Spielraum, falls das
+    // Sendeintervall später mal verkürzt wird. Moderate Bandbreite/SF:
+    // Reichweite hat laut Doku Priorität vor Datenrate, unsere Pakete
+    // sind winzig (20-28 Byte) und selten.
+    // Duty-Cycle/Kanalwahl gegen BAKOM-Vorgaben geprüft (06.08.2026,
+    // siehe PROJEKT_STATUS.md) — 869.525 MHz ist die gewählte Frequenz.
+    radio.setFrequency(869.525);
     radio.setBandwidth(125.0);
     radio.setSpreadingFactor(10);
     radio.setCodingRate(6);

@@ -32,9 +32,13 @@ gerade läuft, was Baustelle und was nur Test ist.
   existieren, gehören sie hier in den Root-Ordner.
 - **`distanceTraveledM`** (LoRa-Paket) braucht noch eine neue
   Distanz-Aufsummierung in der App, existiert aktuell nicht.
-- **Duty-Cycle-/Kanalwahl für LoRa in der Schweiz** vor dem ersten
-  Praxiseinsatz gegen BAKOM-Vorgaben prüfen (siehe
-  `BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md`).
+- ~~**Duty-Cycle-/Kanalwahl für LoRa in der Schweiz**~~ ✅ erledigt
+  06.08.2026: Frequenz beider Firmwares von 868.0 MHz auf 869.525 MHz
+  umgestellt (Band 869.4-869.65 MHz, 10% statt 1% Duty-Cycle in der
+  Schweiz erlaubt). Beide Sketches nach der Änderung fehlerfrei neu
+  kompiliert (`esp32:esp32:twatch_ultra` / `esp32:esp32:twatchs3`), noch
+  nicht auf Hardware geflasht/getestet — nächster Schritt vor dem ersten
+  Praxiseinsatz.
 - **DRV2605-Haptik-Stärke**: aktuelle stärkste verfügbare ROM-Effekte
   genutzt, aber keine echte Software-Gain-Kontrolle möglich (siehe
   Firmware-Kommentar bei `triggerHaptic()`) — bei Bedarf nochmal
