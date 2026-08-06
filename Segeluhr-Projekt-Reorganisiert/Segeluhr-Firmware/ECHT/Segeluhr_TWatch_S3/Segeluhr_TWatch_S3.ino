@@ -294,10 +294,15 @@ static lv_obj_t *lblDetailBattery;
 static lv_obj_t *lblDetailWind;
 static lv_obj_t *lblDetailPacketInfo;
 
-// Menü-Tab: Icon-Grid als Standardansicht + zwei Unteransichten (Fragen,
-// Alltag), siehe buildMenuTab(). Alle drei sind Vollbild-Geschwister
-// innerhalb des Menü-Tabs, per Hidden-Flag umgeschaltet (showMenuScreen()).
+// Menü-Tab: Icon-Grid als Standardansicht + Unteransichten (Fragen, Alltag-
+// Grid, sowie Wecker/Stoppuhr/Schritte darunter), siehe buildMenuTab(). Alle
+// sind Vollbild-Geschwister innerhalb des Menü-Tabs, per Hidden-Flag
+// umgeschaltet (showMenuScreen()). Taschenlampe ist bewusst KEINE dieser
+// Screens, sondern ein Overlay auf layer_top (siehe Alltagsfunktionen unten)
+// - "Verlassen durch Antippen" ueberall auf dem Bildschirm laesst sich so
+// einfacher umsetzen als innerhalb der Tab-Struktur.
 static lv_obj_t *menuGridScreen, *menuFragenScreen, *menuAlltagScreen;
+static lv_obj_t *menuWeckerScreen, *menuStoppuhrScreen, *menuSchritteScreen;
 static lv_obj_t *btnMuteTile, *lblMuteTileText;
 static lv_obj_t *lblQuickSelected;
 
@@ -305,6 +310,56 @@ static lv_obj_t *lblQuickSelected;
 static lv_obj_t *lblQuickOverlay = nullptr;
 static lv_obj_t *btnAnswerJa = nullptr;
 static lv_obj_t *btnAnswerNein = nullptr;
+
+// ============================================================================
+// Alltagsfunktionen (siehe docs/Erweiterung_S3_Alltagsfunktionen.md):
+// Wecker, Stoppuhr, Schrittzähler, Taschenlampe. Macht die Land-Uhr auch
+// ausserhalb des Segel-Kontexts als normale Armbanduhr sinnvoll tragbar.
+// ============================================================================
+
+// ---- Wecker (Software-Vergleich statt Hardware-Alarm-Register) ----
+// ABWEICHUNG von der urspruenglichen Doku-Annahme: die reale S3 nutzt laut
+// LilyGoLib (LilyGoWatchS3.h) einen PCF8563, nicht wie dokumentiert einen
+// PCF85063A - der PCF8563 hat zwar ebenfalls ein Alarm-Register
+// (SensorPCF8563::setAlarm/enableAlarm), aber LilyGoLib verdrahtet dessen
+// Interrupt-Pin fuer die S3 nur als Deep-Sleep-Wakeup-Quelle, nicht als
+// laufende Interrupt-Quelle im Normalbetrieb (RTC_EVENT_INTERRUPT wuerde nie
+// feuern). Einfacher und genauso zuverlaessig: die RTC wird ohnehin jede
+// Sekunde fuer die Uhrzeit-Anzeige gelesen (siehe mainScreenUpdate()) - der
+// Wecker vergleicht bei dieser Gelegenheit einfach mit, kein Zugriff auf
+// Alarm-Register noetig.
+static bool alarmEnabled = false;
+static uint8_t alarmHour = 7;
+static uint8_t alarmMinute = 0;
+static bool alarmArmedThisMinute = true; // verhindert Re-Trigger innerhalb derselben Minute
+static bool alarmRinging = false;
+static unsigned long lastAlarmVibrateMs = 0;
+static const unsigned long ALARM_VIBRATE_INTERVAL_MS = 2000; // wiederholt vibrieren, bis "Stopp" gedrueckt wird
+static lv_obj_t *lblAlarmTimePreview;
+static lv_obj_t *btnAlarmToggleTile, *lblAlarmToggleText;
+static lv_obj_t *alarmRingingOverlay; // layer_top, siehe buildUi()
+
+// ---- Stoppuhr (identisches Muster wie auf der Ultra, siehe dortiges
+// alltagScreenTick()/cbStopwatch{Toggle,Reset}) ----
+static lv_obj_t *lblStopwatch;
+static uint32_t stopwatchStartMs = 0;
+static uint32_t stopwatchElapsedMs = 0;
+static bool stopwatchRunning = false;
+
+// ---- Schrittzähler (BMA423-Pedometer, von LilyGoLib bereits aktiviert -
+// siehe initSensor() in LilyGoWatchS3.cpp: enableFeature(FEATURE_STEP_CNTR),
+// setStepCounterWatermark(1)) ----
+static lv_obj_t *lblSteps;
+// Bekannte Einschränkung (siehe Doku): Mitternachts-Reset nur waehrend die
+// Uhr durchlaeuft - kein NVS-Tracking des letzten Reset-Tages ueber einen
+// Neustart hinweg, "-1" heisst "seit Boot noch kein Tag gesehen".
+static int8_t stepsLastSeenDay = -1;
+
+// ---- Taschenlampe (Overlay auf layer_top, siehe buildUi()) ----
+static bool flashlightActive = false;
+static unsigned long flashlightActivatedMs = 0;
+static const unsigned long FLASHLIGHT_TIMEOUT_MS = 90000; // 90s, siehe Doku "60-120s"
+static lv_obj_t *flashlightOverlay;
 
 static void mainScreenUpdate() {
     if (isSignalLost()) {
@@ -328,6 +383,26 @@ static void mainScreenUpdate() {
     struct tm timeinfo;
     instance.rtc.getDateTime(&timeinfo);
     lv_label_set_text_fmt(lblClockBig, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+
+    alarmCheckTick(timeinfo);
+    stepsAutoResetCheck(timeinfo);
+}
+
+// Aktualisiert die Anzeigen der Alltag-Unteransichten (Wecker-Vorschau,
+// Stoppuhr, Schritte) - unabhaengig davon, ob sie gerade sichtbar sind
+// (billig genug, gleiche Konvention wie updateMenuScreen()).
+static void updateAlltagScreens() {
+    if (lblAlarmTimePreview != nullptr) {
+        lv_label_set_text_fmt(lblAlarmTimePreview, "%02d:%02d", alarmHour, alarmMinute);
+    }
+    if (stopwatchRunning && lblStopwatch != nullptr) {
+        uint32_t elapsed = millis() - stopwatchStartMs;
+        lv_label_set_text_fmt(lblStopwatch, "%02lu:%02lu.%01lu",
+                              (elapsed / 60000UL), (elapsed / 1000UL) % 60UL, (elapsed / 100UL) % 10UL);
+    }
+    if (lblSteps != nullptr) {
+        lv_label_set_text_fmt(lblSteps, "Schritte heute:\n%u", (unsigned)instance.sensor.getPedometerCounter());
+    }
 }
 
 static void detailScreenUpdate() {
@@ -383,6 +458,109 @@ static void updateQuickOverlay() {
 static void refreshActiveScreen() {
     mainScreenUpdate();
     detailScreenUpdate();
+    updateAlltagScreens();
+}
+
+// ---- Wecker: Software-Vergleich statt Hardware-Alarm-Register (siehe
+// ausführlichen Begründungs-Kommentar bei den Wecker-Globals oben) ----
+static void alarmCheckTick(const struct tm &now) {
+    if (!alarmEnabled) {
+        alarmArmedThisMinute = true;
+        return;
+    }
+    bool matches = (now.tm_hour == alarmHour && now.tm_min == alarmMinute);
+    if (matches && alarmArmedThisMinute) {
+        alarmArmedThisMinute = false;
+        alarmRinging = true;
+        lastAlarmVibrateMs = 0; // sofort beim naechsten alarmRingingTick() vibrieren
+        lv_obj_clear_flag(alarmRingingOverlay, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(alarmRingingOverlay);
+        lv_display_trigger_activity(NULL); // Standby-Aufwecken, siehe Erweiterung_Standby_Wecken.md
+        if (displayAsleep) wakeDisplay();
+    } else if (!matches) {
+        alarmArmedThisMinute = true; // Minute vorbei - naechstes Mal (naechster Tag) wieder scharf
+    }
+}
+
+static void alarmRingingTick() {
+    if (!alarmRinging) return;
+    if (millis() - lastAlarmVibrateMs >= ALARM_VIBRATE_INTERVAL_MS) {
+        lastAlarmVibrateMs = millis();
+        playWaveformSeq({5, 5, 5}); // dieselbe "Strong Buzz"-Sequenz wie vibrateIncomingQuestion()
+    }
+}
+
+static void cbAlarmStop(lv_event_t *e) {
+    alarmRinging = false;
+    lv_obj_add_flag(alarmRingingOverlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void cbAlarmHourPlus(lv_event_t *e) { alarmHour = (alarmHour + 1) % 24; }
+static void cbAlarmHourMinus(lv_event_t *e) { alarmHour = (alarmHour + 23) % 24; }
+static void cbAlarmMinutePlus(lv_event_t *e) { alarmMinute = (alarmMinute + 1) % 60; }
+static void cbAlarmMinuteMinus(lv_event_t *e) { alarmMinute = (alarmMinute + 59) % 60; }
+
+static void updateAlarmToggleVisual() {
+    lv_label_set_text_fmt(lblAlarmToggleText, "%s\n%s", alarmEnabled ? LV_SYMBOL_BELL : LV_SYMBOL_CLOSE,
+                          alarmEnabled ? "An" : "Aus");
+    lv_obj_set_style_bg_color(btnAlarmToggleTile, alarmEnabled ? lv_color_hex(0x208030) : lv_color_hex(0x2A2A2A), 0);
+}
+static void cbAlarmToggle(lv_event_t *e) {
+    alarmEnabled = !alarmEnabled;
+    alarmArmedThisMinute = true; // frisch scharf, verhindert Sofort-Trigger falls gerade Alarmzeit erreicht ist
+    updateAlarmToggleVisual();
+}
+
+// ---- Stoppuhr (identisches Muster wie auf der Ultra) ----
+static void cbStopwatchToggle(lv_event_t *e) {
+    if (!stopwatchRunning) {
+        stopwatchStartMs = millis() - stopwatchElapsedMs;
+        stopwatchRunning = true;
+    } else {
+        stopwatchElapsedMs = millis() - stopwatchStartMs;
+        stopwatchRunning = false;
+    }
+}
+static void cbStopwatchReset(lv_event_t *e) {
+    stopwatchRunning = false;
+    stopwatchElapsedMs = 0;
+    lv_label_set_text(lblStopwatch, "00:00.0");
+}
+
+// ---- Schrittzähler ----
+static void stepsAutoResetCheck(const struct tm &now) {
+    if (stepsLastSeenDay == -1) {
+        stepsLastSeenDay = now.tm_mday; // erster Tick nach Boot: nur Basislinie merken, nicht resetten
+        return;
+    }
+    if (now.tm_mday != stepsLastSeenDay) {
+        instance.sensor.resetPedometer();
+        stepsLastSeenDay = now.tm_mday;
+        Serial.println("[Alltag] Schrittzaehler: neuer Tag, automatisch zurueckgesetzt");
+    }
+}
+static void cbStepsReset(lv_event_t *e) {
+    instance.sensor.resetPedometer();
+    lv_label_set_text(lblSteps, "Schritte heute:\n0");
+}
+
+// ---- Taschenlampe (Overlay auf layer_top, siehe buildUi()) ----
+static void cbOpenFlashlight(lv_event_t *e) {
+    flashlightActive = true;
+    flashlightActivatedMs = millis();
+    lv_obj_clear_flag(flashlightOverlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(flashlightOverlay);
+}
+static void cbCloseFlashlight(lv_event_t *e) {
+    flashlightActive = false;
+    lv_obj_add_flag(flashlightOverlay, LV_OBJ_FLAG_HIDDEN);
+}
+static void flashlightTick() {
+    if (!flashlightActive) return;
+    lv_display_trigger_activity(NULL); // verhindert, dass der normale 30s-Standby waehrend Nutzung dazwischenfunkt
+    if (millis() - flashlightActivatedMs > FLASHLIGHT_TIMEOUT_MS) {
+        cbCloseFlashlight(nullptr);
+    }
 }
 
 // ---- Menü-Tab: Icon-Grid (siehe docs/Erweiterung_Land_Boot_LoRa_Kommunikation.md
@@ -405,6 +583,10 @@ static void showMenuScreen(lv_obj_t *screen); // Vorwärtsdeklaration, siehe unt
 static void cbOpenFragen(lv_event_t *e) { showMenuScreen(menuFragenScreen); }
 static void cbOpenAlltag(lv_event_t *e) { showMenuScreen(menuAlltagScreen); }
 static void cbMenuBack(lv_event_t *e) { showMenuScreen(menuGridScreen); }
+static void cbOpenWecker(lv_event_t *e) { showMenuScreen(menuWeckerScreen); }
+static void cbOpenStoppuhr(lv_event_t *e) { showMenuScreen(menuStoppuhrScreen); }
+static void cbOpenSchritte(lv_event_t *e) { showMenuScreen(menuSchritteScreen); }
+static void cbAlltagBack(lv_event_t *e) { showMenuScreen(menuAlltagScreen); } // von Wecker/Stoppuhr/Schritte zurueck ins Alltag-Grid
 
 /**
  * Deep-Sleep, analog zum Shutdown-Mechanismus der Boots-Uhr
@@ -449,6 +631,18 @@ static lv_obj_t *addIconTile(lv_obj_t *parent, const char *symbol, const char *l
     return btn;
 }
 
+// Kleiner +/- -Button, z.B. zum Einstellen der Weckzeit.
+static lv_obj_t *addAdjustButton(lv_obj_t *parent, const char *label, lv_event_cb_t cb) {
+    lv_obj_t *btn = lv_button_create(parent);
+    lv_obj_set_size(btn, 70, 56);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
+    lv_label_set_text(lbl, label);
+    lv_obj_center(lbl);
+    return btn;
+}
+
 // text_font vererbt sich nicht zuverlässig - Section-Header bekommen ihre
 // Schrift deshalb hier zentral über einen kleinen Helfer.
 static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
@@ -474,6 +668,9 @@ static void showMenuScreen(lv_obj_t *screen) {
     lv_obj_add_flag(menuGridScreen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(menuFragenScreen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(menuAlltagScreen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(menuWeckerScreen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(menuStoppuhrScreen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(menuSchritteScreen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(screen, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -518,16 +715,68 @@ static void buildMenuTab(lv_obj_t *parent) {
     addMenuButton(menuFragenScreen, "Frage senden", cbQuickSend);
     addMenuButton(menuFragenScreen, LV_SYMBOL_LEFT " Zurueck", cbMenuBack);
 
-    // -- Alltag-Unteransicht: Platzhalter, Funktionen (Wecker/Stoppuhr/
-    // Schritte/Taschenlampe) folgen als eigener Schritt, siehe
-    // docs/Erweiterung_S3_Alltagsfunktionen.md --
+    // -- Alltag-Unteransicht: eigenes Icon-Grid [Wecker][Stoppuhr] /
+    // [Schritte][Taschenlampe] / [Zurück], siehe
+    // docs/Erweiterung_S3_Alltagsfunktionen.md Abschnitt 2 --
     menuAlltagScreen = addMenuScreenContainer(parent);
     addSubHeader(menuAlltagScreen, "-- Alltag --");
-    lv_obj_t *lblAlltagPlaceholder = lv_label_create(menuAlltagScreen);
-    lv_obj_set_style_text_font(lblAlltagPlaceholder, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_align(lblAlltagPlaceholder, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(lblAlltagPlaceholder, "Wecker/Stoppuhr/Schritte/\nTaschenlampe folgen als\neigener naechster Schritt");
+    lv_obj_t *alltagRow1 = lv_obj_create(menuAlltagScreen);
+    lv_obj_set_size(alltagRow1, LV_PCT(94), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(alltagRow1, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(alltagRow1, 8, 0);
+    addIconTile(alltagRow1, LV_SYMBOL_BELL, "Wecker", cbOpenWecker, 47);
+    addIconTile(alltagRow1, LV_SYMBOL_PLAY, "Stoppuhr", cbOpenStoppuhr, 47);
+    lv_obj_t *alltagRow2 = lv_obj_create(menuAlltagScreen);
+    lv_obj_set_size(alltagRow2, LV_PCT(94), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(alltagRow2, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(alltagRow2, 8, 0);
+    addIconTile(alltagRow2, LV_SYMBOL_GPS, "Schritte", cbOpenSchritte, 47);
+    addIconTile(alltagRow2, LV_SYMBOL_EYE_OPEN, "Taschen-\nlampe", cbOpenFlashlight, 47);
     addMenuButton(menuAlltagScreen, LV_SYMBOL_LEFT " Zurueck", cbMenuBack);
+
+    // -- Wecker-Unteransicht --
+    menuWeckerScreen = addMenuScreenContainer(parent);
+    addSubHeader(menuWeckerScreen, "-- Wecker --");
+    lblAlarmTimePreview = lv_label_create(menuWeckerScreen);
+    lv_obj_set_style_text_font(lblAlarmTimePreview, &lv_font_montserrat_48, 0);
+    lv_label_set_text_fmt(lblAlarmTimePreview, "%02d:%02d", alarmHour, alarmMinute);
+    lv_obj_t *alarmTimeRow = lv_obj_create(menuWeckerScreen);
+    lv_obj_set_size(alarmTimeRow, LV_PCT(94), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(alarmTimeRow, LV_FLEX_FLOW_ROW);
+    addAdjustButton(alarmTimeRow, "Std-", cbAlarmHourMinus);
+    addAdjustButton(alarmTimeRow, "Std+", cbAlarmHourPlus);
+    addAdjustButton(alarmTimeRow, "Min-", cbAlarmMinuteMinus);
+    addAdjustButton(alarmTimeRow, "Min+", cbAlarmMinutePlus);
+    btnAlarmToggleTile = lv_button_create(menuWeckerScreen);
+    lv_obj_set_width(btnAlarmToggleTile, LV_PCT(94));
+    lv_obj_set_height(btnAlarmToggleTile, 90);
+    lv_obj_add_event_cb(btnAlarmToggleTile, cbAlarmToggle, LV_EVENT_CLICKED, NULL);
+    lblAlarmToggleText = lv_label_create(btnAlarmToggleTile);
+    lv_obj_set_style_text_font(lblAlarmToggleText, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_align(lblAlarmToggleText, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(lblAlarmToggleText);
+    updateAlarmToggleVisual();
+    addMenuButton(menuWeckerScreen, LV_SYMBOL_LEFT " Zurueck", cbAlltagBack);
+
+    // -- Stoppuhr-Unteransicht (identisches Muster wie auf der Ultra) --
+    menuStoppuhrScreen = addMenuScreenContainer(parent);
+    addSubHeader(menuStoppuhrScreen, "-- Stoppuhr --");
+    lblStopwatch = lv_label_create(menuStoppuhrScreen);
+    lv_obj_set_style_text_font(lblStopwatch, &lv_font_montserrat_48, 0);
+    lv_label_set_text(lblStopwatch, "00:00.0");
+    addMenuButton(menuStoppuhrScreen, "Start/Stop", cbStopwatchToggle);
+    addMenuButton(menuStoppuhrScreen, "Reset", cbStopwatchReset);
+    addMenuButton(menuStoppuhrScreen, LV_SYMBOL_LEFT " Zurueck", cbAlltagBack);
+
+    // -- Schritte-Unteransicht (BMA423-Pedometer, siehe Globals-Kommentar) --
+    menuSchritteScreen = addMenuScreenContainer(parent);
+    addSubHeader(menuSchritteScreen, "-- Schritte --");
+    lblSteps = lv_label_create(menuSchritteScreen);
+    lv_obj_set_style_text_font(lblSteps, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_align(lblSteps, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(lblSteps, "Schritte heute:\n0");
+    addMenuButton(menuSchritteScreen, "Reset", cbStepsReset);
+    addMenuButton(menuSchritteScreen, LV_SYMBOL_LEFT " Zurueck", cbAlltagBack);
 
     showMenuScreen(menuGridScreen);
 }
@@ -615,6 +864,41 @@ static void buildUi() {
     lv_obj_add_event_cb(btnAnswerNein, cbAnswerNein, LV_EVENT_CLICKED, NULL);
     lv_label_set_text(lv_label_create(btnAnswerNein), "NEIN");
     lv_obj_add_flag(btnAnswerNein, LV_OBJ_FLAG_HIDDEN);
+
+    // -- Wecker-Overlay (layer_top, siehe alarmCheckTick()/alarmRingingTick()) --
+    alarmRingingOverlay = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(alarmRingingOverlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(alarmRingingOverlay, lv_color_hex(0x101040), 0);
+    lv_obj_set_style_bg_opa(alarmRingingOverlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(alarmRingingOverlay, 0, 0);
+    lv_obj_t *lblAlarmRinging = lv_label_create(alarmRingingOverlay);
+    lv_obj_set_style_text_font(lblAlarmRinging, &lv_font_montserrat_28, 0);
+    lv_label_set_text(lblAlarmRinging, LV_SYMBOL_BELL "\nWECKER");
+    lv_obj_set_style_text_align(lblAlarmRinging, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(lblAlarmRinging, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_t *btnAlarmStop = lv_button_create(alarmRingingOverlay);
+    lv_obj_set_size(btnAlarmStop, 160, 70);
+    lv_obj_set_style_bg_color(btnAlarmStop, lv_color_hex(0x802020), 0);
+    lv_obj_align(btnAlarmStop, LV_ALIGN_CENTER, 0, 60);
+    lv_obj_add_event_cb(btnAlarmStop, cbAlarmStop, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lblAlarmStop = lv_label_create(btnAlarmStop);
+    lv_obj_set_style_text_font(lblAlarmStop, &lv_font_montserrat_24, 0);
+    lv_label_set_text(lblAlarmStop, "Stopp");
+    lv_obj_center(lblAlarmStop);
+    lv_obj_add_flag(alarmRingingOverlay, LV_OBJ_FLAG_HIDDEN);
+
+    // -- Taschenlampen-Overlay (layer_top, volle Helligkeit + weisser
+    // Vollbild-Hintergrund, siehe cbOpenFlashlight()/flashlightTick()).
+    // Antippen IRGENDWO auf dem Overlay verlaesst sie wieder (klickbarer
+    // Vollbild-Container statt einzelnem Button). --
+    flashlightOverlay = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(flashlightOverlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(flashlightOverlay, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_opa(flashlightOverlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(flashlightOverlay, 0, 0);
+    lv_obj_add_flag(flashlightOverlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(flashlightOverlay, cbCloseFlashlight, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_flag(flashlightOverlay, LV_OBJ_FLAG_HIDDEN);
 
     refreshActiveScreen();
     updateMenuScreen();
@@ -729,6 +1013,8 @@ void loop() {
     loraReceiveTick();
     checkQuickMessageTimeout();
     standbyTick();
+    alarmRingingTick();
+    flashlightTick();
 
     // 1Hz-Tick fürs Uhrzeit-/Verbindungsalter-Update (Status ändert sich
     // sonst nur bei Paketempfang, aber Uhrzeit und "Xs her" müssen auch

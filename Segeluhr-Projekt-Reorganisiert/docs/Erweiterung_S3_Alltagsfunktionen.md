@@ -3,8 +3,10 @@
 > Nicht in der ursprünglichen Spezifikation. Macht die S3 auch außerhalb des
 > Segel-Kontexts als normale Alltags-Uhr sinnvoll tragbar.
 
-## Status: KONZEPT — Umsetzung durch Claude Code gegen den aktuellen Code
-von `Segeluhr_TWatch_S3.ino`.
+## Status: 🔧 UMGESETZT, KOMPILIERT (06.08.2026) — noch nicht auf Hardware
+getestet. Alle vier Funktionen (Wecker, Stoppuhr, Schrittzähler, Taschen-
+lampe) implementiert. Siehe Abschnitt 3 (aktualisiert) für Details und eine
+wichtige Hardware-Abweichung von der ursprünglichen Doku-Annahme (RTC-Chip).
 
 ## 1. Ziel
 Die Land-Uhr soll nicht nur während des Segelns Sinn ergeben, sondern auch
@@ -31,45 +33,68 @@ Alltag-Untermenü:  [Wecker] [Stoppuhr]
 
 ## 3. Einzelne Funktionen
 
-### Schrittzähler (praktisch ohne Zusatzaufwand)
-- BMA423 (der bereits für Touch-Wake/Standby genutzte Sensor, siehe
-  `Erweiterung_Standby_Wecken.md`) hat einen **eingebauten Schrittzähler-
-  Modus**, läuft direkt im Sensor-Chip, ohne den Hauptprozessor zu belasten
-- Anzeige: einfache Zahl + Datum, Reset um Mitternacht (oder manuell)
-- Kein Netzwerk, keine App-Anbindung nötig — reine Lokalanzeige
+### Schrittzähler — ✅ implementiert
+- BMA423-Pedometer, den LilyGoLib für die S3 bereits vollständig aktiviert
+  (`enableFeature(FEATURE_STEP_CNTR)`, `setStepCounterWatermark(1)` in
+  `initSensor()`) — `instance.sensor.getPedometerCounter()` liefert direkt
+  den aktuellen Zählerstand, keine eigene Aktivierung nötig.
+- Anzeige: Zahl im Schritte-Screen, "Reset"-Button für manuellen Reset.
+- **Mitternachts-Reset**: automatisch umgesetzt, aber mit Einschränkung —
+  vergleicht bei jedem RTC-Read (1x/Sekunde) den aktuellen Tag gegen den
+  zuletzt gesehenen; funktioniert nur, solange die Uhr über Mitternacht
+  hinweg durchläuft. Kein NVS-Tracking des letzten Reset-Tages über einen
+  Neustart hinweg (offener Punkt, siehe Abschnitt 5).
 
-### Wecker (nutzt vorhandene RTC)
-- PCF85063A (Echtzeituhr-Chip, schon für die Grunduhrzeit im Einsatz) hat
-  eine **eingebaute Alarm-Funktion** — funktioniert stromsparend, auch wenn
-  der Hauptprozessor im Standby ist (weckt das System bei Alarmzeit auf)
-- UI: Uhrzeit einstellen (Touch, +/- oder Scroll), Ein/Aus-Toggle
-- Weckton: Vibration (DRV2605, wie bei Quick-Messages) + optional Ton,
-  analog zum bestehenden Benachrichtigungskonzept
+### Wecker — ✅ implementiert, mit Architektur-Abweichung
+- **Wichtige Hardware-Korrektur:** Die reale S3 nutzt laut LilyGoLib
+  (`LilyGoWatchS3.h`) einen **PCF8563**, nicht wie hier ursprünglich
+  angenommen einen PCF85063A (der sitzt auf der Ultra). Der PCF8563 hat
+  zwar ebenfalls ein Alarm-Register, aber LilyGoLib verdrahtet dessen
+  Interrupt-Pin für die S3 nur als Deep-Sleep-Wakeup-Quelle, nicht als
+  laufende Interrupt-Quelle im Normalbetrieb — ein Hardware-Alarm würde im
+  wachen Zustand also gar nicht bemerkt.
+- **Lösung:** Software-Vergleich statt Hardware-Alarm-Register. Die RTC
+  wird ohnehin jede Sekunde für die Uhrzeit-Anzeige gelesen
+  (`mainScreenUpdate()`) — der Wecker vergleicht bei dieser Gelegenheit
+  einfach mit (`alarmCheckTick()`). Funktional gleichwertig für den
+  Anwendungsfall (Uhr ist ohnehin durchgehend an), nur eben nicht
+  Deep-Sleep-kompatibel — was hier aber ohnehin nicht gebraucht wird, die
+  Uhr läuft normalerweise durch (Display-Standby statt Deep-Sleep, siehe
+  `Erweiterung_Standby_Wecken.md`).
+- UI: Std/Min +/- Buttons, Ein/Aus-Toggle-Kachel (grün/grau).
+- Weckton: **nur Vibration** (dieselbe Sequenz wie bei Quick-Messages,
+  wiederholt alle 2s bis "Stopp" gedrückt wird). **Kein Ton** — die S3 hat
+  zwar laut LilyGoLib (`I2SClass player`) einen Lautsprecher-Codec, aber
+  einen Ton darüber auszugeben bräuchte eigene I2S-/PCM-Ansteuerung
+  (Audio-Buffer, Codec-Setup) - deutlich mehr Aufwand als eine
+  Vibrationssequenz und bewusst nicht Teil dieser Session, siehe
+  Abschnitt 5.
+- **Keine Persistenz**: Weckzeit/Ein-Aus-Zustand übersteht aktuell keinen
+  Neustart (offener Punkt, siehe Abschnitt 5).
 
-### Stoppuhr/Timer (Software, nutzt bestehende Zeit-/Haptik-Logik)
-- Einfacher Start/Stopp/Reset, große Zeitanzeige
-- Technisch nichts Neues — dieselbe Grundlage wie der Countdown-Ring, den
-  der BLE-Tester schon zu Testzwecken zeigt (`segeluhr_ble_tester_v2.ino`),
-  nur ohne die Segel-spezifische Logik drumherum
+### Stoppuhr — ✅ implementiert
+- Start/Stopp/Reset, große Zeitanzeige (MM:SS.z) — identisches Muster wie
+  die bereits vorhandene Stoppuhr auf der Ultra (`Segeluhr_TWatch_Ultra.ino`,
+  `alltagScreenTick()`/`cbStopwatch{Toggle,Reset}`), nur 1:1 auf die S3
+  übertragen.
 
-### Taschenlampen-Modus (trivial)
-- Display auf volle Helligkeit + weißer Vollbild-Hintergrund
-- Praktisch für den Steg/Boot am Abend
-- Verlassen durch Antippen oder automatisch nach X Sekunden (Standby-Logik
-  aus `Erweiterung_Standby_Wecken.md` mitnutzen, aber mit kürzerem Timeout,
-  da hier bewusst kurz genutzt wird)
+### Taschenlampen-Modus — ✅ implementiert
+- Vollbild-Overlay auf `lv_layer_top()` (nicht als normaler Menü-Screen,
+  damit "Antippen irgendwo" zum Verlassen funktioniert und auch die
+  Tab-Leiste überdeckt wird), weißer Hintergrund, maximale Helligkeit.
+- Timeout: 90s (im vorgeschlagenen 60-120s-Bereich aus der ersten
+  Doku-Version) — hält während der Nutzung aktiv die LVGL-
+  Inaktivitätsuhr zurück (`lv_display_trigger_activity()`), damit der
+  normale 30s-Display-Standby nicht dazwischenfunkt.
 
-### Datum/Wochentag auf dem Hauptscreen (kleine Ergänzung)
-- Ergänzt die bestehende Uhrzeit-Anzeige auf dem Hauptscreen um Datum/
-  Wochentag (klein, unterhalb der Uhrzeit) — nutzt dieselbe RTC, kein
-  zusätzlicher Sensor nötig
-
-### Zeitgesteuerter Stumm-Modus (baut auf bestehendem Stumm-Toggle auf)
-- Ergänzung zum manuellen Stumm-Toggle (`Erweiterung_Land_Boot_LoRa_Kommunikation.md`,
-  Abschnitt 6): zusätzlich ein Zeitfenster einstellbar (z.B. 22:00-07:00),
-  in dem automatisch stumm geschaltet wird, unabhängig vom manuellen Toggle
-- UI-technisch im selben Stumm-Bereich des Menüs unterbringen, nicht als
-  komplett neue Kachel
+### Nicht Teil dieser Umsetzung (siehe Abschnitt 5)
+- **Datum/Wochentag auf dem Hauptscreen**: kleine, unabhängige Ergänzung,
+  in dieser Session nicht mitgemacht (war nicht Teil der heutigen
+  Prioritätenliste) — technisch trivial, RTC liefert das bereits.
+- **Zeitgesteuerter Stumm-Modus**: baut auf dem Stumm-Toggle auf (jetzt
+  eine Icon-Kachel statt Switch, siehe
+  `Erweiterung_Land_Boot_LoRa_Kommunikation.md`), ebenfalls nicht Teil
+  dieser Session.
 
 ## 4. Bewusst NICHT umgesetzt (siehe Begründung im Chat-Verlauf)
 - **Kompass**: kein Magnetometer auf der S3 verbaut, bräuchte zusätzliche
@@ -81,17 +106,26 @@ Alltag-Untermenü:  [Wecker] [Stoppuhr]
   eigenes GPS, nur die Ultra
 
 ## 5. Offene technische Punkte
-- [ ] BMA423-Schrittzähler-API in SensorLib verifizieren (Aktivierung,
-  Auslesen, ob automatischer Mitternachts-Reset eingebaut ist oder manuell
-  gebaut werden muss)
-- [ ] PCF85063A-Alarm-API in SensorLib/LilyGoLib verifizieren (wie der
-  Alarm gesetzt wird, wie das Aufwachen aus dem Standby bei Alarmzeit
-  ausgelöst wird)
-- [ ] Persistenz für Wecker-Einstellung (muss Neustart/Ausschalten
-  überleben — NVS/Preferences, analog zu anderen Einstellungen)
-- [ ] Genaues UI-Layout des Alltag-Untermenüs (Icon-Grid wie beim
-  Hauptmenü, siehe Mockup-Stil aus dem Chat)
-- [ ] Standby-Timeout für den Taschenlampen-Modus festlegen (kürzer als
-  der normale 30s-Standby, da hier bewusst kurzfristig genutzt wird — z.B.
-  60-120s, damit man nicht ständig neu antippen muss, aber auch nicht
-  versehentlich den Akku leerbrennt)
+- [x] BMA423-Schrittzähler-API in SensorLib verifiziert — Aktivierung
+  passiert schon in LilyGoLib, Auslesen über `getPedometerCounter()`.
+  Automatischer Mitternachts-Reset ist NICHT eingebaut, musste selbst
+  gebaut werden (siehe Abschnitt 3) — funktioniert nur bei durchlaufender
+  Uhr, nicht über einen Neustart hinweg
+- [x] PCF85063A-Alarm-API verifiziert — mit wichtigem Befund: reale
+  S3-Hardware hat einen PCF8563, dessen Alarm-Interrupt bei dieser
+  LilyGoLib-Version im Normalbetrieb nicht verdrahtet ist. Deshalb
+  Software-Vergleich statt Hardware-Alarm (siehe Abschnitt 3)
+- [ ] Persistenz für Wecker-Einstellung (Weckzeit + Ein/Aus) — noch nicht
+  umgesetzt, übersteht aktuell keinen Neustart. Naheliegend: `Preferences`
+  (ESP32-NVS), analog zum Muster bei den Klio-Mustern auf der Ultra
+  (`docs/Erweiterung_Gesten_Training_Klio.md`)
+- [x] UI-Layout des Alltag-Untermenüs — Icon-Grid [Wecker][Stoppuhr] /
+  [Schritte][Taschenlampe] / [Zurück], konsistent mit dem Hauptmenü
+- [x] Standby-Timeout für Taschenlampe festgelegt: 90s
+- [ ] **Ton beim Wecker** (S3 hat laut LilyGoLib einen Lautsprecher-Codec,
+  `I2SClass player`) — nicht umgesetzt, bräuchte eigene I2S-/PCM-
+  Ansteuerung, deutlich mehr Aufwand als die vorhandene Vibration. Aktuell
+  nur Vibration, siehe Abschnitt 3
+- [ ] Alles in diesem Dokument ist **kompiliert, aber nicht auf
+  Hardware getestet** (06.08.2026) — insbesondere ob der PCF8563-
+  Software-Vergleich-Ansatz für den Wecker im Alltag zuverlässig genug ist
