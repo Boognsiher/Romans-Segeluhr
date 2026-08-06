@@ -779,7 +779,11 @@ static lv_obj_t *addIconTile(lv_obj_t *parent, const char *symbol, const char *l
     lv_obj_set_height(btn, 90);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lbl = lv_label_create(btn);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_28, 0);
+    // Kleiner als der Rest der UI (Hardware-Test-Feedback 06.08.: Schrift in
+    // den Kacheln zu gross) - die Kacheln sind mit ~106px deutlich schmaler
+    // als die vollbreiten Menü-Buttons, Symbol + Text auf zwei Zeilen
+    // braucht hier mehr Zurückhaltung.
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text_fmt(lbl, "%s\n%s", symbol, label);
     lv_obj_center(lbl);
@@ -873,7 +877,7 @@ static void buildMenuTab(lv_obj_t *parent) {
     lv_obj_set_height(btnMuteTile, 90);
     lv_obj_add_event_cb(btnMuteTile, cbMuteTileToggle, LV_EVENT_CLICKED, NULL);
     lblMuteTileText = lv_label_create(btnMuteTile);
-    lv_obj_set_style_text_font(lblMuteTileText, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(lblMuteTileText, &lv_font_montserrat_20, 0); // siehe addIconTile()-Kommentar, dieselbe Kachelgroesse
     lv_obj_set_style_text_align(lblMuteTileText, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(lblMuteTileText);
     updateMuteTileVisual();
@@ -983,6 +987,15 @@ static void buildUi() {
     lv_tabview_set_tab_bar_position(tv, LV_DIR_BOTTOM);
     lv_tabview_set_tab_bar_size(tv, 44);
     lv_obj_set_style_text_font(lv_tabview_get_tab_bar(tv), &lv_font_montserrat_18, 0); // Tab-Bar hat eigene Theme-Schrift
+
+    // Hardware-Test-Feedback 06.08.: Wischen zwischen den Tabs schob den
+    // Screen sichtbar seitlich an, obwohl gar kein seitlicher Input noetig
+    // ist - Tabs werden ohnehin nur ueber die Tab-Leiste unten gewechselt.
+    // lv_tabview blendet Tab-Wechsel intern als horizontales Scrollen des
+    // Content-Containers um - hier deaktiviert, lv_tabview_set_active()
+    // (von den Tab-Buttons ausgeloest) scrollt weiterhin programmatisch,
+    // unabhaengig vom SCROLLABLE-Flag.
+    lv_obj_clear_flag(lv_tabview_get_content(tv), LV_OBJ_FLAG_SCROLLABLE);
 
     tabMain   = lv_tabview_add_tab(tv, "Status");
     tabDetail = lv_tabview_add_tab(tv, "Detail");
