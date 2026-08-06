@@ -240,6 +240,18 @@ static volatile bool doConnect = false;
 static NimBLEAdvertisedDevice *foundDevice = nullptr;
 static uint32_t lastScanAttemptMs = 0;
 
+// ---- Thread-Safety: NimBLE ruft seine Callbacks (onConnect/onDisconnect/
+// Notify-Handler) in einem EIGENEN FreeRTOS-Task auf, nicht im loop()-Task.
+// LVGL ist nicht thread-safe (lv_timer_handler() läuft in loop()) — deshalb
+// dürfen die Callbacks NIE direkt LVGL- oder I2C-Funktionen (Haptik/DRV2605)
+// aufrufen. Stattdessen nur Daten/Flags setzen, die eigentliche Arbeit
+// erledigt bleTick() im loop()-Task. (Ursache eines Absturzes beim ersten
+// echten Handy-Verbindungstest 06.08.2026 — vorher war BLE zum Handy nie
+// unter Last getestet.)
+static volatile bool pendingConnectSwitchToSegeln = false;
+static volatile bool screenNeedsRefresh = false;
+static volatile int pendingHapticCode = -1;
+
 // ============================================================================
 // App-Modus: ALLTAG (Uhrzeit/Wecker/Stoppuhr/Batterie, kein Handy nötig)
 // vs. SEGELN (die 6 Sailing-Tabs, siehe unten). Erweiterung, siehe
@@ -294,18 +306,18 @@ static void onGpsNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len
     gpsData.accuracyM = accuracy;
     gpsData.haveData = true;
     if (flags & GPS_FLAG_BATTERY_LOW) { /* nur informativ, Battery-Char liefert %-Wert */ }
-    refreshActiveScreen();
+    screenNeedsRefresh = true; // NICHT refreshActiveScreen() direkt: läuft im NimBLE-Task, nicht im loop()-Task (siehe Kommentar bei der Deklaration)
 }
 
 static void onBatteryNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
     if (len < 1) return;
     phoneBatteryPct = data[0];
-    refreshActiveScreen();
+    screenNeedsRefresh = true;
 }
 
 static void onHapticNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
     if (len < 1) return;
-    triggerHaptic(data[0]);
+    pendingHapticCode = data[0]; // triggerHaptic() fasst I2C an -> erst im loop()-Task ausführen
 }
 
 static void onHomeStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
@@ -316,7 +328,7 @@ static void onHomeStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, siz
     homeData.maneuverNeeded = (flags & HOME_FLAG_MANEUVER) != 0;
     homeData.etaMinutes = (eta == 0xFFFF) ? -1 : (int)eta;
     homeData.haveData = true;
-    refreshActiveScreen();
+    screenNeedsRefresh = true;
 }
 
 static void onWindNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
@@ -328,7 +340,7 @@ static void onWindNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t le
     windData.dirDeg = (dirDdeg == 0xFFFF) ? -1 : (dirDdeg / 10.0);
     windData.trendDeg = trendDdeg / 10.0;
     windData.haveData = true;
-    refreshActiveScreen();
+    screenNeedsRefresh = true;
 }
 
 static void onRaceStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
@@ -342,7 +354,7 @@ static void onRaceStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, siz
     raceData.isTack = (maneuverFlags & MANEUVER_FLAG_IS_TACK) != 0;
     raceData.competitionLeg = (leg == 0xFF) ? -1 : (int)leg;
     raceData.haveData = true;
-    refreshActiveScreen();
+    screenNeedsRefresh = true;
 }
 
 /**
@@ -358,23 +370,44 @@ static void onRaceStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, siz
  * Wind/Menü bleiben nur per manuellem Wisch erreichbar (z.B. an Land vor
  * dem Versiegeln der Uhr).
  */
+// Merkt sich den zuletzt erzwungenen "zeitkritischen" Tab (-1 = keiner) --
+// für die Flankenerkennung in autoFocusTick() unten.
+static int lastAutoFocusPriorityTab = -1;
+
 static void autoFocusTick() {
     if (appMode != MODE_SEGELN || tabview == nullptr) return;
 
-    int desiredTab;
+    int priorityTab = -1; // -1 = gerade kein zeitkritischer Zustand aktiv
     if (raceData.haveData && raceData.maneuverNeeded) {
-        desiredTab = 4; // tabManeuver
+        priorityTab = 4; // tabManeuver
     } else if (raceData.haveData && raceData.raceState == 1 /* COUNTDOWN */) {
-        desiredTab = 3; // tabCountdown
+        priorityTab = 3; // tabCountdown
     } else if (homeData.haveData && homeData.active) {
-        desiredTab = 2; // tabHome
-    } else {
-        desiredTab = 0; // tabNav
+        priorityTab = 2; // tabHome
     }
 
-    if ((int)lv_tabview_get_tab_act(tabview) != desiredTab) {
-        lv_tabview_set_active(tabview, desiredTab, LV_ANIM_ON);
+    int activeTab = (int)lv_tabview_get_tab_act(tabview);
+
+    if (priorityTab != -1) {
+        // Zeitkritisch -> IMMER durchsetzen, überschreibt auch manuelle
+        // Navigation (Sicherheit/Rechtzeitigkeit geht vor Bedienkomfort).
+        if (activeTab != priorityTab) {
+            lv_tabview_set_active(tabview, priorityTab, LV_ANIM_ON);
+        }
+    } else if (lastAutoFocusPriorityTab != -1) {
+        // Bugfix 06.08.2026: gerade eben noch zeitkritisch, jetzt nicht mehr
+        // -> EINMALIG auf Nav als "ruhigen Standard" zurückfallen (Flanke).
+        // Vorher wurde das bei JEDEM Tick erzwungen (~1x/s durch echte
+        // BLE-Notifies vom Handy), auch wenn der Nutzer längst manuell zu
+        // Wind/Heim/CD/Man/Menu gewechselt hatte -> alle Tabs ausser Nav
+        // waren praktisch unbedienbar, sprangen ständig zurück.
+        if (activeTab != 0) {
+            lv_tabview_set_active(tabview, 0, LV_ANIM_ON);
+        }
     }
+    // Wenn priorityTab == -1 UND vorher auch schon -1 war: nichts tun, der
+    // Nutzer darf frei zwischen allen sechs Tabs navigieren.
+    lastAutoFocusPriorityTab = priorityTab;
 }
 
 /** Sendet einen CMD_*-Steuerbefehl ans Handy (optional +1 Byte Payload, z.B. Waypoint-ID). */
@@ -392,7 +425,10 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient *pClient) override {
         Serial.println("[BLE] Verbunden mit Handy");
         disconnectAtMs = 0;
-        switchToMode(MODE_SEGELN);
+        // NICHT switchToMode() direkt: lv_screen_load() aus dem NimBLE-Task
+        // heraus race't gegen lv_timer_handler() im loop()-Task -> Absturz.
+        // Nur Flag setzen, bleTick() im loop() erledigt den echten Wechsel.
+        pendingConnectSwitchToSegeln = true;
     }
     void onDisconnect(NimBLEClient *pClient, int reason) override {
         Serial.printf("[BLE] Verbindung getrennt (Reason %d)\n", reason);
@@ -402,7 +438,7 @@ class ClientCallbacks : public NimBLEClientCallbacks {
         // SEGELN_FALLBACK_GRACE_MS) werden toleriert, appModeTick() im
         // loop() übernimmt den eigentlichen Rückfall nach Ablauf der Frist.
         disconnectAtMs = millis();
-        refreshActiveScreen();
+        screenNeedsRefresh = true; // s.o.: kein direkter LVGL-Aufruf aus dem NimBLE-Task
     }
 };
 static ClientCallbacks clientCallbacks;
@@ -428,6 +464,13 @@ static bool subscribe(NimBLERemoteService *svc, const char *uuid, NimBLERemoteCh
 }
 
 static bool connectToServer() {
+    if (bleClient != nullptr) {
+        // Leck-Fix: bisher wurde bei jedem Reconnect ein neuer Client angelegt,
+        // ohne den alten freizugeben (NimBLEDevice::deleteClient() fehlte) —
+        // bei wiederholten Verbindungsabbrüchen wächst der Heap unbegrenzt.
+        NimBLEDevice::deleteClient(bleClient);
+        bleClient = nullptr;
+    }
     bleClient = NimBLEDevice::createClient();
     bleClient->setClientCallbacks(&clientCallbacks, false);
     if (!bleClient->connect(foundDevice)) {
@@ -479,7 +522,7 @@ static void bleTick() {
     if (doConnect) {
         doConnect = false;
         connectToServer();
-        refreshActiveScreen();
+        screenNeedsRefresh = true;
     }
     if (!bleConnected && !NimBLEDevice::getScan()->isScanning()) {
         uint32_t now = millis();
@@ -487,6 +530,23 @@ static void bleTick() {
             lastScanAttemptMs = now;
             NimBLEDevice::getScan()->start(2000, false);
         }
+    }
+
+    // Alles, was NimBLE-Callbacks (eigener Task!) nur als Flag/Daten
+    // hinterlassen haben, wird hier im loop()-Task nachgeholt — sicher für
+    // LVGL und I2C (Haptik), siehe Kommentar bei den Flag-Deklarationen.
+    if (pendingConnectSwitchToSegeln) {
+        pendingConnectSwitchToSegeln = false;
+        switchToMode(MODE_SEGELN);
+    }
+    if (pendingHapticCode >= 0) {
+        int code = pendingHapticCode;
+        pendingHapticCode = -1;
+        triggerHaptic(code);
+    }
+    if (screenNeedsRefresh) {
+        screenNeedsRefresh = false;
+        refreshActiveScreen();
     }
 }
 
@@ -1272,6 +1332,11 @@ static lv_obj_t *tabNav, *tabWind, *tabHome, *tabCountdown, *tabManeuver, *tabMe
 // Statusleiste (oben, immer sichtbar)
 static lv_obj_t *lblBleStatus;
 static lv_obj_t *lblPhoneBattery;
+static lv_obj_t *lblStatusClock; // Bugfix 06.08.2026: RTC wird per BLE synchronisiert,
+                                  // war aber im Segeln-Modus nirgends sichtbar (nur der
+                                  // grosse Alltags-Screen-Clock, der beim Verbinden
+                                  // verschwindet) -- deshalb hier zusätzlich in der
+                                  // Statusleiste, die auf JEDEM Screen sichtbar ist.
 
 // Kompass/Nav-Tab
 static lv_obj_t *lblCogSog;
@@ -1307,6 +1372,9 @@ static void statusBarUpdate() {
     } else {
         lv_label_set_text(lblPhoneBattery, "Bat --");
     }
+    struct tm timeinfo;
+    instance.rtc.getDateTime(&timeinfo);
+    lv_label_set_text_fmt(lblStatusClock, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
 }
 
 static void navScreenUpdate() {
@@ -1847,6 +1915,9 @@ static void buildUi() {
     lblPhoneBattery = lv_label_create(lv_layer_top());
     lv_obj_set_style_text_font(lblPhoneBattery, &lv_font_montserrat_20, 0);
     lv_obj_align(lblPhoneBattery, LV_ALIGN_TOP_RIGHT, -14, 10);
+    lblStatusClock = lv_label_create(lv_layer_top());
+    lv_obj_set_style_text_font(lblStatusClock, &lv_font_montserrat_20, 0);
+    lv_obj_align(lblStatusClock, LV_ALIGN_TOP_MID, 0, 10);
 
     // Quick-Message-Overlay, ebenfalls auf layer_top - standardmässig
     // versteckt, wird nur bei eingehender Frage/frischer Antwort eingeblendet

@@ -6,8 +6,48 @@
 > nicht fertig/getestet ist, damit die nächste Session direkt weitermachen
 > kann, statt von vorne zu suchen.
 
+## ✅ 06.08.2026 (Folgesession): BLE Ultra↔Handy zum ersten Mal getestet — 3 Bugs gefixt
+
+Erster echter Verbindungstest Ultra↔Handy (siehe Punkt oben, war bis dahin
+komplett ungetestet). Dabei aufgetreten und gefixt, alle drei in
+`Segeluhr_TWatch_Ultra.ino`, kompiliert + geflasht (COM17), noch nicht über
+eine längere Session/echten Segeltörn verifiziert:
+
+- **Absturz beim Verbinden**: BLE-Notify-/Connect-Callbacks (eigener
+  NimBLE-FreeRTOS-Task) riefen LVGL-Funktionen (`lv_screen_load`,
+  `lv_label_set_text`, ...) und I2C-Haptik direkt auf — Race gegen
+  `lv_timer_handler()` im `loop()`-Task. Jetzt entkoppelt: Callbacks setzen
+  nur noch Flags/Daten (`screenNeedsRefresh`, `pendingConnectSwitchToSegeln`,
+  `pendingHapticCode`), `bleTick()` im `loop()` erledigt die eigentliche
+  Arbeit. Nebenfund: `bleClient` wurde bei jedem Reconnect neu angelegt ohne
+  `NimBLEDevice::deleteClient()` auf den alten — jetzt gefixt (war ein
+  Speicherleck bei wiederholten Verbindungsabbrüchen).
+- **Segeln-Tabs (Wind/Heim/CD/Man) sprangen ständig zurück zu Nav**:
+  `autoFocusTick()` erzwang bei JEDEM Tick (~1x/s durch echte BLE-Notifies)
+  den "Ruhezustand" Nav, sobald nichts akut Wichtiges lief — überschrieb
+  damit jede manuelle Navigation. Umgebaut auf Flankenerkennung: Nav wird
+  nur noch einmalig erzwungen, wenn ein zeitkritischer Zustand (Manöver/
+  Countdown/Heimweg) gerade endet, nicht mehr bei jedem Tick.
+- **Keine Uhrzeit im Segeln-Modus sichtbar**: der grosse Alltags-Clock
+  existiert nur im Alltag-Screen, verschwindet beim automatischen Wechsel
+  in den Segeln-Modus. BLE-Zeit-Sync selbst funktionierte bereits korrekt
+  (RTC wurde richtig gestellt), war nur nirgends angezeigt. Jetzt zusätzlich
+  kleine Uhrzeit in der globalen Statusleiste (oben mittig, auf jedem
+  Screen sichtbar).
+
 ## 🔴 Als Nächstes testen (höchste Priorität)
 
+- **S3 (Land-Uhr) zeigt eine falsche/alte Zeit an, die sich nicht mehr
+  aktualisiert** (06.08. beim heutigen Test aufgefallen). Verdacht: der
+  LoRa-Zeit-Sync in `Segeluhr_TWatch_S3.ino` (`loraReceiveTick()`, Flag
+  `timeSyncedFromBoat`) synct bewusst nur EINMAL pro Boot der S3 — falls
+  das erste empfangene `LoRaStatusPacket` zufällig noch vor dem BLE-Sync
+  der Ultra ankam (`timeHour == 0xFF`) oder aus einem der vielen
+  Test-Reflashes heute einen veralteten Wert enthielt, bleibt die S3 auf
+  diesem falschen Stand hängen, weil weitere Pakete ignoriert werden. Noch
+  nicht untersucht/gefixt — vermutlich reicht ein RST der S3 (frischer Boot,
+  frischer Erst-Sync), langfristig evtl. besser: laufend synchronisieren
+  statt nur einmal, oder zumindest bei grosser Abweichung nachsynchronisieren.
 - **Tab-Leisten-Fix auf der Ultra (94px Höhe) ist UNGETESTET** — letzte
   Änderung der Session, danach nicht mehr geflasht-und-geprüft. Bitte als
   Erstes morgen: RST drücken, Segeln- und Alltag-Screen durchklicken, prüfen
@@ -17,9 +57,6 @@
   und `lv_tabview_set_tab_bar_size(...)` in `buildSegelnScreen()` /
   `buildAlltagScreen()` weiter anpassen (beide Werte sind an zwei Stellen
   dupliziert, siehe Kommentare im Code).
-- **BLE-Verbindung Ultra ↔ Handy** — heute komplett ungetestet. Nur
-  Uhr-zu-Uhr-LoRa wurde geprüft. `currentBoatState` war die ganze Session
-  über `IDLE`, weil kein Handy verbunden war.
 
 ## 🟡 Gestensteuerung — unkalibriert, nur ein Messpunkt
 
