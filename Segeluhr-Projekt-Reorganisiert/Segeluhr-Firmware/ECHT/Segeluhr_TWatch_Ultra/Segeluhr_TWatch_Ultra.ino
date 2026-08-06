@@ -683,6 +683,11 @@ void handleIncomingQuickMessageRequest(const QuickMessageRequest &req) {
     incomingRequest = req;
     triggerHaptic(HAPTIC_STEP1); // kurze Vibration - nicht beim 30s-Status, nur hier
     updateQuickOverlay();
+    // Standby-Aufwecken (siehe docs/Erweiterung_Standby_Wecken.md Abschnitt 2):
+    // eine eingehende Frage darf nicht unbemerkt bleiben, weil der Screen aus
+    // ist - unabhaengig von Geste/Touch aufwecken.
+    lv_display_trigger_activity(NULL);
+    wakeDisplay();
 }
 
 void onButtonShortPress() {
@@ -808,12 +813,50 @@ static void buttonTick() {
     bool down = (digitalRead(CUSTOM_BUTTON_PIN) == LOW);
     if (down && !buttonWasDown) {
         buttonDownAtMs = millis();
+        lv_display_trigger_activity(NULL); // siehe Standby-Abschnitt weiter unten: Knopf zaehlt als Interaktion
     } else if (!down && buttonWasDown) {
         unsigned long heldMs = millis() - buttonDownAtMs;
         if (heldMs >= BUTTON_LONG_PRESS_MS) onButtonLongPress();
         else onButtonShortPress();
     }
     buttonWasDown = down;
+}
+
+// ---- Standby: Display-Aus nach 30s Inaktivitaet (siehe docs/Erweiterung_Standby_Wecken.md) ----
+// WICHTIG: das ist NICHT dasselbe wie cbShutdown()/instance.sleep() weiter
+// unten (echter ESP32-Deep-Sleep, haelt u.a. LoRa/BLE komplett an, nur per
+// Knopf/Krone aufweckbar). Hier geht es nur um das Display - LoRa-Empfang,
+// Statuslogik, BLE etc. laufen im Hintergrund unveraendert weiter (siehe
+// Doku Abschnitt 2: "Restliche Logik laeuft im Hintergrund normal weiter").
+// instance.sleepDisplay()/wakeupDisplay() (LilyGoLib) schalten nur die
+// AMOLED-Anzeige ab (~10mA laut Doku-Kommentar in LilyGoWatchUltra.h),
+// CPU/Sensoren/Funk bleiben aktiv.
+//
+// "Aktivitaet" = irgendeine LVGL-Eingabe (Touch, hier kaum genutzt) ODER
+// lv_display_trigger_activity(NULL), das wir manuell bei Knopfdruck (siehe
+// buttonTick() oben) und bei erkannter Handgelenk-Heben-Geste (siehe
+// gestureTick() unten) aufrufen - dieselbe LVGL-Inaktivitaetsuhr deckt so
+// alle Interaktionsarten einheitlich ab, ohne separate Timer je Quelle.
+static bool displayAsleep = false;
+static const unsigned long STANDBY_TIMEOUT_MS = 30000;
+
+static void wakeDisplay() {
+    if (!displayAsleep) return;
+    instance.wakeupDisplay();
+    displayAsleep = false;
+    Serial.println("[Standby] Display aufgeweckt");
+}
+
+static void standbyTick() {
+    uint32_t inactiveMs = lv_display_get_inactive_time(NULL);
+    if (!displayAsleep && inactiveMs >= STANDBY_TIMEOUT_MS) {
+        instance.sleepDisplay();
+        displayAsleep = true;
+        Serial.println("[Standby] Display nach 30s Inaktivitaet ausgeschaltet (Hintergrundlogik laeuft weiter)");
+    } else if (displayAsleep && inactiveMs < STANDBY_TIMEOUT_MS) {
+        // Inaktivitaetsuhr wurde zurueckgesetzt (Knopf oder Geste, siehe oben) -> aufwecken
+        wakeDisplay();
+    }
 }
 
 // ---- Gesten-Erkennung: Klio (trainiert) mit Schwellenwert-Fallback ----
@@ -1141,10 +1184,22 @@ static void gestureTick() {
                           GESTURE_TILT_TARGET_ANGLE_DEG, GESTURE_TILT_TOLERANCE_DEG,
                           klioPatternTrained[0] ? "nein, Klio uebernimmt JA" : "ja");
         }
+        bool tiltDetected = fabsf(pitch - GESTURE_TILT_TARGET_ANGLE_DEG) <= GESTURE_TILT_TOLERANCE_DEG;
+
+        // Standby-Aufwecken (siehe docs/Erweiterung_Standby_Wecken.md): dieselbe
+        // Handgelenk-Heben-Erkennung wie fuer die JA-Antwort, aber UNGEGATET
+        // (auch ohne offene Frage) - LilyGoLib/BHI260AP bringt laut Doku keine
+        // fertige "Wrist Tilt to Wake"-Funktion mit (anders als S3/BMA423, siehe
+        // dortiges enableTiltIRQ()), deshalb Wiederverwendung dieser einfacheren,
+        // nicht trainierten Pitch-Schwelle statt eines eigenen Klio-Musters.
+        if (tiltDetected) {
+            lv_display_trigger_activity(NULL);
+            if (displayAsleep) wakeDisplay();
+        }
+
         // Nur auswerten, solange fuer JA noch KEIN Klio-Muster trainiert ist -
         // sonst uebernimmt onKlioRecognitionEvent() komplett (kein Doppel-Trigger).
-        if (!klioPatternTrained[0] && haveIncomingQuestion &&
-            fabsf(pitch - GESTURE_TILT_TARGET_ANGLE_DEG) <= GESTURE_TILT_TOLERANCE_DEG) {
+        if (!klioPatternTrained[0] && haveIncomingQuestion && tiltDetected) {
             onGestureTiltUp();
             lastGestureLogMs = millis();
             return;
@@ -1834,6 +1889,7 @@ void loop() {
     buttonTick();
     gestureTick();
     gestureTrainingSerialTick();
+    standbyTick();
 
     lv_timer_handler();
     delay(5);

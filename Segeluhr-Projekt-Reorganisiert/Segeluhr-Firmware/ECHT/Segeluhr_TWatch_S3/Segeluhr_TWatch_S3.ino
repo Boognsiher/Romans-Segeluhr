@@ -178,6 +178,52 @@ static void sendQuickAnswer(QuickAnswer answer) {
     updateQuickOverlay();
 }
 
+// ---- Standby: Display-Aus nach 30s Inaktivitaet (siehe docs/Erweiterung_Standby_Wecken.md) ----
+// WICHTIG: nur das Display geht aus - LoRa-Empfang/Statuslogik laufen im
+// Hintergrund unveraendert weiter (Doku Abschnitt 2). Aufwecken hier per
+// Touch (LVGL-Eingabeaktivitaet laeuft automatisch mit, S3 ist touch-
+// primaer, siehe Doku "Land-Uhr: nur Touch, keine Geste") ODER per
+// Handgelenk-Heben-Geste - dafuer bringt der BMA423 (anders als der
+// BHI260AP der Ultra) eine fertige Hardware-Tilt-Erkennung mit
+// (SensorBMA423::enableTiltIRQ()/isTilt()), die LilyGoLib fuer die S3
+// bereits vollstaendig konfiguriert (instance.begin() -> initSensor(),
+// siehe LilyGoWatchS3.cpp) und als SENSOR_TILT_DETECTED-Event ueber das
+// eingebaute Event-System (LilyGoEventManage) meldet - kein eigener
+// Schwellenwert-Code noetig (anders als bei der Ultra, die kein
+// vergleichbares BHI260AP-Standardfeature hat).
+static bool displayAsleep = false;
+static const unsigned long STANDBY_TIMEOUT_MS = 30000;
+
+static void wakeDisplay() {
+    if (!displayAsleep) return;
+    instance.wakeupDisplay();
+    displayAsleep = false;
+    Serial.println("[Standby] Display aufgeweckt");
+}
+
+static void standbyTick() {
+    uint32_t inactiveMs = lv_display_get_inactive_time(NULL);
+    if (!displayAsleep && inactiveMs >= STANDBY_TIMEOUT_MS) {
+        instance.sleepDisplay();
+        displayAsleep = true;
+        Serial.println("[Standby] Display nach 30s Inaktivitaet ausgeschaltet (LoRa-Empfang laeuft weiter)");
+    } else if (displayAsleep && inactiveMs < STANDBY_TIMEOUT_MS) {
+        wakeDisplay();
+    }
+}
+
+// Reagiert auf Sensor-Events von LilyGoLib (u.a. Tilt vom BMA423, siehe
+// instance.onEvent()-Registrierung in setup()). Nur Tilt ist hier relevant -
+// andere BMA423-Features (Schrittzaehler etc., LilyGoLib aktiviert sie
+// bereits pauschal mit) sind Teil von docs/Erweiterung_S3_Alltagsfunktionen.md,
+// dort noch zu verkabeln.
+static void onDeviceSensorEvent(DeviceEvent_t event, void *params, void *user_data) {
+    if (event != SENSOR_EVENT) return;
+    if (instance.getSensorEventType(params) != SENSOR_TILT_DETECTED) return;
+    lv_display_trigger_activity(NULL);
+    if (displayAsleep) wakeDisplay();
+}
+
 // Anders als bei der Boots-Uhr gibt es hier KEINE Auto-Regatta-Antwort -
 // die Land-Uhr beantwortet nie automatisch, der/die Crew soll die Frage
 // immer sehen (siehe Doku Abschnitt 5, Auto-Antwort ist boots-spezifisch).
@@ -187,6 +233,10 @@ static void handleIncomingQuickMessageRequest(const QuickMessageRequest &req) {
     Serial.printf("[Quick-Msg RX] Frage vom Boot: seq=%d %s\n", req.sequence, quickQuestionText(req.question));
     vibrateIncomingQuestion();
     updateQuickOverlay();
+    // Standby-Aufwecken (siehe docs/Erweiterung_Standby_Wecken.md Abschnitt 2):
+    // eine eingehende Frage darf nicht unbemerkt bleiben, weil der Screen aus ist.
+    lv_display_trigger_activity(NULL);
+    wakeDisplay();
 }
 
 // Touch-Buttons "JA"/"NEIN" im Overlay - primärer und einziger Weg auf der
@@ -612,6 +662,10 @@ void setup() {
     buildUi();
 
     setupLoRaTransceiver();
+
+    // Standby/Wecken (siehe docs/Erweiterung_Standby_Wecken.md): auf
+    // SENSOR_EVENT (u.a. BMA423-Tilt) hoeren, siehe onDeviceSensorEvent().
+    instance.onEvent(onDeviceSensorEvent, SENSOR_EVENT, nullptr);
 }
 
 static unsigned long lastScreenTickMs = 0;
@@ -621,6 +675,7 @@ void loop() {
 
     loraReceiveTick();
     checkQuickMessageTimeout();
+    standbyTick();
 
     // 1Hz-Tick fürs Uhrzeit-/Verbindungsalter-Update (Status ändert sich
     // sonst nur bei Paketempfang, aber Uhrzeit und "Xs her" müssen auch
