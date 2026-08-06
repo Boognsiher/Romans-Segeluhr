@@ -4,8 +4,11 @@
 > auf: `GESTURE_TILT_TARGET_ANGLE_DEG`/`GESTURE_SHAKE_MIN_AMPLITUDE` beruhten
 > auf einer einzigen Schreibtisch-Messung, nicht auf echten Segelbedingungen.
 
-## Status: KONZEPT — Claude Code setzt das gegen den aktuellen Stand von
-`Segeluhr_TWatch_Ultra.ino` um, ich habe keinen Einblick in den Code selbst.
+## Status: 🔧 UMGESETZT, KOMPILIERT (06.08.2026) — noch nicht auf Hardware
+getestet. Serial-Kommando-Training (Abschnitt 2/4) implementiert und gegen
+den echten SensorLib-Quelltext geprüft, siehe Abschnitt 6 (Technische
+Umsetzung, aktualisiert) für Details und zwei dabei gefundene, für den
+nächsten Hardware-Test wichtige Punkte.
 
 > Bootstyp-Kontext: Musto Skiff (Einhand-Trapez-Skiff mit Steuerknüppel-
 > Verlängerung/Tiller Extension und Spinnaker) — Details aus dem offiziellen
@@ -97,55 +100,90 @@ Trainings-Wiederholungen + anschließend kurzer Fehlalarm-Test in genau
 dieser Haltung, dann zur nächsten Kombination wechseln), Wende/Halse-
 Fehlalarmtests am Ende separat als eigener Block.
 
-## 4. Technische Umsetzung (Claude Code prüft exakte API gegen SensorLib)
+## 4. Technische Umsetzung (implementiert, `Segeluhr_TWatch_Ultra.ino`)
 
-Groborientierung, exakte Funktionsnamen bitte gegen die tatsächlichen
-SensorLib-Klio-Beispiele verifizieren (Pfad vermutlich `Sensors/IMU/BHI260AP/`
-im SensorLib-Repo, Klio-Beispiel-Sketch):
+Echte API aus `SensorLib` (Klasse `SensorBHI260AP_Klio`, geprüft gegen
+`src/SensorBHI260AP_Klio.{hpp,cpp}` und die Beispiele
+`BHI260AP_Klio_{Recognition,Selflearning}`), kein Pseudocode mehr:
 
 ```cpp
-// Grober Ablauf, Pseudocode - echte API-Namen in SensorLib pruefen:
+// Klio-Pattern-IDs (bewusst uint8_t-Konstanten statt enum class, siehe
+// Kommentar im Code - Arduino-Prototyp-Generierung bricht sonst)
+static const uint8_t GESTURE_ID_JA = 1;
+static const uint8_t GESTURE_ID_NEIN = 2;
 
-enum class TrainingTarget { JA, NEIN };
-
-void startGestureTraining(TrainingTarget target) {
-    // Klio in Lern-Modus versetzen fuer den gewaehlten Pattern-Slot
-    // (JA und NEIN als zwei getrennte Klio-Pattern-IDs)
-}
-
-void recordTrainingSample() {
-    // Aktuelle Sensor-Sequenz als ein Trainings-Sample an Klio uebergeben
-    // Rueckmeldung (Haptik) sobald Sample akzeptiert wurde
-}
-
-void finalizeTraining(TrainingTarget target) {
-    // Klio-Pattern aus den gesammelten Samples erzeugen lassen
-    // Pattern-Daten persistieren (Flash/NVS), damit sie einen Reboot
-    // ueberleben - Klio-Patterns muessen vermutlich explizit
-    // gespeichert/geladen werden, nicht automatisch persistent
-}
-
-QuickAnswer runGestureRecognition() {
-    // Laufende Sensordaten gegen trainierte Patterns pruefen
-    // Rueckgabe: JA/NEIN falls erkannt (mit Konfidenz-Schwelle),
-    // PENDING falls nichts erkannt wurde
-}
+startGestureTraining(GESTURE_ID_JA)  // -> klio.setState(learning=true, reset=true, recognition=false, ...)
+onKlioLearningEvent(...)             // Callback: Fortschritt 0-100%, bei Abschluss -> finalizeGestureTraining()
+finalizeGestureTraining(learnIndex)  // -> klio.getLearnPattern() + klio.writePattern(id,...) + NVS-Persistenz
+onKlioRecognitionEvent(pattern_id, count, ...) // laufende Erkennung, gated hinter haveIncomingQuestion
 ```
 
+Kein "recordTrainingSample()" nötig, wie in der ersten (Pseudocode-)Version
+dieser Doku vermutet: Klio erkennt Wiederholungen selbst aus dem laufenden
+Sensor-Datenstrom während `learning()` aktiv ist - der Trainingsfortschritt
+(0-100%) kommt automatisch über den Learning-Callback, keine manuelle
+"Sample jetzt aufnehmen"-Aktion pro Wiederholung nötig.
+
+### Serial-Kommandos (siehe Abschnitt 2)
+`TRAIN JA` / `TRAIN NEIN` (Training starten), `TRAIN CANCEL` (abbrechen,
+auch automatisch nach 60s ohne Ergebnis), `TRAIN STATUS` (aktueller Stand),
+`TRAIN RESET JA` / `TRAIN RESET NEIN` (gespeichertes Muster löschen, neu
+trainieren). Serieller Monitor bei 115200 Baud.
+
+### Persistenz
+Klio vergisst gelernte Muster bei Stromverlust (laufen im RAM des
+BHI260AP-Sensorchips) - Rohdaten (`klio.getLearnPattern()`, max. 252 Byte)
+werden deshalb zusätzlich per `Preferences` (ESP32-NVS, Namespace `klio`,
+Keys `ja`/`nein`) auf dem ESP32 selbst abgelegt und bei jedem Boot per
+`klio.writePattern()` zurück in den Sensor geschrieben (`restoreKlioPatterns()`).
+
+### Zusammenspiel mit dem Schwellenwert-Fallback
+Pro Geste (JA/NEIN) unabhängig: solange für eine Geste noch KEIN
+Klio-Muster gespeichert ist, bleibt der alte Schwellenwert-Code
+(`GESTURE_TILT_TARGET_ANGLE_DEG`/`GESTURE_SHAKE_MIN_AMPLITUDE`) für genau
+diese Geste aktiv. Sobald trainiert, übernimmt Klio komplett (kein
+Doppel-Trigger) - kein globaler Umschalter, jede Geste einzeln.
+
+### Gefundene Probleme beim Umsetzen (wichtig für den nächsten Hardware-Test)
+
+1. **`USING_BHI260_SENSOR` war nie definiert.** Der komplette
+   Gesten-/BHI260-Code stand zwar schon im Repo, aber ohne dieses Compile-Gate
+   (das laut LilyGoLib-Beispielen vom Sketch selbst gesetzt werden muss, nicht
+   automatisch vom Board-Paket) wurden ausschließlich Stub-Funktionen
+   kompiliert. Der im Code dokumentierte Messwert "Pitch -30° beim
+   Hochschauen" vom 05.08. kann also nicht aus dieser Firmware stammen - vor
+   dem nächsten Wassertest neu verifizieren, nicht blind übernehmen. Jetzt in
+   `Segeluhr_TWatch_Ultra.ino` gesetzt.
+2. **LilyGoLib lädt standardmäßig NICHT die Klio-fähige BHI260-Firmware.**
+   `instance.begin()` lädt für die T-Watch Ultra die `BOSCH_BHI260_GPIO`-
+   Firmware (kein Klio-Support) - die Klio-Firmware (`BOSCH_BHI260_KLIO`)
+   wird nur geladen, wenn `USING_XL9555_EXPANDS` gesetzt ist, was laut
+   `boards.txt` für die T-Watch Ultra nirgends passiert. Die Firmware wird
+   deshalb jetzt nach `instance.begin()` explizit per
+   `instance.sensor.uploadFirmware(...)` durch die Klio-Variante ersetzt
+   (`setupGestureSensor()`), BEVOR die bestehenden Passthrough-/Quaternion-
+   Sensoren aktiviert werden. **Noch nicht auf Hardware verifiziert**, ob
+   die Klio-Firmware weiterhin `ACCEL_PASSTHROUGH`/Quaternion unterstützt
+   (für den Schwellenwert-Fallback) - sollte laut Bosch-Doku der Fall sein
+   (Klio ist ein Zusatz-Algorithmus, kein Ersatz der Basis-Sensoren), aber
+   ausdrücklich noch nicht am Gerät bestätigt.
+
 ### Offene technische Punkte
-- [ ] Exakte Klio-API in SensorLib verifizieren (Funktionsnamen,
-  Pattern-Anzahl-Limit, ob Persistenz über Reboot eingebaut ist oder
-  manuell in Flash geschrieben werden muss)
-- [ ] Konfidenz-Schwelle für "erkannt" festlegen (Klio liefert vermutlich
-  einen Score/Wahrscheinlichkeitswert zurück, nicht nur ja/nein)
-- [ ] Verhältnis zum bisherigen Schwellenwert-Ansatz (`GESTURE_TILT_TARGET_ANGLE_DEG`
-  etc.): als Fallback behalten, falls Klio-Training fehlschlägt oder das
-  Gerät neu aufgesetzt wird, bevor neu trainiert wurde
-- [ ] Wie das Serial-Kommando/die Ablaufsteuerung genau aussieht (z.B.
-  `TRAIN JA`/`TRAIN NEIN` eintippen, oder Knopfdruck-Sequenz als Alternative
-  ohne USB-Kabel während der Session)
-- [ ] Debug-Logging (`[Gesten]`-Präfix, schon vorhanden) um Klio-Konfidenz-
-  Werte ergänzen, damit der Fehlalarm-Test in Abschnitt 3 auswertbar ist
+- [x] Exakte Klio-API in SensorLib verifiziert (siehe oben) - Pattern-Limit
+  über `klio.getMaxPatterns()` zur Laufzeit abfragbar, Persistenz ist NICHT
+  eingebaut (siehe "Persistenz" oben, musste manuell gebaut werden)
+- [ ] Konfidenz-Schwelle: `onKlioRecognitionEvent()` bekommt `count` (laut
+  SensorLib-Doku "current repetition count", keine 0-1-Konfidenz) - noch zu
+  klären, ob/wie damit Fehlalarme von echten Treffern unterschieden werden
+  sollen, oder ob ein einzelner Recognition-Event (unabhängig von `count`)
+  bereits ausreicht (aktuell so implementiert: jeder Event triggert)
+- [x] Verhältnis zum Schwellenwert-Ansatz geklärt: bleibt pro Geste
+  unabhängig als Fallback aktiv, bis für genau diese Geste trainiert wurde
+  (siehe oben)
+- [x] Serial-Kommandos festgelegt und implementiert (siehe oben)
+- [x] Debug-Logging um Klio-Ausgaben ergänzt (`[Klio]`-Präfix, inkl.
+  Recognition-Events unabhängig von `haveIncomingQuestion` fürs
+  Fehlalarm-Testen aus Abschnitt 3)
 
 ## 5. Warum nicht einfach "mehr Schwellenwerte austesten"
 Das war der gestrige Ansatz und genau daran ist die Kalibrierung

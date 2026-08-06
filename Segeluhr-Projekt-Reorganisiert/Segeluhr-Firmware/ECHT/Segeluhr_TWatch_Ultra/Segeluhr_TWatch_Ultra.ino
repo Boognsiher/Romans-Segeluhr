@@ -44,6 +44,7 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include <Preferences.h> // NVS-Persistenz fuer trainierte Klio-Gesten-Muster
 #include <LilyGoLib.h>
 #include <LV_Helper.h>
 #include <NimBLEDevice.h>
@@ -51,8 +52,42 @@
 #include "../../shared/QuickMessages.h"
 #include "../../shared/Crypto.h"
 
+// BHI260AP (6-Achsen-IMU) ist nur auf der Ultra verbaut (S3 nutzt fuer
+// Standby/Schrittzaehler den separaten BMA423) - schaltet den Gesten-/
+// Klio-Code weiter unten frei. WICHTIG (Bug gefunden 06.08.2026): dieses
+// Define war in der bisherigen Datei NIE gesetzt, wodurch ausschliesslich
+// die Stub-Varianten von setupGestureSensor()/gestureTick() (siehe #else
+// weiter unten) kompiliert wurden - der komplette Schwellenwert-Gestencode
+// (inkl. der vermeintlichen Pitch-Messung "-30°" vom 05.08., siehe
+// GESTURE_TILT_TARGET_ANGLE_DEG-Kommentar) lief also nie wirklich auf der
+// Hardware. Muss beim naechsten Hardware-Test neu verifiziert werden.
+#define USING_BHI260_SENSOR
+
 #ifdef USING_BHI260_SENSOR
 #include <bosch/BoschSensorDataHelper.hpp>
+#include <SensorBHI260AP_Klio.hpp>
+
+// Klio-faehige BHI260-Firmware separat laden (siehe ausfuehrlicher
+// Kommentar bei setupGestureSensor()): LilyGoLib laedt in instance.begin()
+// standardmaessig NUR die "GPIO"-Firmware (BOSCH_BHI260_GPIO), die laut
+// SensorLib-Klio-Beispielen KEIN Klio unterstuetzt - dafuer muesste
+// USING_XL9555_EXPANDS gesetzt sein, was fuer die T-Watch Ultra laut
+// boards.txt nirgends passiert.
+//
+// In einen anonymen Namespace gepackt: BoschFirmware.h legt u.a.
+// "bosch_firmware_image" als (nicht-const) Zeiger-VARIABLE auf ein
+// const-Array an - anders als das Array selbst hat so ein Zeiger OHNE
+// "const" auf oberster Ebene in C++ externe Verlinkung, kollidiert also
+// beim Linken mit dem gleichnamigen Symbol, das LilyGoWatchUltra.cpp fuer
+// die GPIO-Firmware anlegt ("multiple definition"-Fehler, an genau dieser
+// Stelle einmal falsch angenommen und durch echten Compile-Lauf gefunden).
+// Der anonyme Namespace erzwingt interne Verlinkung unabhaengig von der
+// Const-Frage, macht die Namen aber innerhalb dieser Datei weiterhin ohne
+// Praefix nutzbar.
+namespace {
+#define BOSCH_BHI260_KLIO
+#include <BoschFirmware.h>
+}
 #endif
 
 // ============================================================================
@@ -781,25 +816,64 @@ static void buttonTick() {
     buttonWasDown = down;
 }
 
-// ---- Gesten-Erkennung (Platzhalter, siehe Doku Abschnitt 5) ----
-// API-Namen (SensorXYZ/SensorQuaternion, instance.sensor, .enable(),
-// .hasUpdated(), .getX/Y/Z(), .getPitch()) sind gegen die echten
-// LilyGoLib-Beispiele examples/sensor/BHI260AP_{6DoF,Euler} geprüft, also
-// keine Vermutung. UNKALIBRIERT sind aber die konkreten Schwellenwerte
-// (GESTURE_* unten) - die MÜSSEN auf dem Wasser gegen echtes Segeln
-// (Krängung/Wellenschlag/Schoteinholen) getestet werden, siehe Doku. Bis
-// dahin bleibt der Taster (siehe oben) der zuverlässige Weg.
+// ---- Gesten-Erkennung: Klio (trainiert) mit Schwellenwert-Fallback ----
+// (siehe docs/Erweiterung_Gesten_Training_Klio.md)
+//
+// Zwei unabhängige Erkennungswege je Geste (JA/NEIN):
+//   1. Klio (SensorBHI260AP_Klio) - bevorzugt, SOBALD ein Muster trainiert
+//      + in der NVS gespeichert ist (Pattern-ID 1=JA, 2=NEIN, siehe
+//      GestureTarget). Trainiert wird NUR per Serial-Kommando (TRAIN JA /
+//      TRAIN NEIN), siehe gestureTrainingSerialTick() unten - kein UI auf
+//      der Uhr nötig (Doku Abschnitt 2).
+//   2. Schwellenwert-Fallback (Pitch/Shake, wie bisher) - bleibt für eine
+//      Geste aktiv, SOLANGE für genau diese noch kein Klio-Muster trainiert
+//      ist. Sobald trainiert, übernimmt Klio komplett (kein Doppel-Trigger).
+// API-Namen (SensorXYZ/SensorQuaternion/.enable()/.hasUpdated() sowie die
+// komplette SensorBHI260AP_Klio-Klasse: begin(), setState(), learning(),
+// recognition(), getLearnPattern(), writePattern(), setLearningCallback(),
+// setRecognitionCallback()) sind gegen den SensorLib-Quelltext und die
+// Klio-Beispiel-Sketches (BHI260AP_Klio_{Recognition,Selflearning}) im
+// SensorLib-Repo geprüft, keine Vermutung.
 #ifdef USING_BHI260_SENSOR
 static SensorXYZ gestureAccel(SensorBHI260AP::ACCEL_PASSTHROUGH, instance.sensor);
 static SensorQuaternion gestureQuat(instance.sensor);
+static SensorBHI260AP_Klio klio(instance.sensor);
 static bool bhi260Online = false;
+static bool klioOnline = false;
 
-// Lokale Platzhalter-Schwellenwerte (sensor-/einheitenabhängig, siehe
-// QuickMessages.h-Kommentar - deshalb hier und nicht dort definiert).
-// Erster echter Messwert (05.08.2026, Roman): beim "Hochschauen" ging Pitch
-// auf ca. -30° (nicht +45° wie urspruenglich vermutet - falsches Vorzeichen
-// geraten). Immer noch nur EIN Datenpunkt am Schreibtisch, siehe Doku-
-// Warnung: auf dem Wasser mit echter Trageposition/Krängung nachschärfen.
+// Klio-Pattern-IDs fuer JA/NEIN. Bewusst PLAIN uint8_t-Konstanten statt
+// enum class: Arduino generiert Funktionsprototypen automatisch VOR den
+// eigenen Typdefinitionen im .ino (Einfuegepunkt liegt vor jeglichem Code
+// des Sketches) - ein eigener enum-class-Typ als Funktionsparameter fuehrt
+// dort zu "was not declared in this scope", weil der generierte Prototyp
+// den Typ noch nicht kennt. Mit einfachen Konstanten (wie auch von der
+// Klio-API selbst verwendet, die durchgehend mit uint8_t pattern_id
+// arbeitet) tritt das Problem nicht auf.
+static const uint8_t GESTURE_ID_JA = 1;
+static const uint8_t GESTURE_ID_NEIN = 2;
+static const uint16_t KLIO_PATTERN_BUF_SIZE = 252; // wie im SensorLib-Klio-Beispiel
+
+// Ob für JA/NEIN bereits ein Klio-Muster trainiert+geladen ist. Index 0=JA,
+// 1=NEIN. Solange false: Schwellenwert-Fallback bleibt für genau diese
+// Geste maßgeblich (siehe gestureTick()).
+static bool klioPatternTrained[2] = {false, false};
+
+// Laufender Trainingszustand - ausschließlich per Serial-Kommando gesteuert.
+static bool trainingActive = false;
+static uint8_t trainingTarget = GESTURE_ID_JA; // GESTURE_ID_JA oder GESTURE_ID_NEIN
+static unsigned long trainingStartedMs = 0;
+static const unsigned long TRAINING_TIMEOUT_MS = 60000; // Abbruch, falls nie "fertig" gemeldet
+
+static Preferences gesturePrefs; // NVS-Namespace "klio" (Muster überleben Neustart)
+
+// Lokale Platzhalter-Schwellenwerte für den Fallback (sensor-/einheiten-
+// abhängig, siehe QuickMessages.h-Kommentar - deshalb hier und nicht dort
+// definiert). ACHTUNG: der bisher hier notierte Messwert "-30°" vom
+// 05.08.2026 stammt vermutlich NICHT aus dieser Firmware - USING_BHI260_SENSOR
+// war zu dem Zeitpunkt nachweislich nie gesetzt (siehe Fix-Kommentar beim
+// #define oben), der Gestencode lief also nur als Stub. Vor dem nächsten
+// Wassertest neu verifizieren, nicht blind übernehmen. Ohnehin nur noch
+// Fallback, sobald Klio für die jeweilige Geste trainiert ist.
 static const float GESTURE_TILT_TARGET_ANGLE_DEG = -30.0f; // TODO: weiter kalibrieren
 static const float GESTURE_TILT_TOLERANCE_DEG = 20.0f;     // TODO: weiter kalibrieren
 static const float GESTURE_SHAKE_MIN_AMPLITUDE = 8.0f;    // m/s^2, TODO: auf dem Wasser kalibrieren
@@ -810,6 +884,200 @@ struct ShakeDetectorState {
     unsigned long windowStartMs = 0;
 } shakeDetector;
 
+// ---- Klio: Persistenz (Muster überleben Neustart, siehe Doku Abschnitt 4) ----
+// Klio selbst vergisst gelernte Muster bei Stromverlust (läuft im RAM des
+// Sensor-Chips) - deshalb Rohdaten zusätzlich in der ESP32-NVS ablegen und
+// bei jedem Boot per writePattern() zurück in den Sensor schreiben.
+static void restoreRecognitionAfterTraining() {
+    uint8_t patternIds[2];
+    uint8_t count = 0;
+    if (klioPatternTrained[0]) patternIds[count++] = GESTURE_ID_JA;
+    if (klioPatternTrained[1]) patternIds[count++] = GESTURE_ID_NEIN;
+    if (count > 0) {
+        klio.recognition(patternIds, count);
+    } else {
+        klio.setState(false, false, false, false); // weder Lernen noch Erkennen
+    }
+}
+
+static void restoreKlioPatterns() {
+    gesturePrefs.begin("klio", true); // read-only
+    uint8_t buf[KLIO_PATTERN_BUF_SIZE];
+    const char *keys[2] = {"ja", "nein"};
+    for (uint8_t i = 0; i < 2; i++) {
+        size_t len = gesturePrefs.getBytesLength(keys[i]);
+        if (len == 0 || len > sizeof(buf)) continue;
+        gesturePrefs.getBytes(keys[i], buf, len);
+        uint8_t patternId = i + 1; // 1=JA, 2=NEIN
+        if (klio.writePattern(patternId, buf, (uint16_t)len)) {
+            klioPatternTrained[i] = true;
+            Serial.printf("[Klio] Muster '%s' aus NVS geladen (%u Bytes)\n", keys[i], (unsigned)len);
+        } else {
+            Serial.printf("[Klio] Muster '%s' aus NVS konnte nicht geschrieben werden: %s\n", keys[i], klio.errorToString());
+        }
+    }
+    gesturePrefs.end();
+    if (klioPatternTrained[0] || klioPatternTrained[1]) {
+        restoreRecognitionAfterTraining();
+        Serial.println("[Klio] Erkennung aktiv fuer gespeicherte Muster.");
+    } else {
+        Serial.println("[Klio] Keine gespeicherten Muster - Schwellenwert-Fallback bleibt fuer JA/NEIN aktiv, bis per 'TRAIN JA'/'TRAIN NEIN' trainiert wurde.");
+    }
+}
+
+static void finalizeGestureTraining(int learnIndex) {
+    uint8_t patternBuf[KLIO_PATTERN_BUF_SIZE];
+    uint16_t patternSize = sizeof(patternBuf);
+    if (!klio.getLearnPattern(patternBuf, &patternSize)) {
+        Serial.printf("[Klio] Gelerntes Muster konnte nicht gelesen werden: %s\n", klio.errorToString());
+        trainingActive = false;
+        restoreRecognitionAfterTraining();
+        return;
+    }
+
+    uint8_t targetId = trainingTarget; // 1=JA, 2=NEIN
+    const char *targetName = (trainingTarget == GESTURE_ID_JA) ? "JA" : "NEIN";
+    const char *prefKey = (trainingTarget == GESTURE_ID_JA) ? "ja" : "nein";
+
+    if (!klio.writePattern(targetId, patternBuf, patternSize)) {
+        Serial.println("[Klio] Muster schreiben fehlgeschlagen!");
+        trainingActive = false;
+        restoreRecognitionAfterTraining();
+        return;
+    }
+
+    gesturePrefs.begin("klio", false); // read-write
+    gesturePrefs.putBytes(prefKey, patternBuf, patternSize);
+    gesturePrefs.end();
+
+    klioPatternTrained[targetId - 1] = true;
+    trainingActive = false;
+
+    Serial.printf("[Klio] Muster '%s' fertig trainiert und gespeichert (%u Bytes, ueberlebt Neustart).\n",
+                  targetName, (unsigned)patternSize);
+    Serial.println("[Klio] Kurzer Erkennungstest: Geste jetzt ein paar Mal wiederholen - Ergebnis erscheint hier als '[Klio] Erkannt: ...'.");
+    restoreRecognitionAfterTraining();
+}
+
+static void onKlioLearningEvent(SensorBHI260AP_Klio::LeaningChangeReason reason, uint32_t progress, int learn_index, void *user_data) {
+    if (!trainingActive) return; // Events ausserhalb eines aktiven Trainings ignorieren
+    switch (reason) {
+        case SensorBHI260AP_Klio::LEARNING_PROGRESSING:
+            Serial.printf("[Klio] Trainingsfortschritt: %lu%%\n", (unsigned long)progress);
+            break;
+        case SensorBHI260AP_Klio::LEARNING_NO_REPETITIVE_ACTIVITY:
+            Serial.println("[Klio] Bewegung war nicht wiederholend genug - Geste gleichmaessiger wiederholen und weitermachen.");
+            break;
+        case SensorBHI260AP_Klio::LEARNING_NO_SIGNIFICANT:
+            Serial.println("[Klio] Zu wenig Bewegung erkannt - Geste deutlicher ausfuehren und weitermachen.");
+            break;
+    }
+    if (learn_index != SensorBHI260AP_Klio::INVALID_LEARNING_INDEX) {
+        finalizeGestureTraining(learn_index);
+    }
+}
+
+// Wird bei JEDEM erkannten Klio-Muster aufgerufen, auch ausserhalb einer
+// offenen Frage - Logging bewusst ungegatet, damit der Fehlalarm-Test aus
+// docs/Erweiterung_Gesten_Training_Klio.md Abschnitt 3 (Wende/Halse/
+// Trapez-Ein-Aushaken sollen NICHTS auslösen, aber im Serial-Log sichtbar
+// sein, falls doch) auswertbar ist. Die eigentliche Aktion (Quick-Message-
+// Antwort senden) bleibt wie beim Schwellenwert-Fallback hinter
+// haveIncomingQuestion gated.
+static void onKlioRecognitionEvent(uint8_t pattern_id, float count, void *user_data) {
+    Serial.printf("[Klio] Erkannt: Pattern=%u Count=%.1f (Frage offen: %s)\n",
+                  pattern_id, count, haveIncomingQuestion ? "ja" : "nein");
+    if (!haveIncomingQuestion) return;
+    if (pattern_id == GESTURE_ID_JA) onGestureTiltUp();
+    else if (pattern_id == GESTURE_ID_NEIN) onGestureShake();
+}
+
+static void startGestureTraining(uint8_t target) {
+    if (!bhi260Online) {
+        Serial.println("[Klio] BHI260AP nicht online - Training nicht moeglich.");
+        return;
+    }
+    if (!klioOnline) {
+        Serial.println("[Klio] Klio-Sensor nicht initialisiert - Training nicht moeglich (siehe Boot-Log).");
+        return;
+    }
+    trainingActive = true;
+    trainingTarget = target;
+    trainingStartedMs = millis();
+    Serial.printf("\n[Klio] === Training '%s' gestartet ===\n", target == GESTURE_ID_JA ? "JA" : "NEIN");
+    Serial.println("[Klio] Geste jetzt mehrfach gleichmaessig wiederholen (Kalibrierungs-Protokoll siehe");
+    Serial.println("[Klio] docs/Erweiterung_Gesten_Training_Klio.md Abschnitt 3). Fortschritt erscheint hier.");
+    Serial.println("[Klio] 'TRAIN CANCEL' bricht ab.");
+    // learning_reset=true: fruehere, unvollstaendige Lernversuche verwerfen.
+    // recognition_enable=false: waehrend des Trainings keine alten Muster
+    // erkennen (vermeidet Ja/Nein-Antworten mitten im Training).
+    klio.setState(/*learning_enable=*/true, /*learning_reset=*/true,
+                  /*recognition_enable=*/false, /*recognition_reset=*/false);
+}
+
+static void cancelGestureTraining() {
+    if (!trainingActive) {
+        Serial.println("[Klio] Kein Training aktiv.");
+        return;
+    }
+    Serial.println("[Klio] Training abgebrochen.");
+    trainingActive = false;
+    restoreRecognitionAfterTraining();
+}
+
+static void printGestureTrainingStatus() {
+    Serial.printf("[Klio] JA trainiert: %s | NEIN trainiert: %s | Training aktiv: %s\n",
+                  klioPatternTrained[0] ? "ja" : "nein",
+                  klioPatternTrained[1] ? "ja" : "nein",
+                  trainingActive ? (trainingTarget == GESTURE_ID_JA ? "JA" : "NEIN") : "nein");
+}
+
+static void resetGesturePattern(uint8_t target) {
+    const char *prefKey = (target == GESTURE_ID_JA) ? "ja" : "nein";
+    gesturePrefs.begin("klio", false);
+    gesturePrefs.remove(prefKey);
+    gesturePrefs.end();
+    klioPatternTrained[target - 1] = false;
+    Serial.printf("[Klio] Gespeichertes Muster '%s' geloescht - Schwellenwert-Fallback greift wieder, bis neu trainiert wird.\n",
+                  target == GESTURE_ID_JA ? "JA" : "NEIN");
+    restoreRecognitionAfterTraining();
+}
+
+// ---- Serial-Kommandos fuer den Kalibrierungslauf (siehe Doku Abschnitt 2) ----
+// Bewusst simpler Zeilen-Parser, kein UI auf der Uhr noetig. Kommandos:
+//   TRAIN JA / TRAIN NEIN   - Trainingslauf fuer diese Geste starten
+//   TRAIN CANCEL            - laufendes Training abbrechen
+//   TRAIN STATUS            - aktuellen Trainingsstand ausgeben
+//   TRAIN RESET JA / NEIN   - gespeichertes Muster loeschen (neu trainieren)
+static void gestureTrainingSerialTick() {
+    if (trainingActive && (millis() - trainingStartedMs) > TRAINING_TIMEOUT_MS) {
+        Serial.println("[Klio] Training-Timeout (60s ohne Ergebnis) - abgebrochen. 'TRAIN JA'/'TRAIN NEIN' erneut eintippen.");
+        cancelGestureTraining();
+    }
+
+    if (!Serial.available()) return;
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    line.toUpperCase();
+    if (line.length() == 0) return;
+
+    if (line == "TRAIN JA") {
+        startGestureTraining(GESTURE_ID_JA);
+    } else if (line == "TRAIN NEIN") {
+        startGestureTraining(GESTURE_ID_NEIN);
+    } else if (line == "TRAIN CANCEL") {
+        cancelGestureTraining();
+    } else if (line == "TRAIN STATUS") {
+        printGestureTrainingStatus();
+    } else if (line == "TRAIN RESET JA") {
+        resetGesturePattern(GESTURE_ID_JA);
+    } else if (line == "TRAIN RESET NEIN") {
+        resetGesturePattern(GESTURE_ID_NEIN);
+    } else if (line.startsWith("TRAIN")) {
+        Serial.println("[Klio] Unbekanntes Kommando. Verfuegbar: TRAIN JA, TRAIN NEIN, TRAIN CANCEL, TRAIN STATUS, TRAIN RESET JA, TRAIN RESET NEIN");
+    }
+}
+
 static void setupGestureSensor() {
     if (!(instance.getDeviceProbe() & HW_BHI260AP_ONLINE)) {
         Serial.println("[Gesten] BHI260AP nicht online - Gestenerkennung deaktiviert, Taster bleibt Fallback");
@@ -817,11 +1085,38 @@ static void setupGestureSensor() {
         return;
     }
     bhi260Online = true;
+
+    // Klio-Firmware ZUERST laden (ersetzt die von LilyGoLib in instance.begin()
+    // bereits hochgeladene GPIO-Firmware, siehe Kommentar beim
+    // BOSCH_BHI260_KLIO-Define oben) - erst DANACH virtuelle Sensoren
+    // aktivieren, sonst würde enable() noch gegen die alte Firmware laufen.
+    bool klioFirmwareOk = instance.sensor.uploadFirmware(bosch_firmware_image, bosch_firmware_size, false);
+    if (!klioFirmwareOk) {
+        Serial.printf("[Klio] Firmware-Upload fehlgeschlagen (%s) - Klio bleibt deaktiviert, Schwellenwert-Fallback laeuft weiter.\n",
+                      instance.sensor.getError());
+    }
+
     Serial.println("[Gesten] BHI260AP online, Sensoren aktiviert"); // TODO(Test-Debug)
     float sampleRate = 50.0;       // reicht für Handgelenk-Gesten, spart Strom ggü. 100Hz
     uint32_t reportLatencyMs = 0;
     gestureAccel.enable(sampleRate, reportLatencyMs);
     gestureQuat.enable(sampleRate, reportLatencyMs);
+
+    if (!klioFirmwareOk) {
+        klioOnline = false;
+        return;
+    }
+    if (!klio.begin()) {
+        Serial.println("[Klio] Initialisierung fehlgeschlagen - Klio bleibt deaktiviert, Schwellenwert-Fallback laeuft weiter.");
+        klioOnline = false;
+        return;
+    }
+    klioOnline = true;
+    Serial.printf("[Klio] Online, max. %u Muster gleichzeitig moeglich.\n", klio.getMaxPatterns());
+    klio.setLearningCallback(onKlioLearningEvent, nullptr);
+    klio.setRecognitionCallback(onKlioRecognitionEvent, nullptr);
+    klio.enable(sampleRate, reportLatencyMs);
+    restoreKlioPatterns();
 }
 
 // TODO(Test-Debug): Kalibrier-Logging, alle Zeilen mit diesem Kommentar nach
@@ -841,11 +1136,15 @@ static void gestureTick() {
         gestureQuat.toEuler();
         float pitch = gestureQuat.getPitch();
         if (doLog) {
-            Serial.printf("[Gesten] Pitch=%.1f Roll=%.1f Heading=%.1f (Ziel fuer JA: %.0f +-%.0f)\n",
+            Serial.printf("[Gesten] Pitch=%.1f Roll=%.1f Heading=%.1f (Fallback-Ziel JA: %.0f +-%.0f, Fallback aktiv: %s)\n",
                           pitch, gestureQuat.getRoll(), gestureQuat.getHeading(),
-                          GESTURE_TILT_TARGET_ANGLE_DEG, GESTURE_TILT_TOLERANCE_DEG);
+                          GESTURE_TILT_TARGET_ANGLE_DEG, GESTURE_TILT_TOLERANCE_DEG,
+                          klioPatternTrained[0] ? "nein, Klio uebernimmt JA" : "ja");
         }
-        if (haveIncomingQuestion && fabsf(pitch - GESTURE_TILT_TARGET_ANGLE_DEG) <= GESTURE_TILT_TOLERANCE_DEG) {
+        // Nur auswerten, solange fuer JA noch KEIN Klio-Muster trainiert ist -
+        // sonst uebernimmt onKlioRecognitionEvent() komplett (kein Doppel-Trigger).
+        if (!klioPatternTrained[0] && haveIncomingQuestion &&
+            fabsf(pitch - GESTURE_TILT_TARGET_ANGLE_DEG) <= GESTURE_TILT_TOLERANCE_DEG) {
             onGestureTiltUp();
             lastGestureLogMs = millis();
             return;
@@ -855,11 +1154,13 @@ static void gestureTick() {
     if (gestureAccel.hasUpdated()) {
         float ax = gestureAccel.getX();
         if (doLog) {
-            Serial.printf("[Gesten] Accel X=%.2f Y=%.2f Z=%.2f (Schwelle: %.1f)\n",
-                          ax, gestureAccel.getY(), gestureAccel.getZ(), GESTURE_SHAKE_MIN_AMPLITUDE);
+            Serial.printf("[Gesten] Accel X=%.2f Y=%.2f Z=%.2f (Fallback-Schwelle: %.1f, Fallback aktiv: %s)\n",
+                          ax, gestureAccel.getY(), gestureAccel.getZ(), GESTURE_SHAKE_MIN_AMPLITUDE,
+                          klioPatternTrained[1] ? "nein, Klio uebernimmt NEIN" : "ja");
             lastGestureLogMs = millis();
         }
 
+        if (klioPatternTrained[1]) return; // NEIN laeuft jetzt komplett ueber Klio
         if (!haveIncomingQuestion) return; // Shake-Logik nur auswerten, wenn tatsächlich eine Frage offen ist
 
         unsigned long now = millis();
@@ -885,6 +1186,7 @@ static void setupGestureSensor() {
     Serial.println("[Gesten] USING_BHI260_SENSOR nicht definiert - Gestencode nicht mitkompiliert"); // TODO(Test-Debug)
 }
 static void gestureTick() {}
+static void gestureTrainingSerialTick() {}
 #endif
 
 // ============================================================================
@@ -1531,6 +1833,7 @@ void loop() {
     checkQuickMessageTimeout();
     buttonTick();
     gestureTick();
+    gestureTrainingSerialTick();
 
     lv_timer_handler();
     delay(5);
