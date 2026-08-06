@@ -33,11 +33,25 @@ struct LoRaStatusPacket {
     int16_t   windDirDeg;                // 0-359, -1 falls unbekannt
     int32_t   latE7;                     // Breitengrad * 1e7 (für spätere Kartendarstellung)
     int32_t   lonE7;                     // Längengrad * 1e7
-    // Gesamtgröße: 1+1+1+2+1+2+2+2+4+4 = 20 Bytes
+    // Zeit-Sync für die Land-Uhr (siehe docs/Erweiterung_Land_Boot_LoRa_Kommunikation.md,
+    // war dort als offener Punkt markiert): die Boots-Uhr bezieht ihre Zeit
+    // per bestehendem BLE-Zeit-Sync vom Handy, die Land-Uhr hat seit der
+    // Umstellung auf reinen LoRa-Empfang kein BLE mehr - übernimmt die Zeit
+    // deshalb einmalig aus dem ersten empfangenen Statuspaket nach dem Booten
+    // (siehe Segeluhr_TWatch_S3.ino). Bewusst einzelne Felder statt Unix-
+    // Timestamp - erspart Zeitzone/Epoch-Umrechnung, beide Seiten nutzen
+    // ohnehin dieselben struct-tm-Felder.
+    uint8_t   timeHour;                  // 0-23, 0xFF = RTC der Boots-Uhr noch nicht gestellt (kein Sync)
+    uint8_t   timeMinute;                // 0-59
+    uint8_t   timeSecond;                // 0-59
+    uint8_t   timeDay;                   // 1-31
+    uint8_t   timeMonth;                 // 1-12
+    uint8_t   timeYearOffset;            // Jahr - 2000
+    // Gesamtgröße: 1+1+1+2+1+2+2+2+4+4+6 = 26 Bytes
 };
 #pragma pack(pop)
 
-static_assert(sizeof(LoRaStatusPacket) == 20, "LoRaStatusPacket Größe hat sich geändert - Doku und Empfänger pruefen!");
+static_assert(sizeof(LoRaStatusPacket) == 26, "LoRaStatusPacket Größe hat sich geändert - Doku und Empfänger pruefen!");
 
 // Sende-Intervall (ms) - beide Seiten sollten diesen Wert kennen,
 // damit die Land-Uhr "Signal verloren" korrekt timen kann.

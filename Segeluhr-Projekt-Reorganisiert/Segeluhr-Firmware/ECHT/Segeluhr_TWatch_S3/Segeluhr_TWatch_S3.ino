@@ -54,6 +54,7 @@
 static LoRaStatusPacket lastPacket;
 static unsigned long lastPacketReceivedMillis = 0;
 static bool havePacketYet = false;
+static bool timeSyncedFromBoat = false; // siehe loraReceiveTick(): einmaliger Auto-Sync statt manuellem Stellen
 
 static bool isSignalLost() {
     if (!havePacketYet) return true;
@@ -293,10 +294,12 @@ static lv_obj_t *lblDetailBattery;
 static lv_obj_t *lblDetailWind;
 static lv_obj_t *lblDetailPacketInfo;
 
-// Menü-Tab
-static lv_obj_t *swMute;
+// Menü-Tab: Icon-Grid als Standardansicht + zwei Unteransichten (Fragen,
+// Alltag), siehe buildMenuTab(). Alle drei sind Vollbild-Geschwister
+// innerhalb des Menü-Tabs, per Hidden-Flag umgeschaltet (showMenuScreen()).
+static lv_obj_t *menuGridScreen, *menuFragenScreen, *menuAlltagScreen;
+static lv_obj_t *btnMuteTile, *lblMuteTileText;
 static lv_obj_t *lblQuickSelected;
-static lv_obj_t *lblTimeSetPreview;
 
 // Quick-Message-Overlay (layer_top, über allen Tabs)
 static lv_obj_t *lblQuickOverlay = nullptr;
@@ -382,31 +385,26 @@ static void refreshActiveScreen() {
     detailScreenUpdate();
 }
 
-// ---- Menü-Tab: Stumm-Modus + Zeit stellen + Quick-Message-Browser + Ausschalten ----
+// ---- Menü-Tab: Icon-Grid (siehe docs/Erweiterung_Land_Boot_LoRa_Kommunikation.md
+// Abschnitt 3, Mockup [Stumm][Fragen] / [Alltag] / [Ausschalten]) ----
+// "Zeit stellen" gibt es nicht mehr im Menü - die Land-Uhr übernimmt ihre
+// Zeit jetzt automatisch aus dem ersten LoRa-Statuspaket (siehe
+// loraReceiveTick()/timeSyncedFromBoat), Roman-Entscheidung 06.08.2026.
 
-static void cbMuteToggle(lv_event_t *e) {
-    muteEnabled = lv_obj_has_state(swMute, LV_STATE_CHECKED);
+static void updateMuteTileVisual() {
+    lv_label_set_text_fmt(lblMuteTileText, "%s\nStumm", muteEnabled ? LV_SYMBOL_MUTE : LV_SYMBOL_VOLUME_MAX);
+    lv_obj_set_style_bg_color(btnMuteTile, muteEnabled ? lv_color_hex(0x802020) : lv_color_hex(0x2A2A2A), 0);
+}
+static void cbMuteTileToggle(lv_event_t *e) {
+    muteEnabled = !muteEnabled;
+    updateMuteTileVisual();
 }
 
-// Lokale RTC-Einstellung (siehe Header-Kommentar: bewusst ohne
-// Protokolländerung gelöst, nur Stunde/Minute - das Datum ist für die
-// reine HH:MM-Anzeige auf dem Hauptscreen irrelevant und bleibt, was die
-// RTC ohnehin gespeichert hat).
-static int8_t timeSetHour = 12;
-static int8_t timeSetMinute = 0;
+static void showMenuScreen(lv_obj_t *screen); // Vorwärtsdeklaration, siehe unten
 
-static void updateTimeSetPreview() {
-    lv_label_set_text_fmt(lblTimeSetPreview, "%02d:%02d", timeSetHour, timeSetMinute);
-}
-static void cbTimeHourPlus(lv_event_t *e) { timeSetHour = (timeSetHour + 1) % 24; updateTimeSetPreview(); }
-static void cbTimeHourMinus(lv_event_t *e) { timeSetHour = (timeSetHour + 23) % 24; updateTimeSetPreview(); }
-static void cbTimeMinutePlus(lv_event_t *e) { timeSetMinute = (timeSetMinute + 1) % 60; updateTimeSetPreview(); }
-static void cbTimeMinuteMinus(lv_event_t *e) { timeSetMinute = (timeSetMinute + 59) % 60; updateTimeSetPreview(); }
-static void cbTimeSetApply(lv_event_t *e) {
-    struct tm now;
-    instance.rtc.getDateTime(&now);
-    instance.rtc.setDateTime(now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, timeSetHour, timeSetMinute, 0);
-}
+static void cbOpenFragen(lv_event_t *e) { showMenuScreen(menuFragenScreen); }
+static void cbOpenAlltag(lv_event_t *e) { showMenuScreen(menuAlltagScreen); }
+static void cbMenuBack(lv_event_t *e) { showMenuScreen(menuGridScreen); }
 
 /**
  * Deep-Sleep, analog zum Shutdown-Mechanismus der Boots-Uhr
@@ -435,8 +433,24 @@ static lv_obj_t *addMenuButton(lv_obj_t *parent, const char *label, lv_event_cb_
     return btn;
 }
 
-// text_font vererbt sich nicht zuverlässig - Section-Header/Zeit-Buttons
-// bekommen ihre Schrift deshalb hier zentral über einen kleinen Helfer.
+// Quadratische Icon-Kachel (Symbol + kurzer Text übereinander) fürs neue
+// Grid-Menü. widthPct ist relativ zum jeweiligen Eltern-Container (z.B.
+// 47 für zwei Kacheln nebeneinander in einer Reihe, 94 für eine volle Reihe).
+static lv_obj_t *addIconTile(lv_obj_t *parent, const char *symbol, const char *label, lv_event_cb_t cb, lv_coord_t widthPct) {
+    lv_obj_t *btn = lv_button_create(parent);
+    lv_obj_set_width(btn, LV_PCT(widthPct));
+    lv_obj_set_height(btn, 90);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text_fmt(lbl, "%s\n%s", symbol, label);
+    lv_obj_center(lbl);
+    return btn;
+}
+
+// text_font vererbt sich nicht zuverlässig - Section-Header bekommen ihre
+// Schrift deshalb hier zentral über einen kleinen Helfer.
 static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
     lv_obj_t *lbl = lv_label_create(parent);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_24, 0);
@@ -444,55 +458,78 @@ static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
     return lbl;
 }
 
-static lv_obj_t *addSmallButton(lv_obj_t *parent, const char *label, lv_event_cb_t cb) {
-    lv_obj_t *btn = lv_button_create(parent);
-    lv_obj_set_size(btn, 70, 56);
-    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *lbl = lv_label_create(btn);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
-    lv_label_set_text(lbl, label);
-    lv_obj_center(lbl);
-    return btn;
+// Vollbild-Container für eine der drei Menü-Unteransichten - randlos, damit
+// er optisch mit dem Tab verschmilzt statt als eigene Box aufzufallen.
+static lv_obj_t *addMenuScreenContainer(lv_obj_t *parent) {
+    lv_obj_t *screen = lv_obj_create(parent);
+    lv_obj_set_size(screen, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_pad_all(screen, 0, 0);
+    lv_obj_set_style_border_width(screen, 0, 0);
+    lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(screen, 8, 0);
+    return screen;
+}
+
+static void showMenuScreen(lv_obj_t *screen) {
+    lv_obj_add_flag(menuGridScreen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(menuFragenScreen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(menuAlltagScreen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(screen, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void buildMenuTab(lv_obj_t *parent) {
-    lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(parent, 6, 0);
+    // Icon-Grid, Fragen- und Alltag-Ansicht sind Vollbild-Geschwister
+    // innerhalb des Tabs (kein Layout auf "parent" selbst nötig - Kinder
+    // liegen per Default bei (0,0) übereinander, showMenuScreen() blendet
+    // per Hidden-Flag um).
 
-    addSubHeader(parent, "-- Stumm-Modus --");
-    lv_obj_t *muteRow = lv_obj_create(parent);
-    lv_obj_set_size(muteRow, LV_PCT(94), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(muteRow, LV_FLEX_FLOW_ROW);
-    lv_obj_t *lblMute = lv_label_create(muteRow);
-    lv_obj_set_style_text_font(lblMute, &lv_font_montserrat_20, 0);
-    lv_label_set_text(lblMute, "Vibration/Ton stumm:");
-    swMute = lv_switch_create(muteRow);
-    lv_obj_set_style_transform_zoom(swMute, 320, 0); // groesserer Schalter, leichter zu treffen
-    lv_obj_add_event_cb(swMute, cbMuteToggle, LV_EVENT_VALUE_CHANGED, NULL);
+    // -- Icon-Grid (Standardansicht) --
+    menuGridScreen = addMenuScreenContainer(parent);
 
-    addSubHeader(parent, "-- Zeit stellen --");
-    lblTimeSetPreview = lv_label_create(parent);
-    lv_obj_set_style_text_font(lblTimeSetPreview, &lv_font_montserrat_28, 0);
-    lv_label_set_text(lblTimeSetPreview, "12:00");
-    lv_obj_t *timeRow = lv_obj_create(parent);
-    lv_obj_set_size(timeRow, LV_PCT(94), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(timeRow, LV_FLEX_FLOW_ROW);
-    addSmallButton(timeRow, "Std-", cbTimeHourMinus);
-    addSmallButton(timeRow, "Std+", cbTimeHourPlus);
-    addSmallButton(timeRow, "Min-", cbTimeMinuteMinus);
-    addSmallButton(timeRow, "Min+", cbTimeMinutePlus);
-    addMenuButton(parent, "Uebernehmen", cbTimeSetApply);
+    lv_obj_t *row1 = lv_obj_create(menuGridScreen);
+    lv_obj_set_size(row1, LV_PCT(94), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row1, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row1, 8, 0);
 
-    addSubHeader(parent, "-- Quick-Message ans Boot --");
-    lblQuickSelected = lv_label_create(parent);
+    btnMuteTile = lv_button_create(row1);
+    lv_obj_set_width(btnMuteTile, LV_PCT(47));
+    lv_obj_set_height(btnMuteTile, 90);
+    lv_obj_add_event_cb(btnMuteTile, cbMuteTileToggle, LV_EVENT_CLICKED, NULL);
+    lblMuteTileText = lv_label_create(btnMuteTile);
+    lv_obj_set_style_text_font(lblMuteTileText, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_align(lblMuteTileText, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(lblMuteTileText);
+    updateMuteTileVisual();
+
+    addIconTile(row1, LV_SYMBOL_ENVELOPE, "Fragen", cbOpenFragen, 47);
+
+    addIconTile(menuGridScreen, LV_SYMBOL_HOME, "Alltag", cbOpenAlltag, 94);
+
+    lv_obj_t *btnShutdown = addMenuButton(menuGridScreen, "Ausschalten", cbShutdown);
+    lv_obj_set_style_bg_color(btnShutdown, lv_color_hex(0x802020), 0);
+
+    // -- Fragen-Unteransicht (vorher: inline im alten Listen-Menü) --
+    menuFragenScreen = addMenuScreenContainer(parent);
+    addSubHeader(menuFragenScreen, "-- Quick-Message ans Boot --");
+    lblQuickSelected = lv_label_create(menuFragenScreen);
     lv_obj_set_style_text_font(lblQuickSelected, &lv_font_montserrat_24, 0);
     lv_label_set_text(lblQuickSelected, "Frage: ALLES GUT?");
-    addMenuButton(parent, "Naechste Frage", cbQuickNext);
-    addMenuButton(parent, "Frage senden", cbQuickSend);
+    addMenuButton(menuFragenScreen, "Naechste Frage", cbQuickNext);
+    addMenuButton(menuFragenScreen, "Frage senden", cbQuickSend);
+    addMenuButton(menuFragenScreen, LV_SYMBOL_LEFT " Zurueck", cbMenuBack);
 
-    addSubHeader(parent, "-- Sonstiges --");
-    lv_obj_t *btnShutdown = addMenuButton(parent, "Ausschalten", cbShutdown);
-    lv_obj_set_style_bg_color(btnShutdown, lv_color_hex(0x802020), 0);
+    // -- Alltag-Unteransicht: Platzhalter, Funktionen (Wecker/Stoppuhr/
+    // Schritte/Taschenlampe) folgen als eigener Schritt, siehe
+    // docs/Erweiterung_S3_Alltagsfunktionen.md --
+    menuAlltagScreen = addMenuScreenContainer(parent);
+    addSubHeader(menuAlltagScreen, "-- Alltag --");
+    lv_obj_t *lblAlltagPlaceholder = lv_label_create(menuAlltagScreen);
+    lv_obj_set_style_text_font(lblAlltagPlaceholder, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_align(lblAlltagPlaceholder, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(lblAlltagPlaceholder, "Wecker/Stoppuhr/Schritte/\nTaschenlampe folgen als\neigener naechster Schritt");
+    addMenuButton(menuAlltagScreen, LV_SYMBOL_LEFT " Zurueck", cbMenuBack);
+
+    showMenuScreen(menuGridScreen);
 }
 
 static void buildUi() {
@@ -642,6 +679,22 @@ static void loraReceiveTick() {
         lastPacketReceivedMillis = millis();
         havePacketYet = true;
         Serial.printf("[LoRa RX] Status OK: seq=%d state=%d\n", lastPacket.sequence, (int)lastPacket.state);
+
+        // Zeit-Sync von der Boots-Uhr (siehe LoRaPacket.h-Kommentar): einmalig
+        // beim ersten gueltigen Paket nach dem Booten, nicht bei jedem Paket -
+        // die lokale RTC laeuft danach eigenstaendig weiter (siehe Doku
+        // "Eigene RTC/Uhrzeit läuft lokal weiter, auch ohne Empfang"). Manuelles
+        // Stellen im Menue gibt es deshalb nicht mehr (vorher: "Zeit stellen"-
+        // Abschnitt, siehe PROJEKT_STATUS.md-Historie).
+        if (!timeSyncedFromBoat && lastPacket.timeHour != 0xFF) {
+            instance.rtc.setDateTime(2000 + lastPacket.timeYearOffset, lastPacket.timeMonth, lastPacket.timeDay,
+                                      lastPacket.timeHour, lastPacket.timeMinute, lastPacket.timeSecond);
+            timeSyncedFromBoat = true;
+            Serial.printf("[Zeit-Sync] Von Boots-Uhr uebernommen: %02d.%02d.%04d %02d:%02d:%02d\n",
+                          lastPacket.timeDay, lastPacket.timeMonth, 2000 + lastPacket.timeYearOffset,
+                          lastPacket.timeHour, lastPacket.timeMinute, lastPacket.timeSecond);
+        }
+
         refreshActiveScreen(); // sofort aktualisieren, nicht erst beim naechsten 1Hz-Tick
     } else {
         Serial.printf("[LoRa RX] unbekanntes Paket, firstByte=0x%02X plainLen=%d\n", firstByte, (int)plainLen);

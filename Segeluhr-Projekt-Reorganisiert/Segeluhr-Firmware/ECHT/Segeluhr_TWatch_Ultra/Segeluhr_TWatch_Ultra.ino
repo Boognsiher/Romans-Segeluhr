@@ -604,6 +604,24 @@ void buildAndSendStatusPacket() {
     pkt.latE7 = (int32_t)(gpsData.lat * 1e7);
     pkt.lonE7 = (int32_t)(gpsData.lon * 1e7);
 
+    // Zeit-Sync fuer die Land-Uhr (siehe LoRaPacket.h-Kommentar). Nur senden,
+    // wenn die eigene RTC schon sinnvoll gestellt ist (per bestehendem
+    // BLE-Zeit-Sync vom Handy) - PCF85063 startet sonst bei einem
+    // Reset-Datum weit vor 2020, das wollen wir der Land-Uhr nicht
+    // aufdruecken.
+    struct tm rtcNow;
+    instance.rtc.getDateTime(&rtcNow);
+    if (rtcNow.tm_year + 1900 >= 2020) {
+        pkt.timeHour = (uint8_t)rtcNow.tm_hour;
+        pkt.timeMinute = (uint8_t)rtcNow.tm_min;
+        pkt.timeSecond = (uint8_t)rtcNow.tm_sec;
+        pkt.timeDay = (uint8_t)rtcNow.tm_mday;
+        pkt.timeMonth = (uint8_t)(rtcNow.tm_mon + 1);
+        pkt.timeYearOffset = (uint8_t)(rtcNow.tm_year + 1900 - 2000);
+    } else {
+        pkt.timeHour = 0xFF; // signalisiert der Land-Uhr "kein Sync verfuegbar"
+    }
+
     uint8_t encBuf[CRYPTO_MAX_BUFFER];
     size_t encLen;
     if (encryptLoRaPacket((uint8_t *)&pkt, sizeof(pkt), encBuf, encLen)) {

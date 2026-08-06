@@ -94,6 +94,24 @@ Antippen (Touch primär, siehe Abschnitt 5) oder Knopf als Fallback.
 Navigation zwischen den Screens: einfacher Tap/Button-Druck, kein
 komplexes Menü nötig (Land-Uhr soll bewusst simpel bleiben).
 
+**Status: 🔧 UMGESETZT, KOMPILIERT (06.08.2026)** — `Segeluhr_TWatch_S3.ino`
+hat jetzt genau dieses Icon-Grid (`buildMenuTab()`): Stumm ist eine
+Toggle-Kachel (Icon wechselt Lautsprecher/Stumm-Symbol + rote/graue
+Einfärbung), Fragen und Alltag navigieren in Vollbild-Unteransichten
+(`menuFragenScreen`/`menuAlltagScreen`) mit "Zurück"-Button. Fragen enthält
+den bisherigen Frage-durchblättern/senden-Ablauf (nur verschoben, keine
+neue Logik). **Alltag ist aktuell nur ein Platzhalter-Screen** — die
+eigentlichen Funktionen (Wecker/Stoppuhr/Schritte/Taschenlampe) sind der
+nächste Schritt, siehe `Erweiterung_S3_Alltagsfunktionen.md`. Der BLE-
+Fragen-Editor aus `Erweiterung_S3_BLE_Fragen_Editor.md` ist ebenfalls noch
+nicht angebunden — die Fragen-Ansicht zeigt bislang nur die 10
+vordefinierten Fragen. **Zeit stellen entfällt komplett** (Roman-
+Entscheidung 06.08.2026): die Land-Uhr übernimmt ihre Uhrzeit jetzt
+automatisch aus dem ersten empfangenen LoRa-Statuspaket nach dem Booten
+(siehe Abschnitt 4, neue `timeHour`/`timeMinute`/... Felder) — kein
+manuelles Stellen mehr nötig, dafür ist die Land-Uhr ohne jemals ein
+Paket empfangen zu haben auf die letzte gespeicherte RTC-Zeit angewiesen.
+
 ## 4. LoRa-Paketformat
 
 Siehe `LoRaPacket.h` (gemeinsam includiert von beiden Firmwares, damit
@@ -101,12 +119,24 @@ Sender/Empfänger nie auseinanderlaufen).
 
 - Sende-Intervall: alle 30s (fix, kein Ack nötig — Land-Uhr toleriert
   Paketverlust und zeigt einfach "kein Signal" wenn nichts mehr ankommt)
-- Paketgröße: 20 Bytes (siehe Header) — bewusst kompakt gehalten für
-  zuverlässige LoRa-Übertragung auch bei größerer Distanz/schlechterem SNR
+- Paketgröße: 26 Bytes (siehe Header, war ursprünglich 20 Bytes — +6 Bytes
+  seit 06.08.2026 für die Zeit-Sync-Felder, siehe unten) — weiterhin
+  bewusst kompakt gehalten für zuverlässige LoRa-Übertragung auch bei
+  größerer Distanz/schlechterem SNR
 - `BoatState`-Enum bildet die Top-Level-Zustände ab, die für die Crew
   relevant sind — bewusst NICHT die volle Detailtiefe der App-internen
   Engines (TrainingEngine/CompetitionEngine bleiben intern, Land-Uhr sieht
   nur den vereinfachten Zustand)
+- **Zeit-Sync-Felder** (`timeHour`/`timeMinute`/`timeSecond`/`timeDay`/
+  `timeMonth`/`timeYearOffset`, 06.08.2026 ergänzt): die Boots-Uhr sendet
+  ihre eigene RTC-Zeit (die sie per bestehendem BLE-Zeit-Sync vom Handy
+  bezieht) in jedem Statuspaket mit. Die Land-Uhr übernimmt sie **einmalig**
+  beim ersten gültigen Paket nach dem Booten (`timeSyncedFromBoat`-Flag in
+  `Segeluhr_TWatch_S3.ino`), ersetzt damit das bisherige manuelle
+  "Zeit stellen"-Menü. `timeHour == 0xFF` signalisiert "Boots-Uhr hat selbst
+  noch keine gültige Zeit" (PCF85063-Reset-Zustand vor dem ersten
+  BLE-Zeit-Sync) — die Land-Uhr ignoriert das Paket dann für den Sync und
+  wartet auf ein späteres Paket mit gültiger Zeit.
 
 ## 5. Quick-Messages (lockere Ja/Nein-Fragen)
 
@@ -300,9 +330,9 @@ angenommen wird.
   (bei S3 nötig, unklar ob Ultra denselben USB-CDC-Reset-Bug hat)
 - [ ] LilyGoLib-Abhängigkeiten weiterhin NUR aus LilyGoLib-ThirdParty-Repo,
   nie über Library Manager aktualisieren
-- [ ] Land-Uhr: lokale RTC initial setzen (z.B. einmalig per Knopfdruck-Menü,
-  oder optionalen Zeitstempel im ersten LoRa-Paket für Auto-Sync — Entscheidung
-  offen, im Skeleton als TODO markiert)
+- [x] Land-Uhr: lokale RTC initial setzen — entschieden (06.08.2026, Roman)
+  und umgesetzt: automatischer Sync aus dem ersten LoRa-Statuspaket, siehe
+  Abschnitt 3/4
 - [ ] Nach erfolgreichem Test: alte S3-BLE-Test-Firmware
   (`segeluhr_ble_tester_v2.ino`) bleibt als eigenständiges BLE-Testtool
   bestehen (unabhängig von diesem Feature) — nicht verwechseln mit der neuen
