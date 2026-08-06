@@ -4,10 +4,13 @@ import android.content.Context
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.segeluhr.app.core.GeoPoint
+import com.segeluhr.app.core.LakeCircle
 import com.segeluhr.app.data.model.OperationMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
+import org.json.JSONObject
 
 private val Context.dataStore by preferencesDataStore(name = "segeluhr_settings")
 
@@ -25,8 +28,14 @@ class SettingsRepository(private val context: Context) {
         val TARGET_LAT = doublePreferencesKey("target_lat"); val TARGET_LON = doublePreferencesKey("target_lon")
         val BUOY1_LAT = doublePreferencesKey("buoy1_lat"); val BUOY1_LON = doublePreferencesKey("buoy1_lon")
         val BUOY2_LAT = doublePreferencesKey("buoy2_lat"); val BUOY2_LON = doublePreferencesKey("buoy2_lon")
-        val LAKE_CENTER_LAT = doublePreferencesKey("lake_center_lat"); val LAKE_CENTER_LON = doublePreferencesKey("lake_center_lon")
-        val LAKE_RADIUS = doublePreferencesKey("lake_radius")
+        // Kette von See-Geofence-Kreisen (Roman-Entscheidung 06.08.2026, siehe
+        // docs/Erweiterung_Automatische_See_Erkennung.md) - als JSON-Array
+        // statt fester Einzelfelder, da die Anzahl variabel ist. Ersetzt die
+        // früheren Einzelfelder lake_center_lat/lon + lake_radius; alte
+        // Installationen verlieren dadurch einmalig einen gesetzten See
+        // (DataStore braucht keine Schema-Migration, die alten Keys werden
+        // einfach nicht mehr gelesen) - unkritisch im aktuellen Projektstand.
+        val LAKE_CIRCLES_JSON = stringPreferencesKey("lake_circles_json")
         val HOME_LAT = doublePreferencesKey("home_lat"); val HOME_LON = doublePreferencesKey("home_lon")
         val COMPETITION_MARK1_LAT = doublePreferencesKey("competition_mark1_lat"); val COMPETITION_MARK1_LON = doublePreferencesKey("competition_mark1_lon")
         val COMPETITION_MARK2_LAT = doublePreferencesKey("competition_mark2_lat"); val COMPETITION_MARK2_LON = doublePreferencesKey("competition_mark2_lon")
@@ -41,13 +50,38 @@ class SettingsRepository(private val context: Context) {
     data class Waypoints(
         val pin: GeoPoint?, val boat: GeoPoint?, val target: GeoPoint?,
         val buoy1: GeoPoint?, val buoy2: GeoPoint?,
-        val lakeCenter: GeoPoint?, val lakeRadius: Double?,
+        val lakeCircles: List<LakeCircle> = emptyList(),
         val home: GeoPoint? = null,
         val competitionMark1: GeoPoint? = null,
         val competitionMark2: GeoPoint? = null,
     )
 
     data class WindCalib(val windDir: Double?, val calibrated: Boolean)
+
+    private fun serializeLakeCircles(circles: List<LakeCircle>): String {
+        val arr = JSONArray()
+        circles.forEach { c ->
+            arr.put(JSONObject().apply {
+                put("lat", c.center.lat)
+                put("lon", c.center.lon)
+                put("radius", c.radiusM)
+            })
+        }
+        return arr.toString()
+    }
+
+    private fun parseLakeCircles(json: String?): List<LakeCircle> {
+        if (json.isNullOrBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                LakeCircle(GeoPoint(o.getDouble("lat"), o.getDouble("lon")), o.getDouble("radius"))
+            }
+        } catch (e: Exception) {
+            emptyList() // beschädigtes/altes Format - lieber leer als abstürzen
+        }
+    }
 
     val waypointsFlow: Flow<Waypoints> = context.dataStore.data.map { p ->
         fun pt(latKey: Preferences.Key<Double>, lonKey: Preferences.Key<Double>): GeoPoint? {
@@ -61,8 +95,7 @@ class SettingsRepository(private val context: Context) {
             target = pt(Keys.TARGET_LAT, Keys.TARGET_LON),
             buoy1 = pt(Keys.BUOY1_LAT, Keys.BUOY1_LON),
             buoy2 = pt(Keys.BUOY2_LAT, Keys.BUOY2_LON),
-            lakeCenter = pt(Keys.LAKE_CENTER_LAT, Keys.LAKE_CENTER_LON),
-            lakeRadius = p[Keys.LAKE_RADIUS],
+            lakeCircles = parseLakeCircles(p[Keys.LAKE_CIRCLES_JSON]),
             home = pt(Keys.HOME_LAT, Keys.HOME_LON),
             competitionMark1 = pt(Keys.COMPETITION_MARK1_LAT, Keys.COMPETITION_MARK1_LON),
             competitionMark2 = pt(Keys.COMPETITION_MARK2_LAT, Keys.COMPETITION_MARK2_LON),
@@ -90,7 +123,6 @@ class SettingsRepository(private val context: Context) {
                 "target" -> { p[Keys.TARGET_LAT] = point.lat; p[Keys.TARGET_LON] = point.lon }
                 "buoy1" -> { p[Keys.BUOY1_LAT] = point.lat; p[Keys.BUOY1_LON] = point.lon }
                 "buoy2" -> { p[Keys.BUOY2_LAT] = point.lat; p[Keys.BUOY2_LON] = point.lon }
-                "lakeCenter" -> { p[Keys.LAKE_CENTER_LAT] = point.lat; p[Keys.LAKE_CENTER_LON] = point.lon }
                 "home" -> { p[Keys.HOME_LAT] = point.lat; p[Keys.HOME_LON] = point.lon }
                 "competitionMark1" -> { p[Keys.COMPETITION_MARK1_LAT] = point.lat; p[Keys.COMPETITION_MARK1_LON] = point.lon }
                 "competitionMark2" -> { p[Keys.COMPETITION_MARK2_LAT] = point.lat; p[Keys.COMPETITION_MARK2_LON] = point.lon }
@@ -98,13 +130,45 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    /** See-Rand: merkt sich den KLEINSTEN gemessenen Abstand als Radius (Abschnitt 6.5) */
-    suspend fun addLakeEdgeSample(center: GeoPoint, edgePoint: GeoPoint) {
-        val d = com.segeluhr.app.core.GeoUtils.distanceMeters(center.lat, center.lon, edgePoint.lat, edgePoint.lon)
+    // ---- See-Geofence: Kette von Kreisen statt einzelnem Mittelpunkt+Radius ----
+    // (siehe Klassenkommentar bei LAKE_CIRCLES_JSON und LakeGeofenceEngine)
+
+    /** Neuer Kreis, Mittelpunkt = übergebene Position, Radius zunächst 0 - wird über [addLakeEdgeSampleToLastCircle] befüllt ("Kreis hinzufügen" in der UI). */
+    suspend fun addLakeCircle(center: GeoPoint) {
         context.dataStore.edit { p ->
-            val current = p[Keys.LAKE_RADIUS]
-            p[Keys.LAKE_RADIUS] = if (current == null) d else minOf(current, d)
+            val circles = parseLakeCircles(p[Keys.LAKE_CIRCLES_JSON]).toMutableList()
+            circles.add(LakeCircle(center, 0.0))
+            p[Keys.LAKE_CIRCLES_JSON] = serializeLakeCircles(circles)
         }
+    }
+
+    /** See-Rand für den ZULETZT hinzugefügten Kreis: merkt sich den KLEINSTEN gemessenen Abstand als dessen Radius (gleiches Prinzip wie zuvor, jetzt pro Kreis, Abschnitt 6.5). */
+    suspend fun addLakeEdgeSampleToLastCircle(edgePoint: GeoPoint) {
+        context.dataStore.edit { p ->
+            val circles = parseLakeCircles(p[Keys.LAKE_CIRCLES_JSON]).toMutableList()
+            val last = circles.lastOrNull() ?: return@edit
+            val d = com.segeluhr.app.core.GeoUtils.distanceMeters(last.center.lat, last.center.lon, edgePoint.lat, edgePoint.lon)
+            val newRadius = if (last.radiusM <= 0.0) d else minOf(last.radiusM, d)
+            circles[circles.size - 1] = last.copy(radiusM = newRadius)
+            p[Keys.LAKE_CIRCLES_JSON] = serializeLakeCircles(circles)
+        }
+    }
+
+    suspend fun removeLakeCircle(index: Int) {
+        context.dataStore.edit { p ->
+            val circles = parseLakeCircles(p[Keys.LAKE_CIRCLES_JSON]).toMutableList()
+            if (index in circles.indices) circles.removeAt(index)
+            p[Keys.LAKE_CIRCLES_JSON] = serializeLakeCircles(circles)
+        }
+    }
+
+    /** Ersetzt die komplette Kreis-Kette, z.B. mit dem Ergebnis der automatischen See-Erkennung (LakeAutoDetector). */
+    suspend fun setLakeCircles(circles: List<LakeCircle>) {
+        context.dataStore.edit { p -> p[Keys.LAKE_CIRCLES_JSON] = serializeLakeCircles(circles) }
+    }
+
+    suspend fun clearLakeCircles() {
+        context.dataStore.edit { p -> p.remove(Keys.LAKE_CIRCLES_JSON) }
     }
 
     suspend fun clearWaypoint(key: String) {
@@ -115,8 +179,9 @@ class SettingsRepository(private val context: Context) {
                 "target" -> { p.remove(Keys.TARGET_LAT); p.remove(Keys.TARGET_LON) }
                 "buoy1" -> { p.remove(Keys.BUOY1_LAT); p.remove(Keys.BUOY1_LON) }
                 "buoy2" -> { p.remove(Keys.BUOY2_LAT); p.remove(Keys.BUOY2_LON) }
-                "lakeCenter" -> { p.remove(Keys.LAKE_CENTER_LAT); p.remove(Keys.LAKE_CENTER_LON) }
-                "lakeRadius" -> p.remove(Keys.LAKE_RADIUS)
+                // Ganze Kreis-Kette auf einmal leeren (z.B. "×" in der UI neben den
+                // Kreis-Aktionen) - einzelne Kreise siehe removeLakeCircle(index).
+                "lakeCircles" -> p.remove(Keys.LAKE_CIRCLES_JSON)
                 "home" -> { p.remove(Keys.HOME_LAT); p.remove(Keys.HOME_LON) }
                 "competitionMark1" -> { p.remove(Keys.COMPETITION_MARK1_LAT); p.remove(Keys.COMPETITION_MARK1_LON) }
                 "competitionMark2" -> { p.remove(Keys.COMPETITION_MARK2_LAT); p.remove(Keys.COMPETITION_MARK2_LON) }

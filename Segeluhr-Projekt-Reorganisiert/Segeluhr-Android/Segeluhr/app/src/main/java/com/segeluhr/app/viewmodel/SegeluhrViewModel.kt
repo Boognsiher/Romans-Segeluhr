@@ -16,6 +16,7 @@ import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.data.model.RaceState
 import com.segeluhr.app.data.model.TrainMode
 import com.segeluhr.app.data.settings.SettingsRepository
+import com.segeluhr.app.geo.LakeAutoDetector
 import com.segeluhr.app.location.LocationProvider
 import com.segeluhr.app.logic.*
 import kotlinx.coroutines.flow.*
@@ -43,7 +44,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     // von der 1Hz-Tickschleife aber nur einmal pro Sekunde gelesen (analog
     // zu S.fix / mainTick() im Browser-Prototyp).
     private var currentFix: Fix = Fix()
-    private var currentWaypoints = SettingsRepository.Waypoints(null, null, null, null, null, null, null)
+    private var currentWaypoints = SettingsRepository.Waypoints(null, null, null, null, null)
 
     private val statusSink = StatusSink { text, level ->
         _uiState.update { it.copy(statusText = text, statusLevel = level) }
@@ -86,7 +87,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                     it.copy(
                         pin = wp.pin, boat = wp.boat, target = wp.target,
                         buoy1 = wp.buoy1, buoy2 = wp.buoy2,
-                        lakeCenter = wp.lakeCenter, lakeRadius = wp.lakeRadius,
+                        lakeCircles = wp.lakeCircles,
                         home = wp.home,
                         competitionMark1 = wp.competitionMark1,
                         competitionMark2 = wp.competitionMark2,
@@ -194,7 +195,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         if (trainingEngine.trainMode == TrainMode.RACE) {
             trainingEngine.tickRaceNav(fix, currentWaypoints.buoy1, currentWaypoints.buoy2)
         }
-        lakeEngine.tick(fix, trainingEngine.trainMode, currentWaypoints.lakeCenter, currentWaypoints.lakeRadius)
+        lakeEngine.tick(fix, trainingEngine.trainMode, currentWaypoints.lakeCircles)
 
         val competitionGuidance = if (competitionActive) {
             competitionEngine.tick(fix, windEngine.windDir, currentWaypoints.competitionMark1, currentWaypoints.competitionMark2)
@@ -243,7 +244,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             buoyDistance = GeoUtils.distanceMeters(fix.lat, fix.lon, activeBuoy.lat, activeBuoy.lon)
         }
 
-        val lakePct = lakeEngine.distancePct(fix, currentWaypoints.lakeCenter, currentWaypoints.lakeRadius)
+        val lakePct = lakeEngine.distancePct(fix, currentWaypoints.lakeCircles)
 
         val trend = windEngine.trendStats()
 
@@ -340,19 +341,61 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         }
         val point = GeoPoint(currentFix.lat!!, currentFix.lon!!)
         viewModelScope.launch {
-            if (key == "lakeEdge") {
-                val center = currentWaypoints.lakeCenter
-                if (center == null) {
-                    statusSink.setStatus("Bitte zuerst See-Mitte setzen.", StatusLevel.AMBER)
-                } else {
-                    settingsRepo.addLakeEdgeSample(center, point)
-                    statusSink.setStatus("See-Rand erfasst.", StatusLevel.GREEN)
+            when (key) {
+                // See-Geofence: Kette von Kreisen statt einzelnem Mittelpunkt+Radius,
+                // siehe docs/Erweiterung_Automatische_See_Erkennung.md.
+                "lakeCircle" -> {
+                    settingsRepo.addLakeCircle(point)
+                    statusSink.setStatus("Neuer See-Kreis begonnen — jetzt Rand-Punkte erfassen.", StatusLevel.GREEN)
                 }
-            } else {
-                settingsRepo.setWaypoint(key, point)
-                statusSink.setStatus("Wegpunkt gesetzt: $key", StatusLevel.GREEN)
+                "lakeEdge" -> {
+                    if (currentWaypoints.lakeCircles.isEmpty()) {
+                        statusSink.setStatus("Bitte zuerst einen Kreis hinzufügen.", StatusLevel.AMBER)
+                    } else {
+                        settingsRepo.addLakeEdgeSampleToLastCircle(point)
+                        statusSink.setStatus("See-Rand erfasst.", StatusLevel.GREEN)
+                    }
+                }
+                else -> {
+                    settingsRepo.setWaypoint(key, point)
+                    statusSink.setStatus("Wegpunkt gesetzt: $key", StatusLevel.GREEN)
+                }
             }
         }
+    }
+
+    /**
+     * Automatische See-Erkennung (siehe docs/Erweiterung_Automatische_See_Erkennung.md):
+     * lädt die Uferlinie um den aktuellen GPS-Standort per Overpass-API und
+     * ersetzt die komplette bestehende Kreis-Kette durch das Ergebnis.
+     */
+    fun autoDetectLake() {
+        val lat = currentFix.lat; val lon = currentFix.lon
+        if (!currentlyValid() || lat == null || lon == null) {
+            statusSink.setStatus("Kein gültiger GPS-Fix — See kann nicht automatisch erkannt werden.", StatusLevel.RED)
+            return
+        }
+        _uiState.update { it.copy(lakeDetectionInProgress = true) }
+        viewModelScope.launch {
+            when (val result = LakeAutoDetector.detect(GeoPoint(lat, lon))) {
+                is LakeAutoDetector.Result.Success -> {
+                    settingsRepo.setLakeCircles(result.lake.circles)
+                    val nameSuffix = result.lake.name?.let { " \"$it\"" } ?: ""
+                    statusSink.setStatus(
+                        "See$nameSuffix erkannt: ${result.lake.circles.size} Kreis(e).",
+                        StatusLevel.GREEN,
+                    )
+                }
+                is LakeAutoDetector.Result.Failure -> {
+                    statusSink.setStatus(result.message, StatusLevel.RED)
+                }
+            }
+            _uiState.update { it.copy(lakeDetectionInProgress = false) }
+        }
+    }
+
+    fun removeLakeCircle(index: Int) {
+        viewModelScope.launch { settingsRepo.removeLakeCircle(index) }
     }
 
     fun clearWaypoint(key: String) {
@@ -432,7 +475,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         BleProtocol.WaypointId.TARGET -> "target"
         BleProtocol.WaypointId.BUOY1 -> "buoy1"
         BleProtocol.WaypointId.BUOY2 -> "buoy2"
-        BleProtocol.WaypointId.LAKE_CENTER -> "lakeCenter"
+        // Kette von Kreisen statt Einzelkreis (siehe captureWaypoint()) - ein
+        // Tastendruck auf der Uhr markiert die aktuelle Position weiterhin
+        // als (neuen) See-Sicherheitskreis-Mittelpunkt.
+        BleProtocol.WaypointId.LAKE_CENTER -> "lakeCircle"
         BleProtocol.WaypointId.HOME -> "home"
         BleProtocol.WaypointId.COMPETITION_MARK1 -> "competitionMark1"
         BleProtocol.WaypointId.COMPETITION_MARK2 -> "competitionMark2"

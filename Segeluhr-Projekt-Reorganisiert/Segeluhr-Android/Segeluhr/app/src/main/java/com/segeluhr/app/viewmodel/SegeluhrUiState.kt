@@ -2,6 +2,7 @@ package com.segeluhr.app.viewmodel
 
 import com.segeluhr.app.core.Fix
 import com.segeluhr.app.core.GeoPoint
+import com.segeluhr.app.core.LakeCircle
 import com.segeluhr.app.data.model.*
 import com.segeluhr.app.logic.StatusLevel
 
@@ -54,8 +55,8 @@ data class SegeluhrUiState(
     val target: GeoPoint? = null,
     val buoy1: GeoPoint? = null,
     val buoy2: GeoPoint? = null,
-    val lakeCenter: GeoPoint? = null,
-    val lakeRadius: Double? = null,
+    val lakeCircles: List<LakeCircle> = emptyList(),
+    val lakeDetectionInProgress: Boolean = false,
     val home: GeoPoint? = null,
     val competitionMark1: GeoPoint? = null,
     val competitionMark2: GeoPoint? = null,

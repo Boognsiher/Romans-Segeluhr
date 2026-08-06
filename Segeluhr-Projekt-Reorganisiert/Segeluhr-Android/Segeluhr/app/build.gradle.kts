@@ -59,6 +59,11 @@ dependencies {
     // GPS
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
+    // Automatische See-Erkennung (Overpass-API), siehe
+    // docs/Erweiterung_Automatische_See_Erkennung.md — JSON-Parsing über das
+    // in Android eingebaute org.json, kein zusätzlicher JSON-Dependency nötig.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // Persistenz: Room fürs Manöver-Log, DataStore für Einstellungen/Wegpunkte
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")

@@ -122,6 +122,8 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onSetMode = viewModel::setTrainMode,
                     onSetWaypoint = viewModel::captureWaypoint,
                     onClearWaypoint = viewModel::clearWaypoint,
+                    onAutoDetectLake = viewModel::autoDetectLake,
+                    onRemoveLakeCircle = viewModel::removeLakeCircle,
                 )
                 Tab.LOG -> LogScreen(state, onClearLog = viewModel::clearManeuverLog)
                 Tab.SETUP -> SetupScreen(

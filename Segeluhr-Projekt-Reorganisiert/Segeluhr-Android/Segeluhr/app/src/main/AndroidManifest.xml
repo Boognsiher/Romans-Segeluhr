@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- Automatische See-Erkennung (Overpass-API), siehe
+         docs/Erweiterung_Automatische_See_Erkennung.md - nur beim einmaligen
+         Einrichten gebraucht, danach läuft alles offline. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- BLE Peripheral-Rolle (Handy = GATT-Server für die T-Watch), siehe BLE_Protokoll.md -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />

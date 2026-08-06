@@ -4,9 +4,23 @@
 > `LakeGeofenceEngine` um eine automatisierte Datenquelle statt manuellem
 > Abstecken der Seegrenze auf dem Wasser.
 
-## Status: KONZEPT — Umsetzung durch Claude Code gegen den aktuellen Code
-von `LakeGeofenceEngine` und der zugehörigen Setup-UI. Ich kenne den
-bestehenden Code der Engine nicht, daher hier auf Konzeptebene.
+## Status: 🔧 UMGESETZT (06.08.2026) — **nicht kompiliert, nicht getestet**,
+siehe Warnung unten. Zwei wichtige Abweichungen von der ursprünglichen
+Doku-Vision (beide Roman-Entscheidungen 06.08.2026, siehe Abschnitt 6):
+**(1)** `LakeGeofenceEngine` kannte keine Polygon-Geofence, nur einen
+einzelnen Kreis (Mittelpunkt+Radius) — die volle JTS/OSM-Polygon-Vision
+wurde durch eine **Kette von Kreisen** ersetzt (deutlich kleinerer Umbau).
+**(2)** Ein einzelner Kreis deckt lange/unregelmässige Seen nicht ab —
+deshalb Kreis-KETTE statt Einzelkreis, mit entsprechendem Umbau von
+`LakeGeofenceEngine`, `SettingsRepository` und der Setup-UI.
+
+> ⚠️ **Für dieses Feature konnte kein Compile-Lauf durchgeführt werden** —
+> anders als bei der Firmware (wo `arduino-cli compile` zur Verfügung
+> steht) gibt es im Android-Projekt keinen `gradlew`-Wrapper/keine lokale
+> Gradle-Installation. Der Code wurde sorgfältig manuell durchgesehen
+> (Typen, Imports, Kotlin-Syntax), aber **vor dem ersten echten Einsatz
+> unbedingt einmal in Android Studio bauen/testen**, bevor er auf dem
+> Segel-Handy verwendet wird.
 
 ## 1. Ziel
 Statt die Seegrenze manuell auf dem Wasser abzufahren/einzugeben, erkennt
@@ -87,21 +101,65 @@ zusätzliche Logik, um äußere/innere Ringe aus den Member-Ways zusammenzusetze
   "See XY erkannt, Geofence mit 50m Abstand berechnet")
 
 ## 5. Offene Punkte
-- [ ] HTTP-Client für Overpass-Anfrage festlegen (z.B. Retrofit/OkHttp,
-  falls nicht schon im Projekt vorhanden)
-- [ ] JTS als Abhängigkeit einbinden, Kompatibilität mit Android/Gradle
-  prüfen (reines Java, sollte unproblematisch sein, aber verifizieren)
-- [ ] Passende UTM-Zone(n) für die Schweiz festlegen (bzw. dynamisch anhand
-  der Longitude wählen, falls das Projekt auch außerhalb der Schweiz
-  genutzt werden könnte)
-- [ ] Verhalten bei fehlendem Internetzugang beim Einrichten (Fehlermeldung,
-  Retry) — danach ist ja alles offline nutzbar, nur der Einrichtungsschritt
-  selbst braucht Netz
-- [ ] Verhalten, falls GPS-Position beim Einrichten (noch am Ufer stehend,
-  nicht auf dem Wasser) knapp außerhalb des erkannten Sees liegt — Toleranz
-  einbauen, nicht nur "Punkt muss exakt im Polygon liegen"
-- [ ] OpenStreetMap-Attribution in der App ergänzen (ODbL-Lizenz verlangt
-  Namensnennung, z.B. im Impressum/Über-die-App-Screen)
-- [ ] Verhältnis zu ggf. bereits vorhandener manueller Geofence-Eingabe in
-  `LakeGeofenceEngine` klären — soll die automatische Erkennung die
-  manuelle Eingabe ersetzen oder als Alternative daneben bestehen bleiben?
+- [x] HTTP-Client: OkHttp (neue Abhängigkeit, `app/build.gradle.kts`).
+  JSON-Parsing über das in Android eingebaute `org.json` statt einer
+  weiteren Abhängigkeit.
+- [x] JTS **nicht** eingebunden — bewusst vermieden, siehe Abschnitt 6
+  (Kreis-Kette statt Polygon-Pufferung macht JTS überflüssig).
+- [x] UTM-Zonen **nicht** nötig — einfache Äquirektangular-Projektion um
+  den GPS-Fix als lokalen Ursprung, für die Grösse eines einzelnen Sees
+  (wenige km) ausreichend genau, siehe `LakeAutoDetector.LocalProjection`.
+- [x] Verhalten bei fehlendem Internetzugang: klare Fehlermeldung über den
+  bestehenden `StatusSink` (kein Retry-Mechanismus, Nutzer versucht es
+  über den Button einfach erneut).
+- [x] Toleranz für "am Ufer stehend": `EDGE_TOLERANCE_M = 50.0` — liegt der
+  GPS-Fix in keinem gefundenen Gewässer-Polygon, wird das nächstgelegene
+  innerhalb von 50m trotzdem akzeptiert.
+- [ ] OpenStreetMap-Attribution in der App **noch nicht ergänzt** (ODbL-
+  Lizenz verlangt Namensnennung, z.B. im Impressum/Über-die-App-Screen) —
+  vor einem Play-Store-Release oder sonstiger Veröffentlichung nachholen.
+- [x] Verhältnis zur manuellen Eingabe geklärt: automatische Erkennung
+  **ersetzt** die komplette bestehende Kreis-Kette (nicht additiv), manuelle
+  Eingabe bleibt als vollwertiger Fallback bestehen (z.B. wenn der See als
+  OSM-Relation vorliegt, siehe bekannte Einschränkung in Abschnitt 6).
+
+## 6. Tatsächliche Umsetzung (Abweichung von Abschnitt 2/3)
+
+Die folgenden Abschnitte (2/3 oben) beschreiben die ursprünglich gedachte
+Polygon-Pufferungs-Lösung — **so nicht umgesetzt**. Tatsächlicher Ablauf:
+
+1. Nutzer tippt im Training-Tab auf "See automatisch erkennen"
+2. Overpass-API-Abfrage (`natural=water`, 5km-Radius) um den aktuellen
+   GPS-Standort — **nur einfache OSM-"way"-Geometrien**, keine
+   Relationen/Multipolygone (siehe bekannte Einschränkung unten)
+3. Welches Gewässer gemeint ist: enthält der GPS-Punkt eines der
+   gefundenen Polygone, wird bei mehreren Treffern das flächenmässig
+   grösste gewählt; liegt der Punkt in keinem (z.B. noch am Ufer stehend),
+   wird das nächstgelegene innerhalb von 50m akzeptiert
+4. Statt Douglas-Peucker-Vereinfachung + JTS-Pufferung + Speicherung der
+   rohen Uferlinie: direkt eine **Kette von Sicherheits-Kreisen** aus dem
+   Polygon berechnen (`LakeAutoDetector.packCircleChain()`) — greedy
+   Gitter-Suche nach dem jeweils grössten Kreis, der noch komplett
+   innerhalb des Polygons UND ausserhalb bereits gepackter Kreise liegt,
+   bis zu 8 Kreise oder Mindestradius 15m unterschritten wird
+5. Ergebnis ersetzt die komplette bisherige Kreis-Kette in
+   `SettingsRepository` (JSON-Array, `LAKE_CIRCLES_JSON`)
+
+**`LakeGeofenceEngine`-Umbau:** `tick()`/`distancePct()` nehmen jetzt
+`List<LakeCircle>` statt `GeoPoint? + Double?`. Die 80%/65%-Warn-Hysterese
+wird auf den **besten (kleinsten) Prozentwert über alle Kreise** angewendet
+— eine Position ist sicher, sobald sie innerhalb IRGENDEINES Kreises liegt.
+
+**Manuelle Eingabe** (Setup/Training-Tab) ebenfalls auf die Kreis-Kette
+umgestellt: "Kreis hinzufügen" (aktuelle Position = neuer Mittelpunkt) +
+"Rand erfassen" (mehrfach möglich, wirkt auf den zuletzt hinzugefügten
+Kreis, kleinster gemessener Abstand wird dessen Radius) — jeder Kreis kann
+einzeln aus der Liste entfernt werden.
+
+**Bekannte Einschränkung:** grössere/komplexere Seen sind in OSM oft als
+Multipolygon-"relation" erfasst (z.B. mit Inseln oder aus mehreren
+Uferabschnitten zusammengesetzt) — das Zusammensetzen solcher Relationen
+wurde bewusst NICHT implementiert (genau der Teil, der "nicht trivial"
+ist und den Aufwand am meisten erhöht hätte). Liegt der Zielsee nur als
+Relation vor, schlägt die automatische Erkennung fehl und die manuelle
+Eingabe bleibt der Weg.
