@@ -43,6 +43,8 @@
 #include <Arduino.h>
 #include <LilyGoLib.h>
 #include <LV_Helper.h>
+#include <NimBLEDevice.h>      // nur fuer den optionalen BLE-Fragen-Editor, siehe docs/Erweiterung_S3_BLE_Fragen_Editor.md
+#include <Preferences.h>       // NVS-Persistenz eigener Fragen + Wecker-Einstellung
 #include "../../shared/LoRaPacket.h"
 #include "../../shared/QuickMessages.h"
 #include "../../shared/Crypto.h"
@@ -150,8 +152,73 @@ static void sendEncrypted(const uint8_t *data, size_t len) {
 // Quick-Messages (lockere Ja/Nein-Fragen, siehe QuickMessages.h)
 // ============================================================================
 
-static QuickQuestion selectedQuestion = QuickQuestion::ALLES_GUT;
+// Fragen-Auswahl deckt jetzt zwei Quellen ab: die 10 festen QuickQuestion-
+// Werte (Index 0..COUNT-1) und eigene, per BLE-Fragen-Editor erstellte
+// Fragen (Index COUNT..COUNT+CUSTOM_QUESTION_MAX_COUNT-1), siehe
+// docs/Erweiterung_S3_BLE_Fragen_Editor.md.
+struct CustomQuestion {
+    bool used = false;
+    char text[CUSTOM_QUESTION_MAX_LEN] = {0};
+};
+static CustomQuestion customQuestions[CUSTOM_QUESTION_MAX_COUNT];
+static uint8_t customQuestionWriteIdx = 0; // Ringpuffer: naechster Slot, der bei Bedarf ueberschrieben wird
+static const uint8_t TOTAL_QUESTION_SLOTS = (uint8_t)QuickQuestion::COUNT + CUSTOM_QUESTION_MAX_COUNT;
+static uint8_t selectedQuestionIndex = 0;
 static uint8_t quickMsgSequence = 0;
+
+static bool questionIndexValid(uint8_t idx) {
+    if (idx < (uint8_t)QuickQuestion::COUNT) return true; // die 10 festen sind immer waehlbar
+    uint8_t slot = idx - (uint8_t)QuickQuestion::COUNT;
+    return slot < CUSTOM_QUESTION_MAX_COUNT && customQuestions[slot].used;
+}
+static const char *selectedQuestionText() {
+    if (selectedQuestionIndex < (uint8_t)QuickQuestion::COUNT) {
+        return quickQuestionText((QuickQuestion)selectedQuestionIndex);
+    }
+    return customQuestions[selectedQuestionIndex - (uint8_t)QuickQuestion::COUNT].text;
+}
+
+// ---- Persistenz eigener Fragen (NVS, ueberlebt Neustart) ----
+static void saveCustomQuestionToPrefs(uint8_t slot) {
+    Preferences prefs;
+    prefs.begin("customq", false);
+    char key[4];
+    snprintf(key, sizeof(key), "%u", slot);
+    if (customQuestions[slot].used) {
+        prefs.putBytes(key, customQuestions[slot].text, strlen(customQuestions[slot].text) + 1);
+    } else {
+        prefs.remove(key);
+    }
+    prefs.end();
+}
+static void loadCustomQuestionsFromPrefs() {
+    Preferences prefs;
+    prefs.begin("customq", true);
+    for (uint8_t i = 0; i < CUSTOM_QUESTION_MAX_COUNT; i++) {
+        char key[4];
+        snprintf(key, sizeof(key), "%u", i);
+        size_t len = prefs.getBytesLength(key);
+        if (len > 1) { // mehr als nur ein NUL-Byte
+            prefs.getBytes(key, customQuestions[i].text, sizeof(customQuestions[i].text));
+            customQuestions[i].used = true;
+            Serial.printf("[Fragen-Editor] Eigene Frage aus NVS geladen (Slot %u): %s\n", i, customQuestions[i].text);
+        }
+    }
+    prefs.end();
+}
+// Wird vom BLE-Fragen-Editor bei eingehendem Schreibzugriff aufgerufen
+// (siehe FragenEditorWriteCallbacks weiter unten). Ringpuffer: bei vollem
+// Speicher wird die aelteste eigene Frage ueberschrieben, kein Fehler noetig
+// (siehe Doku Abschnitt 5, "Speicherlimit klein halten").
+static void addCustomQuestion(const char *text) {
+    CustomQuestion &slot = customQuestions[customQuestionWriteIdx];
+    slot.used = true;
+    strncpy(slot.text, text, CUSTOM_QUESTION_MAX_LEN - 1);
+    slot.text[CUSTOM_QUESTION_MAX_LEN - 1] = '\0';
+    saveCustomQuestionToPrefs(customQuestionWriteIdx);
+    Serial.printf("[Fragen-Editor] Neue eigene Frage gespeichert (Slot %u): %s\n", customQuestionWriteIdx, slot.text);
+    customQuestionWriteIdx = (customQuestionWriteIdx + 1) % CUSTOM_QUESTION_MAX_COUNT;
+}
 
 static bool waitingForAnswer = false;
 static uint8_t pendingRequestSequence = 0;
@@ -231,7 +298,7 @@ static void onDeviceSensorEvent(DeviceEvent_t event, void *params, void *user_da
 static void handleIncomingQuickMessageRequest(const QuickMessageRequest &req) {
     haveIncomingQuestion = true;
     incomingRequest = req;
-    Serial.printf("[Quick-Msg RX] Frage vom Boot: seq=%d %s\n", req.sequence, quickQuestionText(req.question));
+    Serial.printf("[Quick-Msg RX] Frage vom Boot: seq=%d %s\n", req.sequence, quickMessageRequestText(req));
     vibrateIncomingQuestion();
     updateQuickOverlay();
     // Standby-Aufwecken (siehe docs/Erweiterung_Standby_Wecken.md Abschnitt 2):
@@ -245,21 +312,89 @@ static void handleIncomingQuickMessageRequest(const QuickMessageRequest &req) {
 static void cbAnswerJa(lv_event_t *e) { sendQuickAnswer(QuickAnswer::JA); }
 static void cbAnswerNein(lv_event_t *e) { sendQuickAnswer(QuickAnswer::NEIN); }
 
-// Fragen-Browser im Menü-Tab: nächste Frage / senden
+// Fragen-Browser im Menü-Tab: nächste Frage / senden. Blättert über die 10
+// festen UND alle aktuell gespeicherten eigenen Fragen, überspringt leere
+// (noch nicht belegte) Custom-Slots.
 static void cbQuickNext(lv_event_t *e) {
-    selectedQuestion = (QuickQuestion)(((uint8_t)selectedQuestion + 1) % (uint8_t)QuickQuestion::COUNT);
+    uint8_t next = selectedQuestionIndex;
+    for (uint8_t tries = 0; tries < TOTAL_QUESTION_SLOTS; tries++) {
+        next = (next + 1) % TOTAL_QUESTION_SLOTS;
+        if (questionIndexValid(next)) break;
+    }
+    selectedQuestionIndex = next;
     updateMenuScreen();
 }
 static void cbQuickSend(lv_event_t *e) {
     QuickMessageRequest req;
     req.sequence = quickMsgSequence++;
     req.sender = DeviceId::LAND;
-    req.question = selectedQuestion;
+    if (selectedQuestionIndex < (uint8_t)QuickQuestion::COUNT) {
+        req.question = (QuickQuestion)selectedQuestionIndex;
+        req.isCustom = 0;
+    } else {
+        req.isCustom = 1;
+        const char *text = customQuestions[selectedQuestionIndex - (uint8_t)QuickQuestion::COUNT].text;
+        strncpy(req.customText, text, CUSTOM_QUESTION_MAX_LEN - 1);
+        req.customText[CUSTOM_QUESTION_MAX_LEN - 1] = '\0';
+    }
     sendEncrypted((uint8_t *)&req, sizeof(req));
     waitingForAnswer = true;
     pendingRequestSequence = req.sequence;
     pendingRequestSentMillis = millis();
-    Serial.printf("[Quick-Msg TX] Frage gesendet: seq=%d %s\n", req.sequence, quickQuestionText(req.question));
+    Serial.printf("[Quick-Msg TX] Frage gesendet: seq=%d %s\n", req.sequence, quickMessageRequestText(req));
+}
+
+// ============================================================================
+// BLE-Fragen-Editor (siehe docs/Erweiterung_S3_BLE_Fragen_Editor.md) -
+// bewusste Abweichung von der Entscheidung "S3 hat kein BLE mehr": hier
+// gezielt wieder eingeführt, aber standardmäßig AUS und nur per Menü-
+// Toggle einschaltbar (Akku sparen, "S3 ist einfach/lorabasiert"-Idee
+// weitgehend erhalten). Eigener, komplett unabhängiger GATT-Service -
+// NICHT derselbe wie der alte Handy-zu-Uhr-Service aus der ursprünglichen
+// Architektur (die gibt es auf der S3 nicht mehr, nur noch auf der Ultra).
+// Kein PIN/Bestätigung nötig (siehe Doku Abschnitt 5: "BLE ist ja
+// standardmäßig aus" reicht als Zugriffsschutz für diesen Anwendungsfall).
+// ============================================================================
+
+#define FRAGEN_EDITOR_SERVICE_UUID "7a6e0001-b5a3-f393-e0a9-e50e24dcca9e"
+#define FRAGEN_EDITOR_CHAR_UUID    "7a6e0002-b5a3-f393-e0a9-e50e24dcca9e"
+
+static bool bleEditorEnabled = false;
+static lv_obj_t *swBleEditor; // BLE-Fragen-Editor Ein/Aus, siehe cbBleEditorToggle()
+
+// Empfängt den Frage-Text von der Web-Bluetooth-Seite (einfaches Textfeld +
+// "Senden", siehe Doku Abschnitt 2) und legt ihn als neue eigene Frage ab.
+class FragenEditorWriteCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override {
+        std::string value = pCharacteristic->getValue();
+        if (value.empty()) return;
+        addCustomQuestion(value.c_str()); // schneidet bei CUSTOM_QUESTION_MAX_LEN-1 ab, falls zu lang
+        updateMenuScreen(); // Fragen-Vorschau aktualisieren, falls Screen gerade offen ist
+    }
+};
+static FragenEditorWriteCallbacks fragenEditorWriteCallbacks;
+
+static void startFragenEditorBle() {
+    NimBLEDevice::init("Segeluhr-Fragen-Editor");
+    NimBLEServer *pServer = NimBLEDevice::createServer();
+    NimBLEService *pService = pServer->createService(FRAGEN_EDITOR_SERVICE_UUID);
+    NimBLECharacteristic *pChar = pService->createCharacteristic(FRAGEN_EDITOR_CHAR_UUID, NIMBLE_PROPERTY::WRITE);
+    pChar->setCallbacks(&fragenEditorWriteCallbacks);
+    pServer->start();
+    pServer->getAdvertising()->addServiceUUID(FRAGEN_EDITOR_SERVICE_UUID);
+    pServer->getAdvertising()->start();
+    Serial.println("[Fragen-Editor] BLE gestartet, sichtbar als 'Segeluhr-Fragen-Editor'");
+}
+
+static void stopFragenEditorBle() {
+    NimBLEDevice::deinit(true); // clearAll=true: Server/Service/Characteristic komplett abbauen
+    Serial.println("[Fragen-Editor] BLE gestoppt");
+}
+
+static void cbBleEditorToggle(lv_event_t *e) {
+    bleEditorEnabled = lv_obj_has_state(swBleEditor, LV_STATE_CHECKED);
+    if (bleEditorEnabled) startFragenEditorBle();
+    else stopFragenEditorBle();
 }
 
 static void checkQuickMessageTimeout() {
@@ -432,14 +567,14 @@ static void detailScreenUpdate() {
 
 static void updateMenuScreen() {
     if (lblQuickSelected != nullptr) {
-        lv_label_set_text_fmt(lblQuickSelected, "Frage: %s", quickQuestionText(selectedQuestion));
+        lv_label_set_text_fmt(lblQuickSelected, "Frage: %s", selectedQuestionText());
     }
 }
 
 static void updateQuickOverlay() {
     if (lblQuickOverlay == nullptr) return;
     if (haveIncomingQuestion) {
-        lv_label_set_text_fmt(lblQuickOverlay, "FRAGE VOM BOOT:\n%s", quickQuestionText(incomingRequest.question));
+        lv_label_set_text_fmt(lblQuickOverlay, "FRAGE VOM BOOT:\n%s", quickMessageRequestText(incomingRequest));
         lv_obj_clear_flag(lblQuickOverlay, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(btnAnswerJa, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(btnAnswerNein, LV_OBJ_FLAG_HIDDEN);
@@ -495,10 +630,29 @@ static void cbAlarmStop(lv_event_t *e) {
     lv_obj_add_flag(alarmRingingOverlay, LV_OBJ_FLAG_HIDDEN);
 }
 
-static void cbAlarmHourPlus(lv_event_t *e) { alarmHour = (alarmHour + 1) % 24; }
-static void cbAlarmHourMinus(lv_event_t *e) { alarmHour = (alarmHour + 23) % 24; }
-static void cbAlarmMinutePlus(lv_event_t *e) { alarmMinute = (alarmMinute + 1) % 60; }
-static void cbAlarmMinuteMinus(lv_event_t *e) { alarmMinute = (alarmMinute + 59) % 60; }
+// Persistenz (NVS): Weckzeit + Ein/Aus-Zustand ueberleben jetzt einen
+// Neustart - war beim ersten Alltagsfunktionen-Commit noch offener Punkt.
+static void saveAlarmToPrefs() {
+    Preferences prefs;
+    prefs.begin("alarm", false);
+    prefs.putUChar("hour", alarmHour);
+    prefs.putUChar("minute", alarmMinute);
+    prefs.putBool("enabled", alarmEnabled);
+    prefs.end();
+}
+static void loadAlarmFromPrefs() {
+    Preferences prefs;
+    prefs.begin("alarm", true);
+    alarmHour = prefs.getUChar("hour", alarmHour);
+    alarmMinute = prefs.getUChar("minute", alarmMinute);
+    alarmEnabled = prefs.getBool("enabled", alarmEnabled);
+    prefs.end();
+}
+
+static void cbAlarmHourPlus(lv_event_t *e) { alarmHour = (alarmHour + 1) % 24; saveAlarmToPrefs(); }
+static void cbAlarmHourMinus(lv_event_t *e) { alarmHour = (alarmHour + 23) % 24; saveAlarmToPrefs(); }
+static void cbAlarmMinutePlus(lv_event_t *e) { alarmMinute = (alarmMinute + 1) % 60; saveAlarmToPrefs(); }
+static void cbAlarmMinuteMinus(lv_event_t *e) { alarmMinute = (alarmMinute + 59) % 60; saveAlarmToPrefs(); }
 
 static void updateAlarmToggleVisual() {
     lv_label_set_text_fmt(lblAlarmToggleText, "%s\n%s", alarmEnabled ? LV_SYMBOL_BELL : LV_SYMBOL_CLOSE,
@@ -508,6 +662,7 @@ static void updateAlarmToggleVisual() {
 static void cbAlarmToggle(lv_event_t *e) {
     alarmEnabled = !alarmEnabled;
     alarmArmedThisMinute = true; // frisch scharf, verhindert Sofort-Trigger falls gerade Alarmzeit erreicht ist
+    saveAlarmToPrefs();
     updateAlarmToggleVisual();
 }
 
@@ -713,6 +868,19 @@ static void buildMenuTab(lv_obj_t *parent) {
     lv_label_set_text(lblQuickSelected, "Frage: ALLES GUT?");
     addMenuButton(menuFragenScreen, "Naechste Frage", cbQuickNext);
     addMenuButton(menuFragenScreen, "Frage senden", cbQuickSend);
+
+    // BLE-Fragen-Editor Ein/Aus (siehe docs/Erweiterung_S3_BLE_Fragen_Editor.md)
+    // - Standard AUS, macht die S3 nur bei Bedarf per BLE sichtbar.
+    lv_obj_t *bleRow = lv_obj_create(menuFragenScreen);
+    lv_obj_set_size(bleRow, LV_PCT(94), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(bleRow, LV_FLEX_FLOW_ROW);
+    lv_obj_t *lblBle = lv_label_create(bleRow);
+    lv_obj_set_style_text_font(lblBle, &lv_font_montserrat_18, 0);
+    lv_label_set_text(lblBle, "BLE Fragen-Editor:");
+    swBleEditor = lv_switch_create(bleRow);
+    lv_obj_set_style_transform_zoom(swBleEditor, 320, 0);
+    lv_obj_add_event_cb(swBleEditor, cbBleEditorToggle, LV_EVENT_VALUE_CHANGED, NULL);
+
     addMenuButton(menuFragenScreen, LV_SYMBOL_LEFT " Zurueck", cbMenuBack);
 
     // -- Alltag-Unteransicht: eigenes Icon-Grid [Wecker][Stoppuhr] /
@@ -995,6 +1163,11 @@ void setup() {
     instance.begin();
     beginLvglHelper(instance);
     instance.setBrightness(DEVICE_MAX_BRIGHTNESS_LEVEL);
+
+    // Vor buildUi(), damit die initialen Anzeigen (Weckzeit-Vorschau,
+    // Alarm-Toggle-Farbe) schon die geladenen Werte zeigen.
+    loadCustomQuestionsFromPrefs();
+    loadAlarmFromPrefs();
 
     buildUi();
 

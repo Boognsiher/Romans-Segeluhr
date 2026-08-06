@@ -4,8 +4,11 @@
 > früheren Entscheidung "S3 hat kein BLE mehr" — hier gezielt wieder
 > eingeführt, aber ein-/ausschaltbar, nicht dauerhaft aktiv.
 
-## Status: KONZEPT — Umsetzung durch Claude Code gegen den aktuellen Code
-von Segeluhr_TWatch_S3.ino.
+## Status: 🔧 UMGESETZT, KOMPILIERT (06.08.2026) — noch nicht auf Hardware
+getestet. Firmware-Seite (BLE-Service, Speicherung, Fragen-Browser) und
+Web-Bluetooth-Seite (`docs/fragen_editor_web/index.html`) beide fertig.
+Siehe Abschnitt 5 (aktualisiert) für die getroffenen Entscheidungen bei den
+zuvor offenen Punkten.
 
 ## 1. Ziel
 Zusätzlich zu den 10 vordefinierten Fragen (`QuickQuestion`-Enum) soll die
@@ -59,21 +62,57 @@ Handy-Browser (Web Bluetooth) --BLE--> S3 (neuer GATT-Service, nur wenn
 - Alternative für iOS-Nutzer: Fallback auf Option A von vorhin (Text direkt
   auf der Uhr eintippen) bleibt bestehen, nur unbequemer
 
-## 5. Offene technische Punkte
-- [ ] Wie viele eigene Fragen sollen maximal speicherbar sein (Speicher-
-  limit auf dem ESP32 klein halten)?
-- [ ] Paketformat für Custom-Fragen in `QuickMessageRequest` festlegen —
-  Text direkt mitschicken (Paketgröße wächst) vs. nur Text-ID (Land-Uhr
-  müsste den Text dann selbst kennen, was bei "auf dem Handy erstellt"
-  bedeutet: der Text muss erst noch von der S3 zur Ultra transportiert
-  werden, damit die Ultra überhaupt weiß, was gefragt wurde — vermutlich
-  einfacher: Text bis zu einer Maximallänge direkt im LoRa-Paket mitschicken)
-- [ ] BLE-Service/Characteristic-UUIDs definieren (analog zu den
-  bestehenden UUIDs im Android-BLE-Protokoll, aber komplett getrennt davon
-  — das ist ein neuer, eigenständiger Service auf der S3, nicht derselbe
-  wie der Handy-zu-Uhr-Service aus der alten Architektur)
-- [ ] Sicherheit: soll der BLE-Fragen-Editor einen PIN/eine Bestätigung
-  brauchen, oder reicht "muss erst im Menü eingeschaltet werden" als
-  Zugriffsschutz? (Vermutlich ausreichend für den Anwendungsfall, da BLE ja
-  standardmäßig aus ist und nur kurz für den Editier-Vorgang eingeschaltet
-  wird)
+## 5. Offene technische Punkte — jetzt entschieden/umgesetzt
+
+- [x] **Maximale Anzahl eigener Fragen: 5** (`CUSTOM_QUESTION_MAX_COUNT` in
+  `QuickMessages.h`). Ringpuffer — die sechste neue Frage überschreibt die
+  älteste, kein "Speicher voll"-Fehler nötig.
+- [x] **Paketformat**: Text direkt im `QuickMessageRequest` mitgeschickt
+  (`isCustom`-Flag + `customText[32]`), wie in der Doku als "vermutlich
+  einfacher" vorgeschlagen. `QuickMessageRequest` dadurch von 4 auf 37 Byte
+  gewachsen — unkritisch, Quick-Messages sind sporadisch, nicht der 30s-
+  Status-Broadcast. **Beide Firmwares müssen zusammen neu geflasht werden**
+  (wie schon beim Zeit-Sync-Feature), sonst laufen Sender/Empfänger
+  auseinander.
+- [x] **BLE-UUIDs definiert**: Service `7a6e0001-b5a3-f393-e0a9-e50e24dcca9e`,
+  Characteristic (WRITE) `7a6e0002-...` — eigener Präfix (`7a6e` statt
+  `6f6e` beim Android-Protokoll), komplett getrennter Service, existiert
+  nur auf der S3.
+- [x] **Sicherheit**: kein PIN, wie in der ersten Doku-Version schon
+  vermutet — "BLE ist per Menü-Toggle standardmäßig aus" reicht als
+  Zugriffsschutz für diesen Anwendungsfall.
+
+## 6. Implementierungsdetails
+
+- **Firmware** (`Segeluhr_TWatch_S3.ino`): `CustomQuestion`-Array (Text +
+  `used`-Flag), persistiert per `Preferences` (NVS, Namespace `customq`).
+  BLE-Toggle im Fragen-Screen (`swBleEditor`) ruft
+  `startFragenEditorBle()`/`stopFragenEditorBle()` — Start macht
+  `NimBLEDevice::init()` + Server/Service/Characteristic frisch auf, Stop
+  ruft `NimBLEDevice::deinit(true)` (kompletter Abbau, nicht nur
+  Advertising-Stop) — damit läuft der BLE-Stack tatsächlich nur, solange
+  der Editor eingeschaltet ist, nicht nur "unsichtbar aber aktiv".
+  `FragenEditorWriteCallbacks::onWrite()` nimmt den geschriebenen Text
+  entgegen, kappt ihn bei 31 Zeichen (`CUSTOM_QUESTION_MAX_LEN - 1`) und
+  legt ihn als neue `CustomQuestion` ab.
+- **Fragen-Browser** (`cbQuickNext`/`cbQuickSend`): blättert jetzt über
+  einen kombinierten Index (0-9 = feste `QuickQuestion`, 10-14 = eigene
+  Fragen), überspringt noch leere Custom-Slots automatisch.
+- **Boots-Uhr** (`Segeluhr_TWatch_Ultra.ino`): zeigt eingehende eigene
+  Fragen korrekt an (`quickMessageRequestText()`-Helper in
+  `QuickMessages.h`, wählt automatisch zwischen `quickQuestionText()` und
+  `customText`) — sendet selbst aber weiterhin nur die 10 festen Fragen,
+  da sie keinen BLE-Fragen-Editor hat (wie in Abschnitt 1 beschrieben:
+  eigene Fragen werden auf der S3 erstellt).
+- **Web-Bluetooth-Seite**: `docs/fragen_editor_web/index.html` — eigen-
+  ständige, selbst-enthaltene HTML-Datei (kein Build-Schritt), Textfeld +
+  Verbinden/Senden-Buttons, nutzt `navigator.bluetooth.requestDevice()`
+  gefiltert auf die Service-UUID. Kann direkt als GitHub-Pages-Quelle
+  (`docs/`-Ordner) veröffentlicht oder lokal geöffnet werden.
+
+### Weiterhin offen
+- [ ] Auf Hardware getestet (BLE-Verbindungsaufbau vom Handy, tatsächliches
+  Schreiben einer Frage, Sende-/Empfangs-Test der neuen Frage über LoRa)
+- [ ] Kein Fehler-Feedback zur Webseite, falls eine Frage z.B. wegen
+  falscher Kodierung nicht ankommt — aktuell rein "fire and forget"
+  (Characteristic hat keine READ/NOTIFY-Bestätigung)

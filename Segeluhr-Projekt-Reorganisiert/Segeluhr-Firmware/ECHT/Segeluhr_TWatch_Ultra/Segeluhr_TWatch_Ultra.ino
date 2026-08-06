@@ -795,7 +795,7 @@ void loraReceiveTick() {
         // gegen Selbstempfang der eigenen gerade gesendeten Pakete (siehe
         // Kommentar bei sendEncrypted()/buildAndSendStatusPacket()).
         if (req.sender != DeviceId::LAND) return;
-        Serial.printf("[Quick-Msg RX] Frage von Land: seq=%d %s\n", req.sequence, quickQuestionText(req.question));
+        Serial.printf("[Quick-Msg RX] Frage von Land: seq=%d %s\n", req.sequence, quickMessageRequestText(req));
         handleIncomingQuickMessageRequest(req);
     } else if (msgType == 0x11 && plainLen >= sizeof(QuickMessageResponse)) {
         QuickMessageResponse resp;
@@ -1393,7 +1393,7 @@ static void updateQuickOverlay() {
     if (lblQuickOverlay != nullptr) {
         if (haveIncomingQuestion) {
             lv_label_set_text_fmt(lblQuickOverlay, "FRAGE VON LAND:\n%s\n\nkurz/Geste hoch=JA\nlang/schuetteln=NEIN",
-                                   quickQuestionText(incomingRequest.question));
+                                   quickMessageRequestText(incomingRequest));
             lv_obj_clear_flag(lblQuickOverlay, LV_OBJ_FLAG_HIDDEN);
         } else if (showAnswerOverlay) {
             lv_label_set_text_fmt(lblQuickOverlay, "ANTWORT:\n%s", quickAnswerText(lastReceivedAnswer));

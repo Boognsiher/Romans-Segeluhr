@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Segeluhr — Eigene Frage senden</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b1622;
+    --panel: #142331;
+    --border: #24384a;
+    --text: #e6f0f7;
+    --muted: #7d93a6;
+    --accent: #2f9e6e;
+    --accent-hover: #37b47e;
+    --danger: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 20px;
+  }
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+  }
+  h1 {
+    font-size: 1.3rem;
+    margin: 0 0 4px;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: 0 0 20px;
+  }
+  label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  input[type="text"] {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #0e1b28;
+    color: var(--text);
+    font-size: 1rem;
+    margin-bottom: 6px;
+  }
+  input[type="text"]:disabled { opacity: 0.5; }
+  .charcount {
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+  button {
+    width: 100%;
+    padding: 13px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 10px;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #btnConnect {
+    background: #1b3a52;
+    color: var(--text);
+  }
+  #btnConnect:not(:disabled):hover { background: #234a68; }
+  #btnSend {
+    background: var(--accent);
+    color: #06251a;
+  }
+  #btnSend:not(:disabled):hover { background: var(--accent-hover); }
+  .status {
+    font-size: 0.85rem;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #0e1b28;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    min-height: 20px;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .status.ok { color: var(--accent); border-color: var(--accent); }
+  .status.err { color: #ff8b7a; border-color: var(--danger); }
+  .warn {
+    margin-top: 16px;
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.5;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .warn b { color: var(--text); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>⛵ Segeluhr — Eigene Frage</h1>
+    <p class="sub">Schickt eine eigene Ja/Nein-Frage an die Land-Uhr (T-Watch S3). Vorher am Uhr-Menü unter „Fragen“ den Schalter „BLE Fragen-Editor“ einschalten.</p>
+
+    <button id="btnConnect">🔗 Mit Uhr verbinden</button>
+
+    <label for="questionInput">Frage (max. 31 Zeichen)</label>
+    <input type="text" id="questionInput" maxlength="31" placeholder="z.B. Kaffee schon fertig?" disabled>
+    <div class="charcount"><span id="charCount">0</span>/31</div>
+
+    <button id="btnSend" disabled>Senden</button>
+
+    <div class="status" id="status">Noch nicht verbunden.</div>
+
+    <div class="warn">
+      <b>Nur Chrome/Edge auf Android oder Desktop.</b> Web Bluetooth wird von
+      Safari auf iOS grundsätzlich nicht unterstützt (Apple-Einschränkung) —
+      hat jemand aus der Crew ein iPhone, funktioniert diese Seite dort nicht.
+      Die Uhr macht sich per BLE nur sichtbar, solange der Fragen-Editor-
+      Schalter im Menü eingeschaltet ist.
+    </div>
+  </div>
+
+<script>
+  // Muss exakt mit FRAGEN_EDITOR_SERVICE_UUID / FRAGEN_EDITOR_CHAR_UUID in
+  // Segeluhr_TWatch_S3.ino übereinstimmen (siehe docs/Erweiterung_S3_BLE_Fragen_Editor.md).
+  const SERVICE_UUID = '7a6e0001-b5a3-f393-e0a9-e50e24dcca9e';
+  const CHAR_UUID    = '7a6e0002-b5a3-f393-e0a9-e50e24dcca9e';
+
+  const btnConnect = document.getElementById('btnConnect');
+  const btnSend = document.getElementById('btnSend');
+  const input = document.getElementById('questionInput');
+  const charCount = document.getElementById('charCount');
+  const statusEl = document.getElementById('status');
+
+  let characteristic = null;
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  input.addEventListener('input', () => {
+    charCount.textContent = input.value.length;
+  });
+
+  if (!navigator.bluetooth) {
+    setStatus('Web Bluetooth wird von diesem Browser nicht unterstützt (siehe Hinweis unten).', 'err');
+    btnConnect.disabled = true;
+  }
+
+  btnConnect.addEventListener('click', async () => {
+    try {
+      setStatus('Suche Uhr …');
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SERVICE_UUID] }]
+      });
+      device.addEventListener('gattserverdisconnected', () => {
+        characteristic = null;
+        input.disabled = true;
+        btnSend.disabled = true;
+        setStatus('Verbindung getrennt.', 'err');
+      });
+      setStatus('Verbinde mit ' + device.name + ' …');
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+      characteristic = await service.getCharacteristic(CHAR_UUID);
+      input.disabled = false;
+      btnSend.disabled = false;
+      setStatus('Verbunden mit ' + device.name + '.', 'ok');
+    } catch (err) {
+      setStatus('Verbindung fehlgeschlagen: ' + err.message, 'err');
+    }
+  });
+
+  btnSend.addEventListener('click', async () => {
+    const text = input.value.trim();
+    if (!text || !characteristic) return;
+    try {
+      btnSend.disabled = true;
+      await characteristic.writeValue(new TextEncoder().encode(text));
+      setStatus('Gesendet: "' + text + '"', 'ok');
+      input.value = '';
+      charCount.textContent = '0';
+    } catch (err) {
+      setStatus('Senden fehlgeschlagen: ' + err.message, 'err');
+    } finally {
+      btnSend.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

@@ -64,13 +64,28 @@ enum class DeviceId : uint8_t {
     LAND = 1  // T-Watch S3
 };
 
+// Maximale Länge eigener, per BLE-Fragen-Editor erstellter Fragen (siehe
+// docs/Erweiterung_S3_BLE_Fragen_Editor.md) - inkl. NUL-Terminator. Text
+// wird direkt im LoRa-Paket mitgeschickt (Doku-Empfehlung: "vermutlich
+// einfacher als nur eine Text-ID"), die Land-Uhr muss den Text also nicht
+// vorher separat zur Boots-Uhr transportieren.
+constexpr uint8_t CUSTOM_QUESTION_MAX_LEN = 32;
+
+// Wie viele eigene Fragen die Land-Uhr gleichzeitig speichert (Speicher-
+// limit auf dem ESP32 klein halten, siehe Doku Abschnitt 5) - bei Erreichen
+// überschreibt eine neue Frage die älteste (Ringpuffer), kein Voll-Fehler
+// nötig.
+constexpr uint8_t CUSTOM_QUESTION_MAX_COUNT = 5;
+
 #pragma pack(push, 1)
 // Anfrage: "Ich stelle dir Frage X"
 struct QuickMessageRequest {
     uint8_t       msgType = 0x10; // zur Unterscheidung von LoRaStatusPacket auf Empfängerseite
     uint8_t       sequence;       // eigener Zähler für Quick-Messages
     DeviceId      sender;
-    QuickQuestion question;
+    QuickQuestion question;              // gültig, wenn isCustom == 0
+    uint8_t       isCustom = 0;          // 0/1 statt bool - sauberer in einem #pragma-pack-Struct
+    char          customText[CUSTOM_QUESTION_MAX_LEN] = {0}; // gültig, wenn isCustom == 1, NUL-terminiert
 };
 
 // Antwort: "Auf deine Frage X (sequence) antworte ich mit Ja/Nein"
@@ -81,6 +96,13 @@ struct QuickMessageResponse {
     QuickAnswer   answer;
 };
 #pragma pack(pop)
+
+// Liefert den Anzeigetext einer Anfrage, unabhängig davon ob sie eine der
+// 10 vordefinierten oder eine eigene (BLE-Editor) Frage ist - zentrale
+// Stelle statt an jeder Anzeigestelle isCustom selbst abzufragen.
+inline const char* quickMessageRequestText(const QuickMessageRequest &req) {
+    return req.isCustom ? req.customText : quickQuestionText(req.question);
+}
 
 // Timeout, nach dem eine unbeantwortete Frage auf dem sendenden Gerät
 // als "keine Antwort" markiert wird
