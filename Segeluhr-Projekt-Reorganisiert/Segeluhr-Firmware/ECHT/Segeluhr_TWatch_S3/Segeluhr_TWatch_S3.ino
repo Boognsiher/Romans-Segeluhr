@@ -1002,8 +1002,15 @@ static void buildUi() {
     tabMenu   = lv_tabview_add_tab(tv, "Menu");
 
     // -- Haupt-Tab: grosser Status-Text + Uhrzeit + Verbindungsindikator --
+    // Hardware-Test-Feedback 06.08.: "WARTE AUF START" lief ohne Breiten-
+    // begrenzung über den 240px-Bildschirmrand hinaus und wurde beidseitig
+    // abgeschnitten ("nur ARTE AUF STAR lesbar") - derselbe Fehler wie
+    // vorher im Menü, hier nachgezogen. Alle Labels auf Haupt-/Detail-Tab
+    // bekommen deshalb jetzt Breite + Zeilenumbruch + Zentrierung.
     lblStatusBig = lv_label_create(tabMain);
     lv_obj_set_style_text_font(lblStatusBig, &lv_font_montserrat_28, 0);
+    lv_obj_set_width(lblStatusBig, LV_PCT(94));
+    lv_label_set_long_mode(lblStatusBig, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lblStatusBig, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblStatusBig, LV_ALIGN_TOP_MID, 0, 20);
 
@@ -1015,23 +1022,41 @@ static void buildUi() {
     // Tabview auf Kind-Labels - deshalb ab hier überall explizit gesetzt.
     lblConnIndicator = lv_label_create(tabMain);
     lv_obj_set_style_text_font(lblConnIndicator, &lv_font_montserrat_24, 0);
+    lv_obj_set_width(lblConnIndicator, LV_PCT(94));
+    lv_label_set_long_mode(lblConnIndicator, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lblConnIndicator, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblConnIndicator, LV_ALIGN_BOTTOM_MID, 0, -10);
 
     // -- Detail-Tab --
     lblDetailDistance = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailDistance, &lv_font_montserrat_28, 0);
+    lv_obj_set_width(lblDetailDistance, LV_PCT(94));
+    lv_label_set_long_mode(lblDetailDistance, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lblDetailDistance, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblDetailDistance, LV_ALIGN_TOP_MID, 0, 6);
     lblDetailSog = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailSog, &lv_font_montserrat_28, 0);
+    lv_obj_set_width(lblDetailSog, LV_PCT(94));
+    lv_label_set_long_mode(lblDetailSog, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lblDetailSog, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblDetailSog, LV_ALIGN_TOP_MID, 0, 48);
     lblDetailBattery = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailBattery, &lv_font_montserrat_28, 0);
+    lv_obj_set_width(lblDetailBattery, LV_PCT(94));
+    lv_label_set_long_mode(lblDetailBattery, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lblDetailBattery, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblDetailBattery, LV_ALIGN_TOP_MID, 0, 90);
     lblDetailWind = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailWind, &lv_font_montserrat_28, 0);
+    lv_obj_set_width(lblDetailWind, LV_PCT(94));
+    lv_label_set_long_mode(lblDetailWind, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lblDetailWind, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblDetailWind, LV_ALIGN_TOP_MID, 0, 132);
     lblDetailPacketInfo = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailPacketInfo, &lv_font_montserrat_18, 0);
+    lv_obj_set_width(lblDetailPacketInfo, LV_PCT(94));
+    lv_label_set_long_mode(lblDetailPacketInfo, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lblDetailPacketInfo, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblDetailPacketInfo, LV_ALIGN_BOTTOM_MID, 0, -10);
 
     // -- Menü-Tab --
