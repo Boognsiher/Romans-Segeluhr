@@ -32,7 +32,8 @@ sealed interface ConnectionState {
 /**
  * BLE-Central für die Galaxy Watch, siehe docs/Erweiterung_GalaxyWatch_WearOS.md.
  * Übernimmt für GPS-/Wind-/Batterie-Notifies die Rolle, die bisher die
- * T-Watch-Firmware (NimBLE-Arduino) gespielt hat: scannt nach
+ * T-Watch-Ultra-Firmware (NimBLE-Arduino, die einzige Boots-Uhr mit
+ * BLE-Central-Rolle zum Handy — die S3 ist reine Land-Uhr) gespielt hat: scannt nach
  * BleProtocol.SERVICE_UUID, verbindet, abonniert die Notify-Characteristics.
  *
  * Läuft PARALLEL zur normalen Wear-OS-Companion-Kopplung (klassisches
@@ -41,7 +42,7 @@ sealed interface ConnectionState {
  * erste Test-Screen klärt, bevor der volle Screen-Umfang gebaut wird.
  *
  * TODO (nach diesem ersten Test): Reconnect-Logik bei Verbindungsabbruch (die
- * T-Watch-Firmware macht das bereits, hier bewusst noch nicht), Control-
+ * T-Watch-Ultra-Firmware macht das bereits, hier bewusst noch nicht), Control-
  * Writes (CMD_*), Haptik-Notify -> Vibrator-Trigger, Race-/Home-Status,
  * Time-Sync-Read direkt nach Connect.
  */

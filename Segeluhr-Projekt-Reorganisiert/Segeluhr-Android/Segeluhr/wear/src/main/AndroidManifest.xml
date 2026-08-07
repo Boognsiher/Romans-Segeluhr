@@ -5,8 +5,9 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <!-- BLE Central-Rolle (Uhr verbindet sich zum Handy-GATT-Server), analog
-         zur bisherigen T-Watch-Firmware, siehe BLE_Protokoll.md und
-         docs/Erweiterung_GalaxyWatch_WearOS.md. Ab API 31 ersetzen
+         zur bisherigen T-Watch-Ultra-Firmware (die einzige Boots-Uhr mit
+         BLE-Central-Rolle zum Handy — die S3 ist reine Land-Uhr), siehe
+         BLE_Protokoll.md und docs/Erweiterung_GalaxyWatch_WearOS.md. Ab API 31 ersetzen
          BLUETOOTH_SCAN/BLUETOOTH_CONNECT die alten BLUETOOTH*-Permissions;
          neverForLocation, weil nur nach der bekannten Service-UUID gefiltert
          wird, keine Positionsbestimmung über den Scan stattfindet. -->

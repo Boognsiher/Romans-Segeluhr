@@ -1,15 +1,27 @@
 # Erweiterung: Galaxy-Watch-App (Wear OS), ohne LoRa
 
-**Nicht Teil der ursprünglichen Spezifikation.** Ziel: eine dritte
-Boots-Uhr-Option neben T-Watch S3/Ultra — eine Samsung Galaxy Watch
-(getestet: Watch5 Pro LTE, Wear OS 3+) als "Mit Uhr"-Client der Handy-App.
-**Bewusst ohne LoRa** — LoRa wird in diesem Projekt ausschliesslich für die
-Boot→Land-Fernverbindung gebraucht (`Segeluhr_TWatch_Ultra` →
-`Segeluhr_WatchS_LoRaEmpfaenger`, siehe `Erweiterung_Heimweg.md` /
-`BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md`). Die reine Boots-Armbanduhr-Rolle
-(bisher `Segeluhr_TWatch_S3`) nutzt gar kein LoRa, nur BLE zum Handy — genau
-diese Rolle übernimmt die Galaxy Watch, per Standard-Android-BLE-APIs statt
-NimBLE-Arduino-Firmware.
+**Nicht Teil der ursprünglichen Spezifikation.** Ziel: eine Alternative zur
+`Segeluhr_TWatch_Ultra` — eine Samsung Galaxy Watch (getestet: Watch5 Pro
+LTE, Wear OS 3+) als "Mit Uhr"-Client der Handy-App, für den Segler selbst
+am Handgelenk auf dem Boot.
+
+**Wichtige Rollenklärung** (siehe `PROJEKT_STATUS.md`): In diesem Projekt
+gibt es genau **eine** Boots-Uhr mit BLE-Verbindung zum Handy — die
+**T-Watch Ultra**. Die T-Watch S3 ist eine reine **Land-Uhr für Begleiter**
+(bekommt Status-Updates ausschliesslich per LoRa von der Ultra, hat *keine*
+BLE-Central-Verbindung zum Handy, siehe `Erweiterung_Land_Boot_LoRa_Kommunikation.md`).
+Die Galaxy Watch übernimmt hier also die Rolle der **Ultra**, nicht der S3.
+
+**Bewusst ohne LoRa**: Die Ultra macht auf dem Boot zwei Dinge parallel —
+(1) BLE-Central zum Handy für Live-Nav-Daten/Haptik (das, was hier
+nachgebaut wird) und (2) LoRa-Sender, der denselben Status zusätzlich an
+die Land-Uhr (S3) funkt, siehe `Erweiterung_Heimweg.md` /
+`BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md`. Die Galaxy Watch hat keine
+LoRa-Hardware und übernimmt deshalb nur Teil (1) — sie kann selbst keine
+Land-Uhr über Distanz informieren. Wer die Begleiter-Land-Funktion
+(Fernstatus) braucht, bleibt auf die T-Watch-S3/Ultra-LoRa-Kombination
+angewiesen; die Galaxy Watch ist rein der Ersatz für die Ultra am
+Handgelenk des Seglers.
 
 ## Warum das funktioniert, ohne die Handy-Seite anzufassen
 
@@ -18,7 +30,7 @@ NimBLE-Arduino-Firmware.
 Senden jedes verbundene Gerät in einer Schleife — der GATT-Server war also
 schon vor dieser Erweiterung mehrklient-fähig. Die Galaxy Watch verbindet
 sich als zusätzlicher/alternativer BLE-Central mit demselben Custom-Service
-(`6f6e0001-...`) und denselben Characteristics wie die T-Watch S3. Am
+(`6f6e0001-...`) und denselben Characteristics wie die T-Watch Ultra. Am
 `BleProtocol.kt`/`BleGattServerManager.kt` auf Handy-Seite wurde für diesen
 ersten Schritt **nichts geändert**.
 
@@ -55,7 +67,7 @@ serielles Abonnieren von CHAR_GPS, CHAR_BATTERY, CHAR_WIND (Notify) →
 Anzeige von SOG/COG/Wind/Handy-Akku auf einem einzigen Compose-Screen.
 
 **Bewusst noch nicht implementiert** (folgt nach dem Verbindungstest):
-- Reconnect-Logik bei Verbindungsabbruch (T-Watch-Firmware macht das
+- Reconnect-Logik bei Verbindungsabbruch (T-Watch-Ultra-Firmware macht das
   bereits; hier bricht die Verbindung aktuell endgültig ab)
 - CHAR_CONTROL (Schreiben von `CMD_*` — Countdown starten, Wind
   kalibrieren, Trainingsmodus wählen etc.)
@@ -72,13 +84,16 @@ Anzeige von SOG/COG/Wind/Handy-Akku auf einem einzigen Compose-Screen.
 - **⚠️ NICHT kompiliert** — kein `gradlew`/lokales Gradle in diesem Repo
   vorhanden, nur manuell durchgesehen (wie beim Rest des Android-Projekts).
   Vor Nutzung unbedingt in Android Studio bauen + auf der Watch testen.
-- **Touch bei Nässe/Salzwasser ungeklärt**: Grund, warum die T-Watch S3
-  bewusst *ohne* Touch-Interaktion läuft (Auto-Focus, steckt im
-  wasserdichten Sack) — kapazitive Touchscreens sind mit nassen/salzigen
-  Fingern unzuverlässig. Falls die Galaxy Watch direkt am Handgelenk (ohne
-  Sack) getragen wird, ist Bedienbarkeit beim Segeln ein reales Risiko.
-  Mögliche Abhilfe: physische Tasten der Watch5 Pro statt Touch für die
-  wichtigsten Aktionen nutzen.
+- **Touch bei Nässe/Salzwasser ungeklärt**: Die T-Watch Ultra steckt beim
+  Segeln in einem wasserdichten Sack am Handgelenk — Touch ist dort laut
+  Firmware-Kommentar "nicht möglich", deshalb läuft die Bedienung primär
+  über den physischen Taster (kurzer/langer Druck für JA/NEIN,
+  Quick-Messages etc.), Touch ist nur optionaler Bonus bei ruhigem Wasser.
+  Die Galaxy Watch hat keinen vergleichbaren dedizierten Aktions-Taster
+  (nur Seitentaste/Home). Falls sie ebenfalls im Sack getragen wird, ist
+  unklar, wie die wichtigsten Aktionen (Countdown, Manöver-Bestätigung)
+  ohne Touch ausgelöst werden sollen — muss vor dem CHAR_CONTROL-Ausbau
+  geklärt werden (z.B. Seitentaste + Doppelklick-Geste als Ersatz).
 - **Parallele Bluetooth-Verbindung ungetestet**: Watch ist bereits klassisch
   mit dem Handy gekoppelt (Benachrichtigungen etc.); ob die zusätzliche
   eigene BLE-GATT-Verbindung zum selben Handy zuverlässig funktioniert, ist

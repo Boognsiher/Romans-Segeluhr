@@ -7,8 +7,10 @@ import java.util.UUID
 /**
  * Gegenstück zu app/.../ble/BleProtocol.kt auf der Handy-Seite — dieselben
  * UUIDs/Byte-Layouts, hier aber DEKODIEREND statt encodierend, weil die Uhr
- * hier die Central-/Client-Rolle übernimmt (bisher: T-Watch-Firmware, siehe
- * BLE_Protokoll.md und docs/Erweiterung_BLE_Wind_RaceStatus.md).
+ * hier die Central-/Client-Rolle übernimmt (bisher: T-Watch-Ultra-Firmware —
+ * die einzige Boots-Uhr mit BLE-Central-Rolle zum Handy, die S3 ist reine
+ * Land-Uhr ohne diese Verbindung, siehe BLE_Protokoll.md und
+ * docs/Erweiterung_BLE_Wind_RaceStatus.md).
  *
  * TODO bei weiterem Ausbau: Duplikation zwischen hier und der Handy-Seite
  * (identische UUIDs/Layouts an zwei Stellen gepflegt) in ein gemeinsames
