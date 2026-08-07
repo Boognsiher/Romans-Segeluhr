@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Segeluhr"
 include(":app")
+include(":wear")
