@@ -46,10 +46,13 @@ gerade läuft, was Baustelle und was nur Test ist.
 - ~~**Duty-Cycle-/Kanalwahl für LoRa in der Schweiz**~~ ✅ erledigt
   06.08.2026: Frequenz beider Firmwares von 868.0 MHz auf 869.525 MHz
   umgestellt (Band 869.4-869.65 MHz, 10% statt 1% Duty-Cycle in der
-  Schweiz erlaubt). Beide Sketches nach der Änderung fehlerfrei neu
-  kompiliert (`esp32:esp32:twatch_ultra` / `esp32:esp32:twatchs3`), noch
-  nicht auf Hardware geflasht/getestet — nächster Schritt vor dem ersten
-  Praxiseinsatz.
+  Schweiz erlaubt). **Korrektur 09.08.2026:** war hier fälschlich noch als
+  "nicht geflasht" notiert - tatsächlich wurden beide Uhren schon am
+  06.08. mit diesem Stand geflasht (Commit `320ab09`, nach der
+  Frequenzänderung `56cf7d7`). Zusätzlich heute (09.08.) indirekt
+  bestätigt: Ultra frisch mit aktuellem Source (weiterhin 869.525 MHz)
+  geflasht, S3 hat direkt danach wieder erfolgreich die Zeit per LoRa
+  übernommen - das geht nur, wenn beide auf derselben Frequenz funken.
 - **DRV2605-Haptik-Stärke**: aktuelle stärkste verfügbare ROM-Effekte
   genutzt, aber keine echte Software-Gain-Kontrolle möglich (siehe
   Firmware-Kommentar bei `triggerHaptic()`) — bei Bedarf nochmal
