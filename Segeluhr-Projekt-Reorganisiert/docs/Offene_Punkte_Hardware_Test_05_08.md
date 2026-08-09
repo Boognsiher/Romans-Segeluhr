@@ -6,6 +6,31 @@
 > nicht fertig/getestet ist, damit die nächste Session direkt weitermachen
 > kann, statt von vorne zu suchen.
 
+## ✅ 09.08.2026 (Folgesession): beide "Als Nächstes"-Punkte von unten erledigt
+
+- **S3-Zeitanzeige erneut getestet: lief korrekt.** Vermutlich lag der
+  06.08.-Fehler tatsächlich an einem der vielen Test-Reflashes an diesem Tag
+  (siehe Theorie unten) - ein sauberer Boot-Zyklus hat gereicht. **Root
+  Cause im Code bleibt unverändert** (`loraReceiveTick()`/
+  `timeSyncedFromBoat` synct weiterhin nur einmal pro S3-Boot) - Roman-
+  Entscheidung 09.08.: aktuell kein robusterer Fix nötig, im Zweifel S3
+  einfach per RST neu starten.
+- **94px-Tab-Leisten-Fix auf der Ultra jetzt auf Hardware verifiziert:**
+  gedrehte Eck-Tabs (Nav/Menu bzw. Uhr/Setup) sitzen sauber sichtbar in der
+  Gehäuse-Ecke, nichts mehr abgeschnitten.
+- **Neuer Bug gefunden + gefixt: "Segelmodus erzwingen" hatte keinen Weg
+  zurück.** Der Schalter dafür sitzt im Setup-Tab des Alltags-Screens, der
+  aber genau dann verlassen wird (Wechsel zu `screenSegeln`) - und
+  `appModeTick()` überspringt den automatischen Rückfall komplett, solange
+  `forceSegelnMode` gesetzt ist (auch ohne BLE-Verbindung). Sackgasse. Fix:
+  neuer Button "Segelmodus beenden (zurück zu Alltag)" ganz oben im
+  Segeln-Menü (`cbExitForcedSegeln()` in `Segeluhr_TWatch_Ultra.ino`),
+  kompiliert + auf COM17 geflasht + auf Hardware verifiziert.
+- Nebenbei geklärt: die übrigen Menü-Buttons im Segeln-Menü (Countdown
+  Start, Wind-Kalibrierung, Training, Wegpunkte, ...) senden nur BLE-Befehle
+  ans Handy - ohne verbundenes Handy tun sie beim Testen mit erzwungenem
+  Segelmodus erwartungsgemäß nichts, das ist kein Bug.
+
 ## ✅ 06.08.2026 (Folgesession): BLE Ultra↔Handy zum ersten Mal getestet — 3 Bugs gefixt
 
 Erster echter Verbindungstest Ultra↔Handy (siehe Punkt oben, war bis dahin
@@ -35,28 +60,13 @@ eine längere Session/echten Segeltörn verifiziert:
   kleine Uhrzeit in der globalen Statusleiste (oben mittig, auf jedem
   Screen sichtbar).
 
-## 🔴 Als Nächstes testen (höchste Priorität)
+## ✅ Beide untenstehenden Punkte erledigt (siehe 09.08.-Eintrag ganz oben)
 
-- **S3 (Land-Uhr) zeigt eine falsche/alte Zeit an, die sich nicht mehr
-  aktualisiert** (06.08. beim heutigen Test aufgefallen). Verdacht: der
-  LoRa-Zeit-Sync in `Segeluhr_TWatch_S3.ino` (`loraReceiveTick()`, Flag
-  `timeSyncedFromBoat`) synct bewusst nur EINMAL pro Boot der S3 — falls
-  das erste empfangene `LoRaStatusPacket` zufällig noch vor dem BLE-Sync
-  der Ultra ankam (`timeHour == 0xFF`) oder aus einem der vielen
-  Test-Reflashes heute einen veralteten Wert enthielt, bleibt die S3 auf
-  diesem falschen Stand hängen, weil weitere Pakete ignoriert werden. Noch
-  nicht untersucht/gefixt — vermutlich reicht ein RST der S3 (frischer Boot,
-  frischer Erst-Sync), langfristig evtl. besser: laufend synchronisieren
-  statt nur einmal, oder zumindest bei grosser Abweichung nachsynchronisieren.
-- **Tab-Leisten-Fix auf der Ultra (94px Höhe) ist UNGETESTET** — letzte
-  Änderung der Session, danach nicht mehr geflasht-und-geprüft. Bitte als
-  Erstes morgen: RST drücken, Segeln- und Alltag-Screen durchklicken, prüfen
-  ob die zwei gedrehten Eck-Tabs (Nav/Menu bzw. Uhr/Setup) jetzt vollständig
-  sichtbar sind (nicht mehr abgeschnitten) UND gut lesbar in der
-  Gehäuse-Ecke sitzen. Falls immer noch abgeschnitten: `OUTER_TAB_LIFT_PX`
-  und `lv_tabview_set_tab_bar_size(...)` in `buildSegelnScreen()` /
-  `buildAlltagScreen()` weiter anpassen (beide Werte sind an zwei Stellen
-  dupliziert, siehe Kommentare im Code).
+- ~~S3 (Land-Uhr) zeigt eine falsche/alte Zeit an~~ — 09.08. erneut
+  getestet, lief korrekt. Root Cause im Code unverändert (Einmal-Sync pro
+  Boot), siehe oben — bewusst nicht weiter verändert (Roman-Entscheidung).
+- ~~Tab-Leisten-Fix auf der Ultra (94px Höhe) ist UNGETESTET~~ — 09.08. auf
+  Hardware verifiziert, Eck-Tabs sitzen sauber sichtbar.
 
 ## 🟡 Gestensteuerung — unkalibriert, nur ein Messpunkt
 

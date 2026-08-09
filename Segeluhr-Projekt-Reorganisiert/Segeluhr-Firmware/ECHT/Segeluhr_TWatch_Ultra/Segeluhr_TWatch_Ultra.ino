@@ -264,6 +264,11 @@ static bool forceSegelnMode = false;   // Menü-Schalter "Segelmodus erzwingen"
 static uint32_t disconnectAtMs = 0;    // 0 = aktuell verbunden oder noch nie verbunden
 static const uint32_t SEGELN_FALLBACK_GRACE_MS = 30000; // Kurzabbruch tolerieren
 
+// Hier (statt erst bei den übrigen Alltags-Tab-Widgets weiter unten) vorab
+// deklariert: cbExitForcedSegeln() im Segeln-Menü (siehe dort) muss diesen
+// Schalter synchron halten können, wird aber vor buildAlltagScreen() gebaut.
+static lv_obj_t *swForceSegeln = nullptr;
+
 void switchToMode(AppMode mode); // Vorwärtsdeklaration (Screens werden weiter unten gebaut)
 
 static void appModeTick() {
@@ -1517,6 +1522,18 @@ static void cbClearWaypoint(lv_event_t *e) {
 static void cbQuickNext(lv_event_t *e) { onButtonShortPress(); }
 static void cbQuickSend(lv_event_t *e) { onButtonLongPress(); }
 
+// Bugfix 09.08.2026: "Segelmodus erzwingen" (Schalter im Setup-Tab des
+// Alltags-Screens) hatte keinen Weg zurück - sobald aktiv, wird der
+// Alltags-Screen (und damit der Schalter selbst) durch switchToMode()
+// verlassen, und appModeTick() ignoriert Verbindungsverlust komplett,
+// solange forceSegelnMode gesetzt ist (siehe dort). Sackgasse. Deshalb hier
+// zusätzlich im Segeln-Menü verfügbar, das immer erreichbar bleibt.
+static void cbExitForcedSegeln(lv_event_t *e) {
+    forceSegelnMode = false;
+    if (swForceSegeln != nullptr) lv_obj_clear_state(swForceSegeln, LV_STATE_CHECKED); // Schalter im Setup-Tab synchron halten
+    switchToMode(MODE_ALLTAG);
+}
+
 // Feedback nach erstem Hardware-Test: Standard-LVGL-Buttongroesse/-Font ist
 // auf dem echten Bildschirm zu klein/schmal - deshalb hier fest auf eine
 // grosszuegige Mindesthoehe + groesseren Font.
@@ -1544,6 +1561,12 @@ static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
 static void buildMenuTab(lv_obj_t *parent) {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(parent, 6, 0);
+
+    // Ganz oben, nicht unten: einziger Ausweg, falls "Segelmodus erzwingen"
+    // aktiv ist (siehe cbExitForcedSegeln-Kommentar) - soll nicht erst
+    // erscrollt werden müssen.
+    addSubHeader(parent, "-- Modus --");
+    addMenuButton(parent, "Segelmodus beenden (zurueck zu Alltag)", cbExitForcedSegeln);
 
     addSubHeader(parent, "-- Countdown --");
     addMenuButton(parent, "Start", cbCountdownStart);
@@ -1593,7 +1616,8 @@ static lv_obj_t *screenSegeln;
 static lv_obj_t *lblClockBig, *lblClockDate;
 static lv_obj_t *lblStopwatch;
 static lv_obj_t *lblOwnBattery;
-static lv_obj_t *swForceSegeln;
+// swForceSegeln jetzt weiter oben deklariert (siehe forceSegelnMode) - hier
+// nicht mehr, wird nur noch gebaut (buildAlltagScreen)
 
 static uint32_t stopwatchStartMs = 0;
 static uint32_t stopwatchElapsedMs = 0;
