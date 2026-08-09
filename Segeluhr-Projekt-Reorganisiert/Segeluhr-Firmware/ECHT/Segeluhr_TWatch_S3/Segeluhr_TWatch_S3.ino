@@ -359,8 +359,27 @@ static void cbQuickSend(lv_event_t *e) {
 #define FRAGEN_EDITOR_SERVICE_UUID "7a6e0001-b5a3-f393-e0a9-e50e24dcca9e"
 #define FRAGEN_EDITOR_CHAR_UUID    "7a6e0002-b5a3-f393-e0a9-e50e24dcca9e"
 
+// Boot-Position fuers Handy an Land (siehe docs/Erweiterung_Landuhr_Kartenansicht.md).
+// Bewusst dieselbe Service/Ein-Aus-Schalter wie der Fragen-Editor statt
+// eines zweiten GATT-Servers - beides haengt ohnehin am selben "BLE an"-
+// Zustand, ein zweiter Server waere nur unnoetig doppelte Verwaltung.
+#define POSITION_CHAR_UUID         "7a6e0003-b5a3-f393-e0a9-e50e24dcca9e"
+
 static bool bleEditorEnabled = false;
 static lv_obj_t *swBleEditor; // BLE-Fragen-Editor Ein/Aus, siehe cbBleEditorToggle()
+static NimBLECharacteristic *pPositionChar = nullptr; // nullptr wenn BLE aus, siehe stopFragenEditorBle()
+
+// Payload von POSITION_CHAR_UUID (NOTIFY), 10 Byte, little-endian (ESP32-
+// nativ) - Android-Seite siehe ble/LandUhrClient.kt in der App:
+//   int32 latE7, int32 lonE7, uint8 gpsValidFix, uint8 sequence
+#pragma pack(push, 1)
+struct BlePositionPayload {
+    int32_t latE7;
+    int32_t lonE7;
+    uint8_t gpsValidFix;
+    uint8_t sequence; // = lastPacket.sequence, damit die App neue Updates erkennt
+};
+#pragma pack(pop)
 
 // Empfängt den Frage-Text von der Web-Bluetooth-Seite (einfaches Textfeld +
 // "Senden", siehe Doku Abschnitt 2) und legt ihn als neue eigene Frage ab.
@@ -380,6 +399,15 @@ static void startFragenEditorBle() {
     NimBLEService *pService = pServer->createService(FRAGEN_EDITOR_SERVICE_UUID);
     NimBLECharacteristic *pChar = pService->createCharacteristic(FRAGEN_EDITOR_CHAR_UUID, NIMBLE_PROPERTY::WRITE);
     pChar->setCallbacks(&fragenEditorWriteCallbacks);
+    pPositionChar = pService->createCharacteristic(POSITION_CHAR_UUID, NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ);
+    // Direkt beim Einschalten schon den letzten bekannten Stand eintragen
+    // (falls schon vor dem BLE-Einschalten ein LoRa-Paket da war) - sonst
+    // liest die App beim Verbinden erstmal 0/kein Fix, bis das naechste
+    // LoRa-Paket (bis zu 30s) reinkommt.
+    if (havePacketYet) {
+        BlePositionPayload initial{lastPacket.latE7, lastPacket.lonE7, lastPacket.gpsValidFix, lastPacket.sequence};
+        pPositionChar->setValue((uint8_t *)&initial, sizeof(initial));
+    }
     pServer->start();
     pServer->getAdvertising()->addServiceUUID(FRAGEN_EDITOR_SERVICE_UUID);
     pServer->getAdvertising()->start();
@@ -388,6 +416,7 @@ static void startFragenEditorBle() {
 
 static void stopFragenEditorBle() {
     NimBLEDevice::deinit(true); // clearAll=true: Server/Service/Characteristic komplett abbauen
+    pPositionChar = nullptr; // Objekt wurde durch deinit() zerstoert, Pointer nicht mehr gueltig
     Serial.println("[Fragen-Editor] BLE gestoppt");
 }
 
@@ -1193,6 +1222,15 @@ static void loraReceiveTick() {
         lastPacketReceivedMillis = millis();
         havePacketYet = true;
         Serial.printf("[LoRa RX] Status OK: seq=%d state=%d\n", lastPacket.sequence, (int)lastPacket.state);
+
+        // Landuhr-Kartenansicht (siehe docs/Erweiterung_Landuhr_Kartenansicht.md):
+        // nur relevant, wenn BLE gerade an ist (pPositionChar != nullptr,
+        // siehe startFragenEditorBle()/stopFragenEditorBle()).
+        if (pPositionChar != nullptr) {
+            BlePositionPayload posPayload{lastPacket.latE7, lastPacket.lonE7, lastPacket.gpsValidFix, lastPacket.sequence};
+            pPositionChar->setValue((uint8_t *)&posPayload, sizeof(posPayload));
+            pPositionChar->notify();
+        }
 
         // Zeit-Sync von der Boots-Uhr (siehe LoRaPacket.h-Kommentar): einmalig
         // beim ersten gueltigen Paket nach dem Booten, nicht bei jedem Paket -

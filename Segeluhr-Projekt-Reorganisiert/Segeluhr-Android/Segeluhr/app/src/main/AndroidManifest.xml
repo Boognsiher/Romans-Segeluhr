@@ -15,6 +15,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Zusätzlich BLE Central-Rolle im Land-Modus (Handy = Scanner/Client zur
+         Land-Uhr), siehe docs/Erweiterung_Landuhr_Kartenansicht.md -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
 
     <!-- Vibration für Signalmuster -->
     <uses-permission android:name="android.permission.VIBRATE" />

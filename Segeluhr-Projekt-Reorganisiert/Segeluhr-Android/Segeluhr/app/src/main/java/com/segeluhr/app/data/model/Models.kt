@@ -7,6 +7,18 @@ package com.segeluhr.app.data.model
  */
 enum class OperationMode { STANDALONE, WITH_WATCH }
 
+/**
+ * Rolle des Handys, NICHT zu verwechseln mit [OperationMode] (das regelt
+ * "Ohne/Mit Uhr" beim Segeln). SAILOR = klassische App-Rolle (Handy =
+ * BLE-GATT-Server für die Boots-Uhr, alle bisherigen Tabs). SHORE = neue
+ * Rolle für die Person an Land (Handy = BLE-Client zur Land-Uhr, zeigt nur
+ * die Boot-Position auf einer Karte), siehe
+ * docs/Erweiterung_Landuhr_Kartenansicht.md. Bewusst als komplett eigener
+ * Umschalter statt als dritter OperationMode-Wert, weil beide Rollen
+ * technisch nichts miteinander zu tun haben (Server- vs. Client-BLE-Rolle).
+ */
+enum class AppRole { SAILOR, SHORE }
+
 enum class RaceState { MENU, COUNTDOWN, RACE }
 
 enum class TrainMode { OFF, TACK_ONLY, JIBE_ONLY, RACE }

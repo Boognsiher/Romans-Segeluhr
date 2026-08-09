@@ -59,6 +59,13 @@ dependencies {
     // GPS
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
+    // Karte für den Land-Modus (siehe docs/Erweiterung_Landuhr_Kartenansicht.md) -
+    // osmdroid statt Google Maps: kein API-Key/Cloud-Konto nötig, OSM-Kacheln
+    // werden von osmdroid automatisch auf Disk gecacht (spätere Offline-
+    // Nutzung eines bereits besuchten Gebiets funktioniert dadurch von selbst,
+    // volles Vorab-Herunterladen eines Gebiets ist noch nicht gebaut).
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+
     // Automatische See-Erkennung (Overpass-API), siehe
     // docs/Erweiterung_Automatische_See_Erkennung.md — JSON-Parsing über das
     // in Android eingebaute org.json, kein zusätzlicher JSON-Dependency nötig.

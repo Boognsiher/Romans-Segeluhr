@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.segeluhr.app.core.GeoPoint
+import com.segeluhr.app.data.model.AppRole
 import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.ui.components.SectionCard
 import com.segeluhr.app.ui.components.WaypointRow
@@ -30,6 +31,7 @@ fun SetupScreen(
     onClearWaypoint: (String) -> Unit,
     onWakeLockChanged: (Boolean) -> Unit,
     onOperationModeChanged: (OperationMode) -> Unit,
+    onAppRoleChanged: (AppRole) -> Unit,
     onRequestLocationPermission: () -> Unit,
     onResetAll: () -> Unit,
 ) {
@@ -71,6 +73,33 @@ fun SetupScreen(
             Text(
                 "Für den Competition-Modus (startet automatisch beim Startsignal). Ohne gesetzte Luvbake wird sie genau gegen den Wind geschätzt. Die Entlastungsboje ist optional — falls gesetzt, wird nach der Luvbake ein kurzer Halbwind-Schlag dorthin eingeplant.",
                 fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        SectionCard("Rolle") {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                val roles = listOf(
+                    AppRole.SAILOR to "Auf dem Boot",
+                    AppRole.SHORE to "An Land",
+                )
+                roles.forEach { (role, label) ->
+                    val active = state.appRole == role
+                    Button(
+                        onClick = { onAppRoleChanged(role) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (active) Teal else Panel2Dark,
+                            contentColor = if (active) Color(0xFF04201C) else TextDim,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) { Text(label) }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "\"An Land\" zeigt statt der Segel-Tabs nur eine Karte mit der zuletzt " +
+                    "per LoRa empfangenen Boot-Position (verbindet sich per Bluetooth mit " +
+                    "der Land-Uhr, nicht mit dem Boot direkt). Zurück geht's im Karten-Screen selbst.",
+                fontSize = 12.sp, color = TextDim,
             )
         }
 
@@ -129,6 +158,16 @@ fun SetupScreen(
                     if (state.gpsFresh) "GPS aktiv." else "Warte auf GPS-Fix…",
                     fontSize = 13.sp,
                 )
+            }
+            // Bugfix 09.08.2026: eigener Button statt an locationPermissionGranted
+            // gekoppelt - sonst bleibt BLUETOOTH_SCAN bei Installs mit schon
+            // erteiltem Standortzugriff für immer unangefragt, "An Land" findet
+            // dann nie eine Land-Uhr (siehe Kommentar in MainActivity.kt).
+            if (!state.bluetoothScanPermissionGranted) {
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = onRequestLocationPermission, modifier = Modifier.fillMaxWidth()) {
+                    Text("Bluetooth-Berechtigung erlauben (für \"An Land\")")
+                }
             }
         }
 

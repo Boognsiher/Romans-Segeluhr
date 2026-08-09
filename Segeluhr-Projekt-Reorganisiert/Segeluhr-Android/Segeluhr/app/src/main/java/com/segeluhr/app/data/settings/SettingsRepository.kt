@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.segeluhr.app.core.GeoPoint
 import com.segeluhr.app.core.LakeCircle
+import com.segeluhr.app.data.model.AppRole
 import com.segeluhr.app.data.model.OperationMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -45,6 +46,7 @@ class SettingsRepository(private val context: Context) {
 
         val WAKE_LOCK_ENABLED = booleanPreferencesKey("wake_lock_enabled")
         val OPERATION_MODE = stringPreferencesKey("operation_mode")
+        val APP_ROLE = stringPreferencesKey("app_role")
     }
 
     data class Waypoints(
@@ -202,6 +204,17 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setOperationMode(mode: OperationMode) {
         context.dataStore.edit { it[Keys.OPERATION_MODE] = mode.name }
+    }
+
+    val appRoleFlow: Flow<AppRole> = context.dataStore.data.map { p ->
+        when (p[Keys.APP_ROLE]) {
+            AppRole.SHORE.name -> AppRole.SHORE
+            else -> AppRole.SAILOR // Default: bisheriges Verhalten, niemand faellt versehentlich in den Land-Modus
+        }
+    }
+
+    suspend fun setAppRole(role: AppRole) {
+        context.dataStore.edit { it[Keys.APP_ROLE] = role.name }
     }
 
     suspend fun currentWaypoints(): Waypoints = waypointsFlow.first()

@@ -31,8 +31,13 @@ struct LoRaStatusPacket {
     int16_t   distanceRemainingM;        // Distanz zu Bake/Ziel/Heimweg-Ziel, -1 falls n/a
     uint16_t  sogCkn;                    // Speed over Ground, 1/100 Knoten
     int16_t   windDirDeg;                // 0-359, -1 falls unbekannt
-    int32_t   latE7;                     // Breitengrad * 1e7 (für spätere Kartendarstellung)
+    int32_t   latE7;                     // Breitengrad * 1e7 (für Kartendarstellung, siehe unten)
     int32_t   lonE7;                     // Längengrad * 1e7
+    // Ob latE7/lonE7 gerade einen echten GPS-Fix vom Handy widerspiegeln
+    // (siehe docs/Erweiterung_Landuhr_Kartenansicht.md) - ohne dieses Flag
+    // liesse sich ein "noch kein Fix" (Felder bleiben bei 0,0) nicht von
+    // einem echten Fix bei 0°N/0°E unterscheiden.
+    uint8_t   gpsValidFix;                // 0 = kein/verlorener Fix, 1 = gueltig
     // Zeit-Sync für die Land-Uhr (siehe docs/Erweiterung_Land_Boot_LoRa_Kommunikation.md,
     // war dort als offener Punkt markiert): die Boots-Uhr bezieht ihre Zeit
     // per bestehendem BLE-Zeit-Sync vom Handy, die Land-Uhr hat seit der
@@ -47,11 +52,11 @@ struct LoRaStatusPacket {
     uint8_t   timeDay;                   // 1-31
     uint8_t   timeMonth;                 // 1-12
     uint8_t   timeYearOffset;            // Jahr - 2000
-    // Gesamtgröße: 1+1+1+2+1+2+2+2+4+4+6 = 26 Bytes
+    // Gesamtgröße: 1+1+1+2+1+2+2+2+4+4+1+6 = 27 Bytes
 };
 #pragma pack(pop)
 
-static_assert(sizeof(LoRaStatusPacket) == 26, "LoRaStatusPacket Größe hat sich geändert - Doku und Empfänger pruefen!");
+static_assert(sizeof(LoRaStatusPacket) == 27, "LoRaStatusPacket Größe hat sich geändert - Doku und Empfänger pruefen!");
 
 // Sende-Intervall (ms) - beide Seiten sollten diesen Wert kennen,
 // damit die Land-Uhr "Signal verloren" korrekt timen kann.

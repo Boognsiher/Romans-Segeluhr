@@ -20,8 +20,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
+import com.segeluhr.app.data.model.AppRole
 import com.segeluhr.app.ui.screens.*
 import com.segeluhr.app.ui.theme.SegeluhrTheme
+import com.segeluhr.app.viewmodel.LandUhrViewModel
 import com.segeluhr.app.viewmodel.SegeluhrViewModel
 
 private enum class Tab(val label: String) {
@@ -37,12 +40,19 @@ class MainActivity : ComponentActivity() {
     ) { results ->
         val locationGranted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true
         viewModel.onLocationPermissionResult(locationGranted)
+        // Nur relevant ab API 31 (siehe hasBluetoothScanPermission()) - auf
+        // aelteren Versionen kommt BLUETOOTH_SCAN gar nicht in "results" vor,
+        // dann bleibt hasBluetoothScanPermission() (true) massgeblich.
+        if (results.containsKey(Manifest.permission.BLUETOOTH_SCAN)) {
+            viewModel.onBluetoothScanPermissionResult(results[Manifest.permission.BLUETOOTH_SCAN] == true)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         checkLocationPermission()
+        viewModel.onBluetoothScanPermissionResult(hasBluetoothScanPermission())
 
         setContent {
             SegeluhrTheme {
@@ -55,6 +65,17 @@ class MainActivity : ComponentActivity() {
         ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    // Bugfix 09.08.2026: BLUETOOTH_SCAN (API 31+, noetig fuer den Land-Modus,
+    // siehe docs/Erweiterung_Landuhr_Kartenansicht.md) wurde bei Installationen,
+    // die den Standortzugriff schon vorher erteilt hatten, NIE angefragt - der
+    // Button dafuer im Setup-Tab war an locationPermissionGranted gekoppelt,
+    // das bei solchen Installs schon true war. App fand die Land-Uhr nie,
+    // SecurityException im Logcat bestaetigt. Deshalb jetzt als eigener Check.
+    private fun hasBluetoothScanPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) ==
+                PackageManager.PERMISSION_GRANTED
+
     private fun checkLocationPermission() {
         viewModel.onLocationPermissionResult(hasLocationPermission())
     }
@@ -64,6 +85,11 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             perms.add(Manifest.permission.BLUETOOTH_ADVERTISE)
             perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+            // Fürs Scannen als BLE-Central im Land-Modus, siehe
+            // docs/Erweiterung_Landuhr_Kartenansicht.md - hier zusammen mit den
+            // anderen BLE-Permissions angefragt, unabhängig von der aktuellen
+            // Rolle (einmalig beim ersten Start, nicht bei jedem Rollenwechsel).
+            perms.add(Manifest.permission.BLUETOOTH_SCAN)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             perms.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -75,6 +101,25 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
+
+    // Rollen-Umschalter (siehe docs/Erweiterung_Landuhr_Kartenansicht.md):
+    // im Land-Modus komplett eigener Screen-Baum statt der Segler-Tabs
+    // darunter - beide Rollen haben inhaltlich nichts miteinander zu tun.
+    // LandUhrViewModel bewusst erst hier (per Compose-viewModel()) angelegt,
+    // nicht eager in der Activity wie SegeluhrViewModel - soll nur laufen/
+    // scannen, wenn diese Rolle auch aktiv gewählt ist.
+    if (state.appRole == AppRole.SHORE) {
+        val landViewModel: LandUhrViewModel = composeViewModel()
+        val landState by landViewModel.state.collectAsState()
+        LandUhrScreen(
+            state = landState,
+            onConnect = landViewModel::connect,
+            onDisconnect = landViewModel::disconnect,
+            onSwitchToSailorMode = { viewModel.setAppRole(AppRole.SAILOR) },
+        )
+        return
+    }
+
     var selectedTab by remember { mutableStateOf(Tab.NORMAL) }
 
     Scaffold(
@@ -132,6 +177,7 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onClearWaypoint = viewModel::clearWaypoint,
                     onWakeLockChanged = viewModel::setWakeLockEnabled,
                     onOperationModeChanged = viewModel::setOperationMode,
+                    onAppRoleChanged = viewModel::setAppRole,
                     onRequestLocationPermission = onRequestPermissions,
                     onResetAll = viewModel::resetAll,
                 )

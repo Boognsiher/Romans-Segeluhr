@@ -12,6 +12,7 @@ import com.segeluhr.app.core.*
 import com.segeluhr.app.data.db.AppDatabase
 import com.segeluhr.app.data.db.toEntity
 import com.segeluhr.app.data.db.toRecord
+import com.segeluhr.app.data.model.AppRole
 import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.data.model.RaceState
 import com.segeluhr.app.data.model.TrainMode
@@ -135,7 +136,17 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 _uiState.update { it.copy(operationMode = mode) }
             }
         }
+        viewModelScope.launch {
+            // Nur UI-State, kein Seiteneffekt noetig - MainActivity liest
+            // state.appRole und entscheidet, welcher Screen-Baum ueberhaupt
+            // gezeigt wird (siehe docs/Erweiterung_Landuhr_Kartenansicht.md).
+            settingsRepo.appRoleFlow.collect { role -> _uiState.update { it.copy(appRole = role) } }
+        }
         startTicker()
+    }
+
+    fun onBluetoothScanPermissionResult(granted: Boolean) {
+        _uiState.update { it.copy(bluetoothScanPermissionGranted = granted) }
     }
 
     fun onLocationPermissionResult(granted: Boolean) {
@@ -494,5 +505,17 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         } else {
             SegeluhrForegroundService.stop(app)
         }
+    }
+
+    /**
+     * Nur Persistenz - siehe docs/Erweiterung_Landuhr_Kartenansicht.md.
+     * Bewusst hier statt in einem eigenen ViewModel: diese Instanz bleibt
+     * (aktuelle MainActivity-Struktur) so oder so am Leben, auch waehrend
+     * die UI im Land-Modus zeigt, und ist der einzige Schreibzugriff auf
+     * SettingsRepository - so bleibt "zurueck zu Boot-Modus" aus dem
+     * Land-Screen ohne zweite SettingsRepository-Instanz moeglich.
+     */
+    fun setAppRole(role: AppRole) {
+        viewModelScope.launch { settingsRepo.setAppRole(role) }
     }
 }

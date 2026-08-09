@@ -668,6 +668,10 @@ void buildAndSendStatusPacket() {
     pkt.windDirDeg = (windData.haveData && windData.calibrated) ? (int16_t)windData.dirDeg : -1;
     pkt.latE7 = (int32_t)(gpsData.lat * 1e7);
     pkt.lonE7 = (int32_t)(gpsData.lon * 1e7);
+    // Fuer die Kartenansicht auf der Land-Uhr (siehe
+    // docs/Erweiterung_Landuhr_Kartenansicht.md) - ohne dieses Flag liesse
+    // sich "noch kein Fix" nicht von einem echten Fix bei 0,0 unterscheiden.
+    pkt.gpsValidFix = gpsData.validFix ? 1 : 0;
 
     // Zeit-Sync fuer die Land-Uhr (siehe LoRaPacket.h-Kommentar). Nur senden,
     // wenn die eigene RTC schon sinnvoll gestellt ist (per bestehendem

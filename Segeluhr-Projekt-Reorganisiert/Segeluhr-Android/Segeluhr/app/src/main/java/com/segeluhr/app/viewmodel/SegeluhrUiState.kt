@@ -72,6 +72,14 @@ data class SegeluhrUiState(
     // Setup
     val wakeLockEnabled: Boolean = false,
     val operationMode: OperationMode = OperationMode.STANDALONE,
+    // Boot/Land-Rollen-Umschalter, siehe docs/Erweiterung_Landuhr_Kartenansicht.md
+    val appRole: AppRole = AppRole.SAILOR,
     val watchConnected: Boolean = false,
     val locationPermissionGranted: Boolean = false,
+    // Separat von locationPermissionGranted, weil sonst der Anfrage-Button im
+    // Setup nie erscheint, wenn Standort schon (von frueher) erteilt ist, aber
+    // BLUETOOTH_SCAN (neu fuer den Land-Modus, siehe
+    // docs/Erweiterung_Landuhr_Kartenansicht.md) noch fehlt - reproduzierter
+    // Bug 09.08.2026: App fand die Land-Uhr nie, SecurityException im Logcat.
+    val bluetoothScanPermissionGranted: Boolean = false,
 )
