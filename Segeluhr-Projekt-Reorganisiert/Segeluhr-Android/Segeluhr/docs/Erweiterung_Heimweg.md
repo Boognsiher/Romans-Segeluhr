@@ -61,3 +61,36 @@ automatisch informiert, sobald der Heimweg-Modus aktiviert wird (inkl.
 ETA). Das ist noch nicht umgesetzt, da dafür erst die Hardware/das
 Protokoll geklärt werden muss (Handy hat kein eingebautes LoRa-Funkmodul) —
 siehe die offene Diskussion dazu in der Projekt-Historie.
+
+## Offener Punkt (10.08.2026): ETA/VMC reagiert zu direkt auf den momentanen Kurs — "Distanz" auf der Land-Uhr dadurch verfälscht
+
+Gefunden beim Durchspielen der Heimweg-Vorschau (siehe
+`docs/Erweiterung_Landuhr_Kartenansicht.md`-Nachbarschaft, interaktives
+HTML-Mockup): `HomeEngine.etaFrom()` nutzt aktuell die **momentane** VMC
+(`sogKn * cos(COG − Peilung)`), neu berechnet bei jedem 1-Hz-Tick direkt aus
+dem aktuellen `Fix.cogDeg`. Beim Kreuzen am Wind (was beim Heimweg-Modus
+der Normalfall ist, sobald das Ziel näher als 45° am Wind liegt) pendelt
+der COG durch jede Wende hindurch kurzzeitig stark — die VMC schwankt
+dadurch mit, bis hin zu `null` (keine ETA) während der Wende selbst, obwohl
+die tatsächliche Annäherung ans Ziel über die ganze Kreuz-Etappe hinweg
+stetig weiterläuft.
+
+**Zusätzlich verstärkt** wird das auf der Land-Uhr: die Boots-Uhr hat kein
+echtes Distanz-Feld aus dem BLE-Protokoll und rechnet sich `distanceRemainingM`
+für das LoRa-Paket aus `etaMinutes * aktuelle SOG` zurück (siehe
+`BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md`, Abschnitt "Weiterhin offen").
+Das nutzt die rohe Fahrt-durchs-Wasser statt der VMC — die angezeigte
+Distanz ist dadurch um den Faktor `1 / cos(Winkel COG↔Peilung)` zu hoch,
+sobald nicht exakt direkt aufs Ziel zugesegelt wird, und "unbekannt"
+während einer Wende, selbst wenn geografisch längst spürbar näher.
+
+**Entscheidung (Roman, 10.08.2026): Logik grundsätzlich überdenken statt nur
+dokumentieren.** Die ETA/VMC-Berechnung soll **träger** werden — kurzfristige
+Kursänderungen mit grossem Momentaufnahme-Effekt (v.a. während einer Wende)
+sollen die angezeigte ETA/Distanz nicht mehr sofort durcheinanderbringen.
+Naheliegender Ansatz (noch nicht final): eine Glättung/gleitender
+Mittelwert über VMC oder direkt über die tatsächliche Distanz-Änderung
+(ähnlich dem bestehenden `CourseTracker`-Muster für den "ruhigen Kurs" bei
+der Windkalibrierung), statt der aktuellen sofortigen Tick-für-Tick-
+Neuberechnung. Konkretes Zeitfenster/Verfahren noch offen — siehe
+Implementierung, sobald entschieden.

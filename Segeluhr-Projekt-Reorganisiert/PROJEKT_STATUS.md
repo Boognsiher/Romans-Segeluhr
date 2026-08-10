@@ -49,6 +49,23 @@ gerade läuft, was Baustelle und was nur Test ist.
   kein `distanceTraveledM`-Feld, das ist reine Firmware-Arbeit (beide
   Uhren müssten neu geflasht werden), siehe
   `docs/BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md`.
+- **ETA/VMC zu reaktiv auf Momentan-Kurs, Distanz auf Land-Uhr dadurch
+  verfälscht** (gefunden 10.08. beim Durchspielen der Heimweg-HTML-Vorschau):
+  `HomeEngine.etaFrom()` nutzt die VMC aus dem jeweils aktuellen 1-Hz-Tick
+  (`sogKn * cos(COG−Peilung)`) ohne jede Glättung — beim Kreuzen am Wind
+  (Heimweg-Normalfall, sobald Ziel <45° zum Wind liegt) schwankt der COG
+  durch jede Wende hindurch stark, ETA/VMC damit mit, bis zu `null` während
+  der Wende selbst. Auf der Land-Uhr verstärkt sich das zusätzlich: die
+  Boots-Uhr rechnet `distanceRemainingM` fürs LoRa-Paket aus
+  `etaMinutes * rohe SOG` zurück (kein echtes Distanz-Feld im
+  BLE-Protokoll) statt aus VMC — angezeigte Distanz dadurch um Faktor
+  `1/cos(Winkel)` zu hoch bzw. "unbekannt" während der Wende, obwohl real
+  stetig näher. **Roman-Entscheidung 10.08.: Logik grundsätzlich
+  überdenken, nicht nur dokumentieren** — ETA/VMC soll träger werden,
+  kurzfristige Kursänderungen mit grossem Einfluss (v.a. während einer
+  Wende) sollen nicht mehr sofort durchschlagen. Naheliegend: Glättung/
+  gleitender Mittelwert ähnlich dem bestehenden `CourseTracker`-Muster,
+  Details siehe `docs/Erweiterung_Heimweg.md`. **Noch nicht implementiert.**
 - ~~**Duty-Cycle-/Kanalwahl für LoRa in der Schweiz**~~ ✅ erledigt
   06.08.2026: Frequenz beider Firmwares von 868.0 MHz auf 869.525 MHz
   umgestellt (Band 869.4-869.65 MHz, 10% statt 1% Duty-Cycle in der
