@@ -591,7 +591,12 @@ static void detailScreenUpdate() {
         lv_label_set_text(lblDetailWind, "Wind: unbekannt");
     }
     unsigned long ageMs = millis() - lastPacketReceivedMillis;
-    lv_label_set_text_fmt(lblDetailPacketInfo, "Paket #%d, %lus alt", lastPacket.sequence, ageMs / 1000);
+    // distanceTraveledM (10.08.2026 neu im Paket, siehe LoRaPacket.h) hier
+    // statt eines eigenen Labels mit reingepackt - spart eine weitere
+    // Zeile auf dem kleinen Display, gleiches Muster wie schon Paket-
+    // Nummer/Alter.
+    lv_label_set_text_fmt(lblDetailPacketInfo, "Paket #%d, %lus alt, bisher %.1f km",
+                          lastPacket.sequence, ageMs / 1000, lastPacket.distanceTraveledM / 1000.0);
 }
 
 static void updateMenuScreen() {

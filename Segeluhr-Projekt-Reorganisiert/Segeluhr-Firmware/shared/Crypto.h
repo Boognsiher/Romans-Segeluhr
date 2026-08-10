@@ -36,7 +36,8 @@ static const uint8_t AES_KEY[AES_KEY_LEN] = {
 };
 
 // Maximale Nutzlast, die wir verschlüsseln - großzügig bemessen, unsere
-// größten Pakete (LoRaStatusPacket = 20 Byte) liegen weit darunter.
+// größten Pakete (LoRaStatusPacket = 31 Byte, Stand 10.08.2026) liegen
+// weit darunter.
 constexpr size_t CRYPTO_MAX_PAYLOAD = 64;
 constexpr size_t CRYPTO_MAX_BUFFER = LORA_NONCE_LEN + CRYPTO_MAX_PAYLOAD;
 

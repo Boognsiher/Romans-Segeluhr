@@ -156,18 +156,29 @@ object BleProtocol {
     fun encodeBatteryLevel(percent: Int): ByteArray = byteArrayOf(percent.coerceIn(0, 100).toByte())
 
     /**
-     * 3-Byte HomeStatusPacket: uint8 flags, uint16 etaMinutes (little-endian).
-     * etaMinutes = 0xFFFF bedeutet "keine ETA verfügbar" (kein Fortschritt
-     * Richtung Heimatpunkt, oder Heimweg-Modus nicht aktiv).
+     * 7-Byte HomeStatusPacket: uint8 flags, uint16 etaMinutes, uint32
+     * distanceTraveledM (little-endian). etaMinutes = 0xFFFF bedeutet "keine
+     * ETA verfügbar" (kein Fortschritt Richtung Heimatpunkt, oder
+     * Heimweg-Modus nicht aktiv). distanceTraveledM ist die zurückgelegte
+     * Session-Distanz (core/DistanceTracker.kt) — läuft unabhängig vom
+     * Heimweg-Modus, deshalb IMMER mitgeschickt statt nur bei active=true
+     * (siehe docs/BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md, Erweiterung
+     * 10.08.2026 um die LoRa-Weitergabe an die Land-Uhr).
+     *
+     * War bis 10.08.2026 3 Byte (nur flags+etaMinutes) — die Ultra-Watch
+     * (`onHomeStatusNotify` in Segeluhr_TWatch_Ultra.ino) muss beim
+     * nächsten Flash entsprechend mit aktualisiert werden, sonst liest sie
+     * die neuen 4 Byte nicht.
      */
-    fun encodeHomeStatus(active: Boolean, maneuverNeeded: Boolean, etaMinutes: Int?): ByteArray {
+    fun encodeHomeStatus(active: Boolean, maneuverNeeded: Boolean, etaMinutes: Int?, distanceTraveledM: Int): ByteArray {
         var flags = 0
         if (active) flags = flags or HOME_FLAG_ACTIVE
         if (maneuverNeeded) flags = flags or HOME_FLAG_MANEUVER_NEEDED
         val eta = (etaMinutes ?: 0xFFFF).coerceIn(0, 0xFFFF)
-        val buf = ByteBuffer.allocate(3).order(ByteOrder.LITTLE_ENDIAN)
+        val buf = ByteBuffer.allocate(7).order(ByteOrder.LITTLE_ENDIAN)
         buf.put(flags.toByte())
         buf.putShort(eta.toShort())
+        buf.putInt(distanceTraveledM.coerceAtLeast(0))
         return buf.array()
     }
 

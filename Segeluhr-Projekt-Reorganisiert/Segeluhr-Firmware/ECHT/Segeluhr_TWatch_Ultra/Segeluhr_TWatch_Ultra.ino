@@ -167,6 +167,7 @@ struct HomeData {
     bool active = false;
     bool maneuverNeeded = false;
     int etaMinutes = -1;     // -1 = keine ETA
+    uint32_t distanceTraveledM = 0; // Session-Gesamtstrecke vom Handy, unabhängig vom Heimweg-Modus
     bool haveData = false;
 } homeData;
 
@@ -286,6 +287,9 @@ static uint16_t rdU16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8));
 static int32_t rdI32(const uint8_t *p) {
     return (int32_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24));
 }
+static uint32_t rdU32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
 
 void triggerHaptic(int code);        // Vorwärtsdeklaration
 void refreshActiveScreen();          // Vorwärtsdeklaration
@@ -326,12 +330,18 @@ static void onHapticNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t 
 }
 
 static void onHomeStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
-    if (len < 3) return;
+    // Seit 10.08.2026 7 Byte statt 3 (neues uint32 distanceTraveledM am Ende,
+    // siehe docs/BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md) - Mindestlänge
+    // dafür auf 7 angehoben. Handy und Uhr müssen für dieses Feld immer
+    // zusammen neu geflasht/gebaut werden, sonst bleibt distanceTraveledM
+    // auf 0 (kürzeres altes Paket würde hier sonst verworfen).
+    if (len < 7) return;
     uint8_t flags = data[0];
     uint16_t eta = rdU16(data + 1);
     homeData.active = (flags & HOME_FLAG_ACTIVE) != 0;
     homeData.maneuverNeeded = (flags & HOME_FLAG_MANEUVER) != 0;
     homeData.etaMinutes = (eta == 0xFFFF) ? -1 : (int)eta;
+    homeData.distanceTraveledM = rdU32(data + 3);
     homeData.haveData = true;
     screenNeedsRefresh = true;
 }
@@ -664,6 +674,9 @@ void buildAndSendStatusPacket() {
     } else {
         pkt.distanceRemainingM = -1;
     }
+    // Session-Gesamtstrecke, läuft unabhängig vom Heimweg-Modus mit (echter
+    // Wert vom Handy statt Schätzung, siehe distanceRemainingM oben).
+    pkt.distanceTraveledM = homeData.distanceTraveledM;
     pkt.sogCkn = (uint16_t)(gpsData.sogKn * 100.0);
     pkt.windDirDeg = (windData.haveData && windData.calibrated) ? (int16_t)windData.dirDeg : -1;
     pkt.latE7 = (int32_t)(gpsData.lat * 1e7);

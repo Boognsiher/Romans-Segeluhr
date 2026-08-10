@@ -253,11 +253,11 @@ class BleGattServerManager(private val context: Context) {
      * nichts zum Senden hat.
      */
     @SuppressLint("MissingPermission")
-    fun notifyHomeStatus(active: Boolean, maneuverNeeded: Boolean, etaMinutes: Int?) {
+    fun notifyHomeStatus(active: Boolean, maneuverNeeded: Boolean, etaMinutes: Int?, distanceTraveledM: Int) {
         val server = gattServer ?: return
         val characteristic = homeStatusCharacteristic ?: return
         if (connectedDevices.isEmpty()) return
-        characteristic.value = BleProtocol.encodeHomeStatus(active, maneuverNeeded, etaMinutes)
+        characteristic.value = BleProtocol.encodeHomeStatus(active, maneuverNeeded, etaMinutes, distanceTraveledM)
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, characteristic, false)
         }

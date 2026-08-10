@@ -76,20 +76,32 @@ im Normal-Tab ("Zurückgelegte Strecke" in der Heimweg-Karte), Reset über
 (kein `gradlew` im Projekt, siehe PROJEKT_STATUS.md — vor Nutzung in
 Android Studio bauen).
 
-**Weiterhin offen:** Die Weitergabe per LoRa an die Land-Uhr fehlt noch.
-Das inzwischen tatsächlich implementierte Funkpaket ist NICHT mehr das
-`HomeLoRaPacket` aus diesem Dokument, sondern `LoRaStatusPacket` in
-`Segeluhr-Firmware/shared/LoRaPacket.h` (27 Byte, u.a. bereits mit
-`distanceRemainingM`, aber noch ohne `distanceTraveledM`) — dieses Dokument
-beschreibt insofern nur noch das ursprüngliche Konzept, nicht den
-aktuellen Stand. Um `distanceTraveledM` wirklich an Land anzuzeigen,
-bräuchte es: neues Feld in `LoRaPacket.h`, Befüllung in
-`Segeluhr_TWatch_Ultra.ino` (aus dem BLE-Home-Status oder einer neuen
-eigenen Characteristic vom Handy), Auswertung in `Segeluhr_TWatch_S3.ino`
-(Land) — und **beide Firmwares müssen danach zusammen neu geflasht
-werden**. Bewusst nicht Teil dieser Änderung, da reine Firmware-Arbeit
-(Arduino IDE, nicht Android Studio) und ohnehin nur mit Hardware-Test
-sinnvoll zu verifizieren.
+**Update 10.08.2026: LoRa-Weitergabe implementiert.** Das inzwischen
+tatsächlich implementierte Funkpaket ist NICHT mehr das `HomeLoRaPacket`
+aus diesem Dokument, sondern `LoRaStatusPacket` in
+`Segeluhr-Firmware/shared/LoRaPacket.h` (jetzt 31 Byte, u.a. bereits mit
+`distanceRemainingM` UND `distanceTraveledM`) — dieses Dokument beschreibt
+insofern nur noch das ursprüngliche Konzept, nicht den exakten aktuellen
+Feldnamen/-aufbau. Umsetzung:
+- **Handy -> Ultra (BLE):** Home-Status-Characteristic (`6f6e0006-...`) von
+  3 auf 7 Byte erweitert (`BleProtocol.encodeHomeStatus`) — neues `uint32
+  distanceTraveledM` am Ende, IMMER mitgeschickt (nicht nur wenn Heimweg
+  aktiv ist, die Session-Distanz läuft ja unabhängig davon mit).
+  `SegeluhrViewModel.tick()` übergibt `distanceTracker.totalM`.
+- **Ultra -> Watch S (LoRa):** neues Feld `distanceTraveledM` in
+  `LoRaStatusPacket` (`LoRaPacket.h`, 27 -> 31 Byte), befüllt in
+  `buildAndSendStatusPacket()` aus `homeData.distanceTraveledM`
+  (`onHomeStatusNotify()` liest es aus dem erweiterten BLE-Paket, neue
+  Mindestlänge 7 Byte statt 3).
+- **Watch S (Land):** `detailScreenUpdate()` zeigt es zusätzlich in der
+  Paket-Info-Zeile ("Paket #N, Xs alt, bisher Y km") — kein neues Label,
+  spart Platz auf dem kleinen Display.
+
+**Wichtig: beide Firmwares (Ultra + S3/Land) UND die Android-App müssen
+zusammen neu gebaut/geflasht werden**, sonst laufen Sender/Empfänger
+auseinander (kürzeres altes 3-Byte-BLE-Paket würde vom neuen Ultra-Code
+verworfen, `len < 7`-Check). **Noch nicht kompiliert/getestet** — Test
+heute Abend geplant, siehe `docs/Test_Checkliste_10_08.md`.
 
 ### Sende-Regeln auf der Ultra-Watch
 

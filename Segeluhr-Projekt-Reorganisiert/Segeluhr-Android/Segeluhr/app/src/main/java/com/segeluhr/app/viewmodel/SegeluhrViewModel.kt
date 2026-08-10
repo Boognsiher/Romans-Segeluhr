@@ -304,6 +304,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             active = _uiState.value.homeModeActive,
             maneuverNeeded = homeGuidance?.maneuverNeeded ?: false,
             etaMinutes = homeGuidance?.etaSeconds?.let { (it / 60.0).roundToInt() },
+            distanceTraveledM = distanceTracker.totalM.roundToInt(),
         )
 
         // Erweiterung: Wind- und Race-Status 1x/s an die Uhr (siehe

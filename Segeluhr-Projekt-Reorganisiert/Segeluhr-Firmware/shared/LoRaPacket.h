@@ -52,11 +52,16 @@ struct LoRaStatusPacket {
     uint8_t   timeDay;                   // 1-31
     uint8_t   timeMonth;                 // 1-12
     uint8_t   timeYearOffset;            // Jahr - 2000
-    // Gesamtgröße: 1+1+1+2+1+2+2+2+4+4+1+6 = 27 Bytes
+    // Zurückgelegte Gesamtstrecke der aktuellen Session (Meter), kommt vom
+    // Handy per BLE (Home-Status-Characteristic, core/DistanceTracker.kt)
+    // und läuft unabhängig vom Heimweg-Modus mit - siehe
+    // docs/BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md (Erweiterung 10.08.2026).
+    uint32_t  distanceTraveledM;
+    // Gesamtgröße: 1+1+1+2+1+2+2+2+4+4+1+6+4 = 31 Bytes
 };
 #pragma pack(pop)
 
-static_assert(sizeof(LoRaStatusPacket) == 27, "LoRaStatusPacket Größe hat sich geändert - Doku und Empfänger pruefen!");
+static_assert(sizeof(LoRaStatusPacket) == 31, "LoRaStatusPacket Größe hat sich geändert - Doku und Empfänger pruefen!");
 
 // Sende-Intervall (ms) - beide Seiten sollten diesen Wert kennen,
 // damit die Land-Uhr "Signal verloren" korrekt timen kann.
