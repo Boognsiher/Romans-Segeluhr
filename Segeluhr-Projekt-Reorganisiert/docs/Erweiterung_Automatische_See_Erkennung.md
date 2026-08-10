@@ -115,9 +115,15 @@ zusätzliche Logik, um äußere/innere Ringe aus den Member-Ways zusammenzusetze
 - [x] Toleranz für "am Ufer stehend": `EDGE_TOLERANCE_M = 50.0` — liegt der
   GPS-Fix in keinem gefundenen Gewässer-Polygon, wird das nächstgelegene
   innerhalb von 50m trotzdem akzeptiert.
-- [ ] OpenStreetMap-Attribution in der App **noch nicht ergänzt** (ODbL-
-  Lizenz verlangt Namensnennung, z.B. im Impressum/Über-die-App-Screen) —
-  vor einem Play-Store-Release oder sonstiger Veröffentlichung nachholen.
+- [x]/[ ] OpenStreetMap-Attribution: **10.08. teilweise nachgeholt** — die
+  Kartenkacheln in der Landuhr-Kartenansicht zeigen jetzt einen
+  Copyright-Overlay (siehe `docs/Erweiterung_Landuhr_Kartenansicht.md`,
+  Lizenz-Abschnitt). Für die hier per Overpass geladenen Uferlinien-Daten
+  (nicht direkt als Karte angezeigt, nur zur Geofencing-Berechnung genutzt)
+  fehlt weiterhin ein allgemeiner Hinweis, z.B. im Impressum/
+  Über-die-App-Screen — den gibt's aktuell noch gar nicht. Für privaten
+  Gebrauch kein akuter Blocker, vor einem Play-Store-Release oder
+  sonstiger Veröffentlichung nachholen.
 - [x] Verhältnis zur manuellen Eingabe geklärt: automatische Erkennung
   **ersetzt** die komplette bestehende Kreis-Kette (nicht additiv), manuelle
   Eingabe bleibt als vollwertiger Fallback bestehen (z.B. wenn der See als

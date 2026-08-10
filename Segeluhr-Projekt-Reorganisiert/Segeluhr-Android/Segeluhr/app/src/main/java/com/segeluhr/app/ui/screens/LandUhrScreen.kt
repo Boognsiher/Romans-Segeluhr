@@ -24,6 +24,7 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint as OsmGeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.CopyrightOverlay
 import org.osmdroid.views.overlay.Marker
 
 // 90s, wie LORA_SIGNAL_LOST_THRESHOLD_MS in shared/LoRaPacket.h (3x
@@ -103,6 +104,10 @@ fun LandUhrScreen(
                     setMultiTouchControls(true)
                     controller.setZoom(13.0)
                     controller.setCenter(OsmGeoPoint(47.0, 8.0)) // grobe CH-Mitte, bis der erste Fix da ist
+                    // ODbL-Pflicht-Attribution für OSM-Kartendaten — osmdroid fügt sie NICHT
+                    // automatisch hinzu, muss explizit rein (siehe
+                    // docs/Erweiterung_Landuhr_Kartenansicht.md, Lizenz-Abschnitt).
+                    overlays.add(CopyrightOverlay(ctx))
                     mapViewRef = this
                 }
             },

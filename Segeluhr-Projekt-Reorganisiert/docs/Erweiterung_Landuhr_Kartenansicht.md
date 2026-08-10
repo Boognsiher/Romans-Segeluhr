@@ -109,6 +109,16 @@ teilt damit automatisch auch die Boot-Position.
 - **Keine Bearing/Heading-Anzeige oder Track-Linie** auf der Karte, nur ein
   einzelner Positions-Marker mit dem letzten Stand.
 
+## Lizenz-Hinweis: OpenStreetMap-Attribution
+
+Kartenkacheln kommen über osmdroid vom öffentlichen Mapnik-Tile-Server —
+OSM-Daten stehen unter der **ODbL**, die eine sichtbar angezeigte
+Attribution verlangt. osmdroid fügt diese **nicht automatisch** hinzu
+(`CopyrightOverlay` muss explizit als Overlay hinzugefügt werden). **10.08.
+nachgetragen** in `LandUhrScreen.kt` (`overlays.add(CopyrightOverlay(ctx))`)
+— vorher fehlte sie komplett, war ein echter Nachholbedarf, kein reiner
+Vorsichtsschritt.
+
 ## Testprotokoll 09.08.2026
 
 Erster echter Hardware-Test (zweites Handy als Land-Gerät, per adb/Logcat
