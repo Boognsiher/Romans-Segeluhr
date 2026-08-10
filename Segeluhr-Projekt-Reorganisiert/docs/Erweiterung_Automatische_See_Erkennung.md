@@ -167,5 +167,10 @@ Multipolygon-"relation" erfasst (z.B. mit Inseln oder aus mehreren
 Uferabschnitten zusammengesetzt) — das Zusammensetzen solcher Relationen
 wurde bewusst NICHT implementiert (genau der Teil, der "nicht trivial"
 ist und den Aufwand am meisten erhöht hätte). Liegt der Zielsee nur als
-Relation vor, schlägt die automatische Erkennung fehl und die manuelle
-Eingabe bleibt der Weg.
+Relation vor, schlägt die automatische Erkennung fehl. **10.08.2026:**
+für genau diesen Fall (konkret: Zürichsee, Inseln Ufenau/Lützelau) gibt's
+jetzt einen dritten Weg — `docs/Erweiterung_Seegrenze_Zeichnen.md` (See-
+Grenze selbst auf einer echten Karte einzeichnen, statt am See entlangzufahren).
+Die Kreis-Packungs-Logik dieser Datei ist dabei nach `geo/CirclePacking.kt`
+ausgelagert worden (quellen-unabhängig) — `LakeAutoDetector` selbst bleibt
+funktional unverändert.

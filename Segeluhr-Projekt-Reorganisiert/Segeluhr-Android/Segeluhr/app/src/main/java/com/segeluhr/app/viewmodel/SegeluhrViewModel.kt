@@ -18,6 +18,7 @@ import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.data.model.RaceState
 import com.segeluhr.app.data.model.TrainMode
 import com.segeluhr.app.data.settings.SettingsRepository
+import com.segeluhr.app.geo.CirclePacking
 import com.segeluhr.app.geo.LakeAutoDetector
 import com.segeluhr.app.location.LocationProvider
 import com.segeluhr.app.logic.*
@@ -509,6 +510,37 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 }
             }
             _uiState.update { it.copy(lakeDetectionInProgress = false) }
+        }
+    }
+
+    /**
+     * See-Grenze auf Karte einzeichnen (siehe docs/Erweiterung_Seegrenze_Zeichnen.md)
+     * — Alternative zu [autoDetectLake] für Seen, die als OSM-Relation statt
+     * einfachem "way" erfasst sind (z.B. Zürichsee mit Ufenau/Lützelau als
+     * Inseln) und deshalb von der automatischen Erkennung nicht gefunden
+     * werden. `startLakeDrawing()` blendet den Karten-Screen ein, zentriert
+     * auf den aktuellen GPS-Fix falls vorhanden (sonst zoomt der Screen
+     * selbst weiter raus, siehe LakeDrawScreen).
+     */
+    fun startLakeDrawing() {
+        _uiState.update { it.copy(lakeDrawModeActive = true) }
+    }
+
+    fun cancelLakeDrawing() {
+        _uiState.update { it.copy(lakeDrawModeActive = false) }
+    }
+
+    /** Wird von LakeDrawScreen mit dem fertig eingezeichneten Polygon aufgerufen — ersetzt die komplette bestehende Kreis-Kette, genau wie [autoDetectLake]. */
+    fun finishLakeDrawing(polygon: List<GeoPoint>) {
+        viewModelScope.launch {
+            val circles = CirclePacking.packChain(polygon)
+            if (circles.isEmpty()) {
+                statusSink.setStatus("Eingezeichnete Fläche zu klein/schmal für einen Sicherheitskreis — bitte grösser zeichnen.", StatusLevel.RED)
+            } else {
+                settingsRepo.setLakeCircles(circles)
+                statusSink.setStatus("See-Grenze gespeichert: ${circles.size} Kreis(e) aus ${polygon.size} Punkten.", StatusLevel.GREEN)
+            }
+            _uiState.update { it.copy(lakeDrawModeActive = false) }
         }
     }
 

@@ -30,6 +30,7 @@ fun TrainingScreen(
     onClearWaypoint: (String) -> Unit,
     onAutoDetectLake: () -> Unit,
     onRemoveLakeCircle: (Int) -> Unit,
+    onStartLakeDrawing: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxSize().padding(14.dp),
@@ -85,6 +86,22 @@ fun TrainingScreen(
             ) {
                 Text(if (state.lakeDetectionInProgress) "Erkenne See…" else "See automatisch erkennen")
             }
+            Spacer(Modifier.height(8.dp))
+            // Fallback für Seen, die als OSM-Relation statt einfachem "way"
+            // erfasst sind (automatische Erkennung findet die nicht, siehe
+            // docs/Erweiterung_Seegrenze_Zeichnen.md, z.B. Zürichsee mit
+            // Ufenau/Lützelau als Inseln).
+            androidx.compose.material3.OutlinedButton(
+                onClick = onStartLakeDrawing,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("See-Grenze auf Karte einzeichnen")
+            }
+            Text(
+                "Falls die automatische Erkennung fehlschlägt (z.B. bei grossen Seen mit Inseln) — " +
+                    "auf einer Karte die Uferpunkte antippen, statt physisch am See entlangzufahren.",
+                fontSize = 11.sp, color = TextDim, modifier = Modifier.padding(top = 4.dp),
+            )
             Spacer(Modifier.height(10.dp))
             if (state.lakeCircles.isEmpty()) {
                 Text("Noch kein See-Geofence gesetzt.", fontSize = 12.sp, color = TextDim)

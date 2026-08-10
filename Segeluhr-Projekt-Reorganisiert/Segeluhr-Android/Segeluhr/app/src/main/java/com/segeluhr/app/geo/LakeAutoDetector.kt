@@ -9,8 +9,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import kotlin.math.cos
-import kotlin.math.hypot
 
 /**
  * Automatische See-Erkennung, siehe docs/Erweiterung_Automatische_See_Erkennung.md.
@@ -21,7 +19,7 @@ import kotlin.math.hypot
  * Doku-Vision (OSM-Uferlinie, JTS-Pufferung, Douglas-Peucker, Multipolygone)
  * würde einen kompletten Umbau der Engine brauchen. Stattdessen: Uferlinie
  * per Overpass-API laden, daraus eine KETTE von Kreisen entlang der
- * Mittellinie packen (siehe [packCircleChain]) — deckt auch lange/
+ * Mittellinie packen (siehe [CirclePacking.packChain]) — deckt auch lange/
  * unregelmässige Seen ab, ohne die volle Polygon-Geofence bauen zu müssen
  * (zweite Roman-Entscheidung 06.08.2026, nachdem ein einzelner Kreis bei
  * länglichen Seen an den Enden ständig falsch gewarnt hätte).
@@ -33,6 +31,9 @@ import kotlin.math.hypot
  * gemessener Abstand zum Ufer wird als Radius übernommen) — hier eben der
  * exakt kleinste (= grösstmögliche sichere) Abstand von einem optimal
  * gewählten Mittelpunkt zur nächsten Uferlinie, statt weniger Handmessungen.
+ * Die eigentliche Kreis-Packung sitzt seit 10.08.2026 in [CirclePacking]
+ * (quellen-unabhängig, siehe dortige Klassendoku) — diese Klasse liefert
+ * nur noch die OSM-spezifische Beschaffung/Auswahl des Polygons.
  *
  * BEKANNTE EINSCHRÄNKUNG: nur einfache OSM-"way"-Geometrien (natural=water
  * auf einem einzelnen geschlossenen Weg) werden ausgewertet. Grössere/
@@ -41,8 +42,10 @@ import kotlin.math.hypot
  * Zusammensetzen solcher Relationen ist laut Doku "nicht trivial" und war
  * genau der Teil, der mit der einfacheren Kreis-Lösung vermieden werden
  * sollte. Falls der Zielsee als Relation vorliegt, schlägt die Erkennung
- * fehl (klare Fehlermeldung) und die manuelle Eingabe (See-Mitte + See-Rand
- * erfassen) bleibt als Fallback bestehen.
+ * fehl (klare Fehlermeldung) — für genau diesen Fall gibt's seit 10.08.2026
+ * die manuelle Karten-Zeichnen-Funktion (siehe
+ * docs/Erweiterung_Seegrenze_Zeichnen.md), zusätzlich zum bisherigen
+ * GPS-Rand-Abfahren.
  */
 object LakeAutoDetector {
 
@@ -54,10 +57,6 @@ object LakeAutoDetector {
     // exakt IM Polygon liegt (z.B. Boot/Steg direkt am Ufer beim Einrichten,
     // siehe Doku Abschnitt 5, offener Punkt).
     private const val EDGE_TOLERANCE_M = 50.0
-    // Kette von Kreisen: maximale Anzahl und Mindestradius als Abbruch-
-    // kriterium (kleinere Lücken lohnen keinen eigenen Kreis mehr).
-    private const val MAX_CIRCLES = 8
-    private const val MIN_CIRCLE_RADIUS_M = 15.0
 
     data class DetectedLake(val circles: List<LakeCircle>, val name: String?)
 
@@ -88,21 +87,24 @@ object LakeAutoDetector {
 
         // Projektion in lokale Meter um den GPS-Fix als Ursprung (siehe
         // Klassenkommentar: einfache Äquirektangular-Projektion reicht für
-        // einen einzelnen See, keine UTM-Zonen-Logik nötig).
-        val proj = LocalProjection(fix)
+        // einen einzelnen See, keine UTM-Zonen-Logik nötig). Nur für die
+        // Auswahl DES richtigen Sees bei mehreren Treffern - die eigentliche
+        // Kreis-Packung (weiter unten) projiziert unabhängig davon nochmal
+        // selbst, siehe CirclePacking.packChain-Doku.
+        val proj = CirclePacking.LocalProjection(fix)
         val polygons = candidates.map { it to proj.toLocal(it.points) }
 
         // Enthält der Fix-Punkt eines der Polygone? Bei mehreren Treffern
         // (z.B. kleiner Nebenteich) die grösste Fläche wählen (Doku Abschnitt 2).
-        val origin = Vec2(0.0, 0.0) // fix liegt per Definition der Projektion bei (0,0)
-        val containing = polygons.filter { (_, localPts) -> pointInPolygon(origin, localPts) }
+        val origin = CirclePacking.Vec2(0.0, 0.0) // fix liegt per Definition der Projektion bei (0,0)
+        val containing = polygons.filter { (_, localPts) -> CirclePacking.pointInPolygon(origin, localPts) }
         val chosen = if (containing.isNotEmpty()) {
             containing.maxByOrNull { (_, localPts) -> polygonArea(localPts) }
         } else {
             // Fix liegt in keinem Polygon (z.B. noch am Ufer stehend) - dem
             // nächstgelegenen innerhalb der Toleranz folgen.
-            polygons.minByOrNull { (_, localPts) -> minDistToBoundary(origin, localPts) }
-                ?.takeIf { (_, localPts) -> minDistToBoundary(origin, localPts) <= EDGE_TOLERANCE_M }
+            polygons.minByOrNull { (_, localPts) -> CirclePacking.minDistToBoundary(origin, localPts) }
+                ?.takeIf { (_, localPts) -> CirclePacking.minDistToBoundary(origin, localPts) <= EDGE_TOLERANCE_M }
         }
 
         if (chosen == null) {
@@ -112,15 +114,14 @@ object LakeAutoDetector {
             )
         }
 
-        val (way, localPts) = chosen
-        val localCircles = packCircleChain(localPts)
-        if (localCircles.isEmpty()) {
+        val (way, _) = chosen
+        val circles = CirclePacking.packChain(way.points)
+        if (circles.isEmpty()) {
             return@withContext Result.Failure(
                 "See gefunden, aber zu klein/schmal für einen sinnvollen Sicherheits-" +
-                    "kreis (< ${MIN_CIRCLE_RADIUS_M.toInt()}m) — bitte See-Mitte/-Rand manuell setzen."
+                    "kreis (< ${CirclePacking.MIN_CIRCLE_RADIUS_M.toInt()}m) — bitte See-Mitte/-Rand manuell setzen."
             )
         }
-        val circles = localCircles.map { (centerLocal, radiusM) -> LakeCircle(proj.toGeo(centerLocal), radiusM) }
 
         Result.Success(DetectedLake(circles, way.name))
     }
@@ -165,42 +166,12 @@ object LakeAutoDetector {
         return result
     }
 
-    // ---- Lokale Geometrie (Äquirektangular-Projektion, Punkt-in-Polygon, ----
-    // ---- Abstand zu Kanten, groesster einbeschriebener Kreis)            ----
-
-    data class Vec2(val x: Double, val y: Double)
-
-    /** Projiziert lat/lon auf lokale Meter-Koordinaten um einen Ursprungspunkt - für Distanzen bis zu wenigen km ausreichend genau, keine UTM-Zone nötig. */
-    private class LocalProjection(private val origin: GeoPoint) {
-        private val metersPerDegLat = 111_320.0
-        private val metersPerDegLon = 111_320.0 * cos(Math.toRadians(origin.lat))
-
-        fun toLocal(points: List<GeoPoint>): List<Vec2> = points.map {
-            Vec2((it.lon - origin.lon) * metersPerDegLon, (it.lat - origin.lat) * metersPerDegLat)
-        }
-
-        fun toGeo(v: Vec2): GeoPoint = GeoPoint(
-            origin.lat + v.y / metersPerDegLat,
-            origin.lon + v.x / metersPerDegLon,
-        )
-    }
-
-    private fun pointInPolygon(p: Vec2, poly: List<Vec2>): Boolean {
-        var inside = false
-        var j = poly.size - 1
-        for (i in poly.indices) {
-            val pi = poly[i]; val pj = poly[j]
-            if ((pi.y > p.y) != (pj.y > p.y)) {
-                val xIntersect = (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y) + pi.x
-                if (p.x < xIntersect) inside = !inside
-            }
-            j = i
-        }
-        return inside
-    }
+    // ---- Nur noch die für die Seeauswahl (bei mehreren Treffern) nötige
+    // ---- Flächenberechnung — Punkt-in-Polygon/Abstand/Kreis-Packung sitzen
+    // ---- jetzt in CirclePacking (quellen-unabhängig, siehe dortige Doku).
 
     /** Fläche via Gauß'scher Trapezformel (Shoelace) - für den Grössenvergleich bei mehreren Treffern. */
-    private fun polygonArea(poly: List<Vec2>): Double {
+    private fun polygonArea(poly: List<CirclePacking.Vec2>): Double {
         var sum = 0.0
         var j = poly.size - 1
         for (i in poly.indices) {
@@ -208,95 +179,5 @@ object LakeAutoDetector {
             j = i
         }
         return kotlin.math.abs(sum / 2.0)
-    }
-
-    private fun distToSegment(p: Vec2, a: Vec2, b: Vec2): Double {
-        val abx = b.x - a.x; val aby = b.y - a.y
-        val len2 = abx * abx + aby * aby
-        if (len2 == 0.0) return hypot(p.x - a.x, p.y - a.y)
-        var t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2
-        t = t.coerceIn(0.0, 1.0)
-        val projX = a.x + t * abx; val projY = a.y + t * aby
-        return hypot(p.x - projX, p.y - projY)
-    }
-
-    private fun minDistToBoundary(p: Vec2, poly: List<Vec2>): Double {
-        var minD = Double.MAX_VALUE
-        var j = poly.size - 1
-        for (i in poly.indices) {
-            minD = minOf(minD, distToSegment(p, poly[j], poly[i]))
-            j = i
-        }
-        return minD
-    }
-
-    private fun isCoveredByExisting(p: Vec2, existing: List<Pair<Vec2, Double>>): Boolean =
-        existing.any { (center, radius) -> hypot(p.x - center.x, p.y - center.y) <= radius }
-
-    /**
-     * Grobe Annäherung an den Chebyshev-Mittelpunkt (grösster Kreis, der
-     * komplett innerhalb des Polygons liegt) per Gitter-Suche mit iterativer
-     * Verfeinerung - kein exakter Löser, aber für diesen Zweck (sinnvoller
-     * Mittelpunkt+Radius statt exakter Optimalität) ausreichend und ohne
-     * externe Geometrie-Bibliothek (JTS) umsetzbar, siehe Klassenkommentar.
-     *
-     * [excludeCovered] schliesst Kandidaten aus, die schon von einem
-     * bereits gepackten Kreis abgedeckt sind - so findet [packCircleChain]
-     * bei jedem Durchlauf eine noch UNabgedeckte Stelle statt immer
-     * denselben (grössten) Kreis erneut.
-     */
-    private fun largestInscribedCircle(
-        poly: List<Vec2>,
-        excludeCovered: List<Pair<Vec2, Double>> = emptyList(),
-    ): Pair<Vec2, Double> {
-        var minX = poly.minOf { it.x }; var maxX = poly.maxOf { it.x }
-        var minY = poly.minOf { it.y }; var maxY = poly.maxOf { it.y }
-        var bestPoint = Vec2((minX + maxX) / 2, (minY + maxY) / 2)
-        var bestDist = 0.0
-        val gridSteps = 30
-
-        repeat(5) {
-            val stepX = (maxX - minX) / gridSteps
-            val stepY = (maxY - minY) / gridSteps
-            if (stepX <= 0.0 || stepY <= 0.0) return@repeat
-            for (ix in 0..gridSteps) {
-                for (iy in 0..gridSteps) {
-                    val candidate = Vec2(minX + ix * stepX, minY + iy * stepY)
-                    if (!pointInPolygon(candidate, poly)) continue
-                    if (isCoveredByExisting(candidate, excludeCovered)) continue
-                    val d = minDistToBoundary(candidate, poly)
-                    if (d > bestDist) {
-                        bestDist = d
-                        bestPoint = candidate
-                    }
-                }
-            }
-            // Suchfenster ums bisher beste Ergebnis verkleinern (grob -> fein)
-            val halfW = (maxX - minX) / 4
-            val halfH = (maxY - minY) / 4
-            minX = bestPoint.x - halfW; maxX = bestPoint.x + halfW
-            minY = bestPoint.y - halfH; maxY = bestPoint.y + halfH
-        }
-        return bestPoint to bestDist
-    }
-
-    /**
-     * Greedy-Kreispackung entlang der "Mittellinie" eines länglichen/
-     * unregelmässigen Sees: wiederholt den grössten einbeschriebenen Kreis
-     * in der noch UNabgedeckten Fläche suchen, bis entweder [MAX_CIRCLES]
-     * erreicht ist oder der nächste Kreis kleiner als [MIN_CIRCLE_RADIUS_M]
-     * würde (kein sinnvoller Platz mehr). Kein echter Medial-Achsen-/
-     * Skeleton-Algorithmus, aber für die Zwecke einer Sicherheits-Geofence
-     * (grobe, überlappende Abdeckung reicht) ausreichend und ohne externe
-     * Geometrie-Bibliothek umsetzbar.
-     */
-    private fun packCircleChain(poly: List<Vec2>): List<Pair<Vec2, Double>> {
-        val circles = mutableListOf<Pair<Vec2, Double>>()
-        repeat(MAX_CIRCLES) {
-            val (center, radius) = largestInscribedCircle(poly, circles)
-            if (radius < MIN_CIRCLE_RADIUS_M) return circles
-            circles.add(center to radius)
-        }
-        return circles
     }
 }

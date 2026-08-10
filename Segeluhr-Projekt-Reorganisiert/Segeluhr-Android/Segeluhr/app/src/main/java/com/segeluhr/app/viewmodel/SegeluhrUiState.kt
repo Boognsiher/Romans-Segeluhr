@@ -72,6 +72,9 @@ data class SegeluhrUiState(
     val buoy2: GeoPoint? = null,
     val lakeCircles: List<LakeCircle> = emptyList(),
     val lakeDetectionInProgress: Boolean = false,
+    // Karten-Zeichnen-Modus (Erweiterung, siehe docs/Erweiterung_Seegrenze_Zeichnen.md)
+    // — true blendet LakeDrawScreen statt der normalen Segel-Tabs ein.
+    val lakeDrawModeActive: Boolean = false,
     val home: GeoPoint? = null,
     val competitionMark1: GeoPoint? = null,
     val competitionMark2: GeoPoint? = null,

@@ -120,6 +120,20 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
         return
     }
 
+    // See-Grenze-Zeichnen-Modus (siehe docs/Erweiterung_Seegrenze_Zeichnen.md)
+    // — ersetzt wie die Land-Rolle oben komplett den Tab-Baum, solange aktiv.
+    if (state.lakeDrawModeActive) {
+        val fix = state.gpsFix
+        LakeDrawScreen(
+            startCenter = if (fix.lat != null && fix.lon != null) {
+                com.segeluhr.app.core.GeoPoint(fix.lat, fix.lon)
+            } else null,
+            onFinish = viewModel::finishLakeDrawing,
+            onCancel = viewModel::cancelLakeDrawing,
+        )
+        return
+    }
+
     var selectedTab by remember { mutableStateOf(Tab.NORMAL) }
 
     Scaffold(
@@ -176,6 +190,7 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onClearWaypoint = viewModel::clearWaypoint,
                     onAutoDetectLake = viewModel::autoDetectLake,
                     onRemoveLakeCircle = viewModel::removeLakeCircle,
+                    onStartLakeDrawing = viewModel::startLakeDrawing,
                 )
                 Tab.LOG -> LogScreen(state, onClearLog = viewModel::clearManeuverLog)
                 Tab.SETUP -> SetupScreen(

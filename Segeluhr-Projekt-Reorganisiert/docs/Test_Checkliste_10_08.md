@@ -81,6 +81,16 @@ angefasst wird** — alles Weitere baut auf einer laufenden App auf.
 - [ ] Geteilte CSV-Datei öffnen (z.B. in Excel/Texteditor) — Kopfzeile +
       Datenzeilen mit plausiblen Werten (keine leeren Spalten überall)
 
+### 2c-4. See-Grenze auf Karte einzeichnen (`docs/Erweiterung_Seegrenze_Zeichnen.md`)
+- [ ] Training-Tab → "See-Grenze auf Karte einzeichnen" → Vollbild-Karte
+      öffnet sich, echte Kartenkacheln laden
+- [ ] Antippen setzt Punkte (Marker + wachsendes Polygon sichtbar), Karte
+      lässt sich dazwischen normal verschieben/zoomen
+- [ ] "Letzten Punkt entfernen" funktioniert
+- [ ] "Fertig" erst ab 3 Punkten aktiv; nach "Fertig" zurück im Training-Tab,
+      neue Kreis-Kette sichtbar unter "See-Geofence"
+- [ ] "Abbrechen" verwirft alle gesetzten Punkte, keine Kreise gespeichert
+
 ### 2d. Mehrere Boots-Profile
 - [ ] Setup-Tab → Sektion "Boots-Profil" sichtbar
 - [ ] Grundprofil heisst "Musto Skiff", Wendewinkel-Startwert 43°
