@@ -69,6 +69,8 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private val lakeEngine = LakeGeofenceEngine(haptics, statusSink)
     private val homeEngine = HomeEngine(haptics, statusSink)
     private val competitionEngine = CompetitionEngine(haptics, statusSink)
+    // Session-Distanz-Aufsummierung, siehe core/DistanceTracker.kt
+    private val distanceTracker = DistanceTracker()
 
     init {
         // Steuerbefehle von der Uhr (CMD_*, siehe BleProtocol.kt) auf die
@@ -214,6 +216,8 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
 
         val countdownS = countdownEngine.tick()
 
+        distanceTracker.sample(valid, fix.lat, fix.lon, fix.sogKn)
+
         renderTelemetry(fix, valid, countdownS, competitionGuidance)
     }
 
@@ -312,6 +316,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 buoyDistanceM = buoyDistance,
                 lakeDistanceM = lakePct?.first,
                 lakeDistancePct = lakePct?.second,
+                distanceTraveledM = distanceTracker.totalM,
                 raceState = countdownEngine.raceState,
                 countdownSeconds = countdownS,
                 isRaceTimerRunning = countdownEngine.raceState == RaceState.RACE,
@@ -422,6 +427,8 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             settingsRepo.resetAll()
             db.maneuverDao().clearAll()
         }
+        distanceTracker.reset()
+        _uiState.update { it.copy(distanceTraveledM = 0.0) }
         // Sicherstellen, dass ein laufender Foreground-Service/Watch-Routing
         // nicht "verwaist", nur weil die zugrunde liegende Einstellung
         // (DataStore) gerade gelöscht wurde.

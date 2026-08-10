@@ -34,6 +34,8 @@ data class SegeluhrUiState(
     val buoyDistanceM: Double? = null,
     val lakeDistanceM: Double? = null,
     val lakeDistancePct: Double? = null,
+    // Session-Distanz, siehe core/DistanceTracker.kt
+    val distanceTraveledM: Double = 0.0,
 
     // Start-Countdown
     val raceState: RaceState = RaceState.MENU,

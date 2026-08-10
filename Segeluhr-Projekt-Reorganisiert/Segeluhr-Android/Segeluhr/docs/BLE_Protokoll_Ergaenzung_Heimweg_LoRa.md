@@ -67,14 +67,29 @@ Distanzen (Nutzer-Wunsch). 19 Byte sind für LoRa immer noch sehr kompakt —
 der Airtime-Unterschied zu den ursprünglichen 11 Byte ist bei den
 üblichen SF-Einstellungen für diesen Anwendungsfall vernachlässigbar.
 
-**Offener Punkt (Android-Seite):** `distanceTraveledM` braucht eine neue,
-fortlaufende Distanz-Aufsummierung über die GPS-Fixes der laufenden
-Session (Summe der Distanzen zwischen aufeinanderfolgenden Fixes) — das
-gibt es aktuell noch nicht in `SegeluhrViewModel`/den Engines und müsste
-zusammen mit der eigentlichen Ultra-Firmware ergänzt werden, sobald die
-Hardware da ist. `distanceRemainingM` lässt sich dagegen direkt aus der
-bereits vorhandenen `HomeEngine`-Peilung ableiten (Distanz zum
-Heimatpunkt ist dort ohnehin Teil der Berechnung).
+**Update 10.08.2026:** Die App-seitige Aufsummierung ist jetzt implementiert
+— neue Klasse `core/DistanceTracker.kt`, läuft in `SegeluhrViewModel.tick()`
+mit (Summe der Distanzen zwischen aufeinanderfolgenden GPS-Fixes oberhalb
+`Constants.MIN_SPEED_KN`, damit GPS-Jitter im Stand nicht mitzählt), Anzeige
+im Normal-Tab ("Zurückgelegte Strecke" in der Heimweg-Karte), Reset über
+"Alles zurücksetzen" im Setup-Tab. **Noch nicht kompiliert/getestet**
+(kein `gradlew` im Projekt, siehe PROJEKT_STATUS.md — vor Nutzung in
+Android Studio bauen).
+
+**Weiterhin offen:** Die Weitergabe per LoRa an die Land-Uhr fehlt noch.
+Das inzwischen tatsächlich implementierte Funkpaket ist NICHT mehr das
+`HomeLoRaPacket` aus diesem Dokument, sondern `LoRaStatusPacket` in
+`Segeluhr-Firmware/shared/LoRaPacket.h` (27 Byte, u.a. bereits mit
+`distanceRemainingM`, aber noch ohne `distanceTraveledM`) — dieses Dokument
+beschreibt insofern nur noch das ursprüngliche Konzept, nicht den
+aktuellen Stand. Um `distanceTraveledM` wirklich an Land anzuzeigen,
+bräuchte es: neues Feld in `LoRaPacket.h`, Befüllung in
+`Segeluhr_TWatch_Ultra.ino` (aus dem BLE-Home-Status oder einer neuen
+eigenen Characteristic vom Handy), Auswertung in `Segeluhr_TWatch_S3.ino`
+(Land) — und **beide Firmwares müssen danach zusammen neu geflasht
+werden**. Bewusst nicht Teil dieser Änderung, da reine Firmware-Arbeit
+(Arduino IDE, nicht Android Studio) und ohnehin nur mit Hardware-Test
+sinnvoll zu verifizieren.
 
 ### Sende-Regeln auf der Ultra-Watch
 

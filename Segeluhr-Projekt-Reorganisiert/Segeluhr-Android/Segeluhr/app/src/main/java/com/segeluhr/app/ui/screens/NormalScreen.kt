@@ -57,6 +57,10 @@ fun NormalScreen(state: SegeluhrUiState, onToggleHomeMode: (Boolean) -> Unit, on
         }
 
         SectionCard("Heimweg") {
+            // Session-Distanz, siehe core/DistanceTracker.kt — unabhängig vom
+            // gesetzten Heimatpunkt, läuft immer mit.
+            StatRow("Zurückgelegte Strecke", GeoUtils.fmtDist(state.distanceTraveledM), valueColor = TextDim)
+            Spacer(Modifier.height(4.dp))
             if (state.home == null) {
                 Text(
                     "Kein Heimatpunkt gesetzt — im Setup-Tab unter \"Zuhause/Hafen\" festlegen.",
