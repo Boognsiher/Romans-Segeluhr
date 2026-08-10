@@ -75,7 +75,8 @@ Wert zu verlieren.
   `musto-skiff-default`): jede Installation startet mit einem Profil
   "Musto Skiff", Wendewinkel 43° statt des reinen 45°-Fallbacks — Mittelwert
   der drei geschätzten Am-Wind-TWA-Bänder aus der vom Nutzer bereitgestellten
-  Referenzdatei (Musto Skiff Class Association + Vergleichsklassen 49er/
+  Referenzdatei (`docs/musto_skiff_reference_data.json`, im Repo abgelegt
+  für Nachvollziehbarkeit) (Musto Skiff Class Association + Vergleichsklassen 49er/
   RS800: Leichtwind 42-48°, Mittelwind/optimales Pointing 38-42°, Starkwind
   40-50° — Mittelpunkte 45/40/45 gemittelt ≈ 43°). Ausdrücklich
   Community-Schätzwerte, keine echten Messdaten (`sampleCount = 0`, wie in

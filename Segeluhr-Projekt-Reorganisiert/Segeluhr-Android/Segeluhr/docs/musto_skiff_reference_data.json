@@ -1,0 +1,157 @@
+{
+  "meta": {
+    "boat": "Musto Skiff",
+    "source_note": "Es existiert kein offiziell publiziertes VPP/Polardiagramm fuer den Musto Skiff. Die Winkel-Werte (twa_upwind_deg, twa_downwind_deg) sind Schaetzwerte/Priors, abgeleitet aus Community-Tipps der Musto Skiff Class Association und Vergleichsklassen (49er, RS800, A-Cat). Sie sollten als Startwerte fuer ein lernendes Modell verwendet werden, nicht als verifizierte Messdaten. Feld 'confidence' gibt an, wie belastbar der jeweilige Wert ist: 'confirmed' = aus Primaerquelle (Class Association / Hersteller), 'estimated' = aus Analogieschluss zu vergleichbaren Skiff-Klassen.",
+    "sources": [
+      "https://mustoskiff.com/",
+      "https://mustoskiff.com/training-top-tips/",
+      "https://mustoskiff.com/rules-documents/rigging-tuning/",
+      "https://en.wikipedia.org/wiki/Musto_Skiff",
+      "https://de.wikipedia.org/wiki/Musto_Skiff",
+      "https://www.boat-specs.com/sailing/sailboats/ovington-boats/musto-skiff"
+    ],
+    "last_updated": "2026-08-10"
+  },
+
+  "boat_specs": {
+    "loa_m": 4.55,
+    "beam_racks_m": 2.35,
+    "beam_hull_m": 1.35,
+    "hull_weight_kg": 44,
+    "crew": 1,
+    "trapeze": true,
+    "hull_type": "Knickspant, flach (planing hull), GFK",
+    "designer": "Joachim Harpprecht",
+    "year_designed": 1999,
+    "builder": "Ovington Boats",
+    "top_speed_knots": 20,
+    "sails": {
+      "mainsail_upwind_m2": 11.8,
+      "gennaker_squaretop_m2": 12.0,
+      "gennaker_pinhead_m2": 15.5,
+      "mainsail_x_small_m2": 9.77,
+      "max_downwind_total_m2": 27.3
+    },
+    "confidence": "confirmed"
+  },
+
+  "polar_estimates": {
+    "note": "TWA = True Wind Angle in Grad, gemessen vom Bug. Werte sind Bandbreiten, kein exaktes VPP. wind_speed_kn bezieht sich auf True Wind Speed (TWS).",
+    "upwind": [
+      {
+        "wind_speed_kn_range": [0, 8],
+        "condition": "Leichtwind, nicht trapezierend",
+        "twa_deg_range": [42, 48],
+        "notes": "Boot 'geglaettet' segeln, Gewicht vorne, ruhige Steuerbewegungen, kein Kicker/Gnav",
+        "confidence": "estimated"
+      },
+      {
+        "wind_speed_kn_range": [8, 15],
+        "condition": "Mittelwind, trapezierend, kein Gleiten am Wind",
+        "twa_deg_range": [38, 42],
+        "notes": "Optimales Pointing, mittlerer Kicker fuer Power",
+        "confidence": "estimated"
+      },
+      {
+        "wind_speed_kn_range": [15, 30],
+        "condition": "Starkwind, ueberpowert",
+        "twa_deg_range": [40, 50],
+        "notes": "Winkel oeffnet sich wieder etwas zum Depowern; max Cunningham, mittlerer Kicker",
+        "confidence": "estimated"
+      }
+    ],
+    "downwind": [
+      {
+        "wind_speed_kn_range": [0, 8],
+        "condition": "Leichtwind, Gennaker gesetzt aber noch kein Gleiten",
+        "twa_deg_range": [130, 145],
+        "notes": "Hoeher heizen fuer Speed statt tiefer DDW-Kurs",
+        "confidence": "estimated"
+      },
+      {
+        "wind_speed_kn_range": [8, 18],
+        "condition": "Gleitend, Haupt-Racebereich",
+        "twa_deg_range": [140, 155],
+        "notes": "Klassisches Skiff-Verhalten: nicht direkt vor den Wind, sondern anluven fuer scheinbaren Wind und Speed",
+        "confidence": "estimated"
+      },
+      {
+        "wind_speed_kn_range": [18, 30],
+        "condition": "Starkwind, Surfbedingungen",
+        "twa_deg_range": [155, 170],
+        "notes": "Tieferer Kurs moeglich da Rumpfgeschwindigkeit durch Gleiten/Surfen ueberschritten wird",
+        "confidence": "estimated"
+      }
+    ]
+  },
+
+  "maneuvers": {
+    "tacking": {
+      "typical_time_loss": "Groesster Zeitverlust im Rennen laut Class Association; anspruchsvollstes Manoever der Klasse",
+      "technique_wire_to_wire": [
+        "Trapez bis kurz vor der Wende halten, Boot flach und schnell fahren",
+        "Mit dem vorderen Fuss fuehren, grossen ruhigen Wendekreis fahren (kein knapper Ruderschlag)",
+        "Grossschot loesen beim Ducken unter dem Baum, Grossschot bis zum Want auslaufen lassen",
+        "Auf neuem Bug nach vorne steigen, um den Gennaker-Block herum bleiben beim Einhaken (verhindert Stehenbleiben in den Wind)",
+        "Mehr Ruder einsetzen sobald das Boot verlangsamt",
+        "Aus dem Rack heraus einhaengen fuer einarmiges Dichtholen"
+      ],
+      "alternative": "Advanced Safety Tack: nur unwesentlich langsamer als Wire-to-Wire, deutlich einfacher zu beherrschen",
+      "source": "mustoskiff.com/training-top-tips (Richard Stenhouse)",
+      "confidence": "confirmed"
+    },
+    "gybing": {
+      "mainsheet_angle_deg_during_gybe": 45,
+      "technique_strong_wind": [
+        "Grossschot am Trapezhaken befestigen fuer Zugriff downwind bei Starkwind",
+        "Vor dem Einleiten Grossschot vom Trapez loesen, damit Boot nicht abrupt stallt",
+        "Grossschot bis zum Baum ausfahren, Gewicht bleibt am Trapez bis zum letzten Moment",
+        "Abfallen + Reinlehnen ins Boot, Grossschot mit gleicher Hand wie Spikschot greifen und Baum uebersetzen",
+        "Waehrend Baum uebersetzt starkes Gegenruder (negativ) geben um Impact abzufangen",
+        "Schnellstmoeglich Gewicht auf neue Seite/Rack bringen",
+        "Neue Spikschot vom Block aufnehmen, sofort dichtholen (kein Flattern)",
+        "Erst danach wieder einhaken und Grossschot final trimmen"
+      ],
+      "technique_notes": "Rack-to-Rack-Gybe: Grossschot leicht ausgefahren auf ca. 45 Grad -- zu weit aussen bremst das Boot, zu zentriert erhoeht Kenterrisiko bei unsauberer Halse. Steuerung als sanfter Bogen ohne Zoegern, frueh (vor dem Baum) queren.",
+      "source": "mustoskiff.com/training-top-tips (Kev Anderson, Richard Stenhouse)",
+      "confidence": "confirmed"
+    },
+    "bear_away_heavy_air": {
+      "steps": [
+        "Gnav und Cunningham vor dem Abfallen loesen (entlastet Rigg, sonst schwerer zu steuern, erhoeht sonst 'Gefahrenzone'-Winkel)",
+        "Bei mittlerem/leichtem Wind am Trapez bleiben; bei viel Wind auf T des Racks sitzen, vorderer Fuss am Suesswasserrand, hinterer Fuss gegen Rack-Bar verhakt",
+        "Boot flach halten, moderate Geschwindigkeit (nicht zu schnell)",
+        "Auf passender Welle: Grossschot fieren + hart abfallen, dabei dichtholen und uebertrimmen bis Vorwindkurs",
+        "Grossschot bis zum Want fieren, Gennaker setzen"
+      ],
+      "source": "mustoskiff.com/training-top-tips (Richard Stenhouse)",
+      "confidence": "confirmed"
+    }
+  },
+
+  "trim_by_wind_speed": [
+    {
+      "wind_speed_kn_range": [0, 5],
+      "cunningham": "maximal",
+      "kicker_gnav": "keiner",
+      "notes": "Segel oben verdrehen lassen (twist)"
+    },
+    {
+      "wind_speed_kn_range": [6, 10],
+      "cunningham": "minimal (nur Falten entfernen)",
+      "kicker_gnav": "mittel",
+      "notes": "Fuer maximale Power, um frueher aufs Trapez zu kommen"
+    },
+    {
+      "wind_speed_kn_range": [10, 30],
+      "cunningham": "maximal",
+      "kicker_gnav": "mittel",
+      "notes": "Outhaul so eingestellt, dass bei max Kicker/Cunningham keine Falte im Unterliek entsteht"
+    }
+  ],
+
+  "reference_classes_for_calibration": {
+    "note": "Aehnliche Leistungsklassen mit oeffentlich verfuegbaren VPP/Polardaten, die sich zur Kalibrierung eignen (aehnliches SA/Displacement, Trapez, Gennaker, Gleitrumpf).",
+    "classes": ["49er", "RS800", "29er (als untere Referenz)", "A-Class Catamaran (nur fuer Starkwind-Trends, Multihull-Charakteristik abweichend)"]
+  }
+}
