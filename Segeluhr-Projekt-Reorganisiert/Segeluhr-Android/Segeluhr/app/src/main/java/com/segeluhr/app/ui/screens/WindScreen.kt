@@ -66,15 +66,24 @@ fun WindScreen(
             val activeProfileName = state.boatProfiles.firstOrNull { it.id == state.activeBoatProfileId }?.name ?: "—"
             StatRow("Aktives Profil", activeProfileName, valueColor = TextDim)
             val angleText = if (state.closehauledSampleCount > 0) {
-                "${"%.0f".format(state.closehauledAngleDeg)}° (${state.closehauledSampleCount} Kalibrierläufe)"
+                "${"%.0f".format(state.closehauledAngleDeg)}° TWA (${state.closehauledSampleCount} Kalibrierläufe)"
             } else {
-                "${"%.0f".format(state.closehauledAngleDeg)}° (Standardwert, noch nicht kalibriert)"
+                "${"%.0f".format(state.closehauledAngleDeg)}° TWA (Standardwert, noch nicht kalibriert)"
             }
             StatRow("Wendewinkel", angleText, valueColor = Teal)
+            // downwindAngleDeg ist wie closehauledAngleDeg eine TWA (Winkel zur
+            // Windrichtung ab Bug), NICHT der Drehwinkel beim Halsen-Manöver
+            // selbst — leicht verwechselbar (149° TWA "klingt" grösser als
+            // 43° Wendewinkel, obwohl der tatsächliche Halsen-Dreh mit 62°
+            // sogar kleiner ist als der Wende-Dreh von 86°). Klammerzusatz
+            // zeigt deshalb explizit den echten Drehwinkel mit an (nur wenn
+            // schon etwas gelernt wurde — bei 180°/Standardwert wäre "0°
+            // Drehwinkel" nur verwirrend, nicht hilfreich).
             val downwindText = if (state.downwindAngleDeg < 179.5) {
-                "${"%.0f".format(state.downwindAngleDeg)}° (Smart-Modus gelernt)"
+                val gybeTurnDeg = 360.0 - 2.0 * state.downwindAngleDeg
+                "${"%.0f".format(state.downwindAngleDeg)}° TWA (Smart-Modus gelernt, Halsen-Drehwinkel: ~${"%.0f".format(gybeTurnDeg)}°)"
             } else {
-                "180° (Standardwert, direkt vor dem Wind)"
+                "180° TWA (Standardwert, direkt vor dem Wind)"
             }
             StatRow("Vorwind-Winkel", downwindText, valueColor = Teal)
             Text(

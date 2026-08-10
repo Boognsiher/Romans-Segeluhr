@@ -116,6 +116,16 @@ erweitern — ein Wert, keine TWS-Tabelle.
   Kalibrierläufe-Zähler, da kein Kalibrierungsmodus dafür existiert),
   Setup-Tab-Profilliste zeigt beide Werte kompakt in einer Zeile.
   "Wendewinkel zurücksetzen"-Button setzt jetzt beide Winkel zurück.
+- **Klarstellung TWA vs. Drehwinkel (10.08.2026, Roman-Feedback):**
+  `downwindAngleDeg` ist wie `closehauledAngleDeg` eine TWA (Winkel zur
+  Windrichtung ab Bug) — NICHT der Winkel, den das Boot beim Halsen-Manöver
+  tatsächlich dreht. Leicht verwechselbar, weil 149° TWA numerisch grösser
+  wirkt als 43° Wendewinkel, obwohl der tatsächliche Halsen-Dreh
+  (`360° − 2×downwindAngleDeg`) bei diesen Werten mit 62° sogar KLEINER ist
+  als der Wende-Dreh (`2×closehauledAngleDeg` = 86°) — je "heisser"/weiter
+  weg von 180° gesegelt wird, desto kleiner der nötige Dreh beim Halsen.
+  Beide Wind-Tab-Anzeigen labeln den Wert jetzt explizit als "TWA", die
+  Vorwind-Zeile zeigt zusätzlich den echten Halsen-Drehwinkel in Klammern.
 
 ## Mehrere Boots-Profile (10.08.2026)
 
