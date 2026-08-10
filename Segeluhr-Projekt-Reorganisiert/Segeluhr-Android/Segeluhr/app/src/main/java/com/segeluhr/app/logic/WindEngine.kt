@@ -27,6 +27,13 @@ import kotlin.math.abs
  *  - **Smart-Modus** (`smartModeEnabled`): läuft während des normalen
  *    Segelns nebenbei mit (siehe `tickContinuous`) und justiert den Wert
  *    langsam per EMA nach, sobald ein ruhiger Kurs plausibel am Wind liegt.
+ *    Seit 10.08.2026 lernt derselbe Schalter zusätzlich einen
+ *    `downwindAngleDeg` (Vorwind-Pendant) — dafür gibt es KEINEN eigenen
+ *    Kalibrierungsmodus (kein dediziertes Halsen-Manöver), nur den
+ *    fortlaufenden Smart-Nachgleich, weil sich TWS (Windstärke) ohne
+ *    eigenen Sensor nicht messen lässt und ein statisches Windstärke-Band-
+ *    Modell (wie z.B. bei tactics_pi/OpenCPN) deshalb hier nicht sinnvoll
+ *    wäre — Entscheidung Roman, 10.08.2026.
  *
  * Es gibt mehrere benannte Boots-Profile (siehe
  * `SettingsRepository.boatProfilesFlow`) — diese Klasse kennt zu jedem
@@ -37,7 +44,7 @@ class WindEngine(
     private val vib: HapticFeedback,
     private val status: StatusSink,
     private val onWindChanged: suspend (windDir: Double, calibrated: Boolean) -> Unit,
-    private val onBoatProfileChanged: suspend (profileId: String, closehauledAngleDeg: Double, sampleCount: Int) -> Unit,
+    private val onBoatProfileChanged: suspend (profileId: String, closehauledAngleDeg: Double, sampleCount: Int, downwindAngleDeg: Double) -> Unit,
 ) {
     var windDir: Double? = null
         private set
@@ -72,11 +79,14 @@ class WindEngine(
         private set
     var closehauledSampleCount: Int = 0
         private set
+    var downwindAngleDeg: Double = Constants.DEFAULT_DOWNWIND_ANGLE_DEG
+        private set
     var calibrationModeEnabled: Boolean = false
         private set
     var smartModeEnabled: Boolean = false
         private set
     private var lastPersistedCloseHauledAngle: Double = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
+    private var lastPersistedDownwindAngle: Double = Constants.DEFAULT_DOWNWIND_ANGLE_DEG
 
     /** Beim App-Start aus der Persistenz laden */
     fun restore(windDir: Double?, calibrated: Boolean) {
@@ -91,11 +101,13 @@ class WindEngine(
      * (`calibrationModeEnabled`/`smartModeEnabled`) bleiben dabei
      * unverändert, nur WAS sie kalibrieren wechselt.
      */
-    fun restoreBoatProfile(profileId: String, closehauledAngleDeg: Double, sampleCount: Int) {
+    fun restoreBoatProfile(profileId: String, closehauledAngleDeg: Double, sampleCount: Int, downwindAngleDeg: Double) {
         this.activeProfileId = profileId
         this.closehauledAngleDeg = closehauledAngleDeg
         this.closehauledSampleCount = sampleCount
         this.lastPersistedCloseHauledAngle = closehauledAngleDeg
+        this.downwindAngleDeg = downwindAngleDeg
+        this.lastPersistedDownwindAngle = downwindAngleDeg
     }
 
     /**
@@ -117,13 +129,15 @@ class WindEngine(
         smartModeEnabled = enabled
     }
 
-    /** Wind-Tab-Button "Wendewinkel zurücksetzen" — wirft nur den gelernten Winkel DES AKTIVEN Profils weg. */
+    /** Wind-Tab-Button "Wendewinkel zurücksetzen" — wirft die gelernten Winkel (Wende UND Vorwind) DES AKTIVEN Profils weg. */
     suspend fun resetBoatProfile() {
         closehauledAngleDeg = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
         closehauledSampleCount = 0
         lastPersistedCloseHauledAngle = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
-        onBoatProfileChanged(activeProfileId, closehauledAngleDeg, closehauledSampleCount)
-        status.setStatus("Wendewinkel auf Standardwert (${Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG.toInt()}°) zurückgesetzt.", StatusLevel.NORMAL)
+        downwindAngleDeg = Constants.DEFAULT_DOWNWIND_ANGLE_DEG
+        lastPersistedDownwindAngle = Constants.DEFAULT_DOWNWIND_ANGLE_DEG
+        onBoatProfileChanged(activeProfileId, closehauledAngleDeg, closehauledSampleCount, downwindAngleDeg)
+        status.setStatus("Wende-/Vorwind-Winkel auf Standardwerte (${Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG.toInt()}°/${Constants.DEFAULT_DOWNWIND_ANGLE_DEG.toInt()}°) zurückgesetzt.", StatusLevel.NORMAL)
     }
 
     /**
@@ -152,10 +166,26 @@ class WindEngine(
         persistBoatProfileIfChanged()
     }
 
+    /**
+     * Vorwind-Pendant zu [maybeLearnCloseHauledAngle] — gleiches Prinzip
+     * (EMA, nur bei plausibel passendem Kurs), nur um den gelernten
+     * Vorwind-Winkel statt den Wendewinkel. `currentAngleOffWindDeg` ist
+     * hier wie dort der BETRAG des Winkels zur Windrichtung (0..180°) —
+     * nahe 180° bedeutet "läuft praktisch direkt vor dem Wind".
+     */
+    private suspend fun maybeLearnDownwindAngle(currentAngleOffWindDeg: Double) {
+        if (abs(currentAngleOffWindDeg - downwindAngleDeg) > Constants.SMART_DOWNWIND_LEARN_BAND_DEG) return
+        downwindAngleDeg += Constants.SMART_CLOSEHAULED_EMA_ALPHA * (currentAngleOffWindDeg - downwindAngleDeg)
+        persistBoatProfileIfChanged()
+    }
+
     private suspend fun persistBoatProfileIfChanged() {
-        if (abs(closehauledAngleDeg - lastPersistedCloseHauledAngle) < Constants.CLOSEHAULED_PERSIST_THRESHOLD_DEG) return
+        val closehauledChanged = abs(closehauledAngleDeg - lastPersistedCloseHauledAngle) >= Constants.CLOSEHAULED_PERSIST_THRESHOLD_DEG
+        val downwindChanged = abs(downwindAngleDeg - lastPersistedDownwindAngle) >= Constants.CLOSEHAULED_PERSIST_THRESHOLD_DEG
+        if (!closehauledChanged && !downwindChanged) return
         lastPersistedCloseHauledAngle = closehauledAngleDeg
-        onBoatProfileChanged(activeProfileId, closehauledAngleDeg, closehauledSampleCount)
+        lastPersistedDownwindAngle = downwindAngleDeg
+        onBoatProfileChanged(activeProfileId, closehauledAngleDeg, closehauledSampleCount, downwindAngleDeg)
     }
 
     fun startCalibration(currentlyValid: Boolean) {
@@ -262,10 +292,16 @@ class WindEngine(
         val awa = GeoUtils.angleDiff(avg, wd)
 
         // Smart-Modus (Boots-Kalibrierung, siehe Klassen-Doku): unabhängig von
-        // der Wende-Erkennung unten - läuft bei jedem ruhigen Kurs mit, der
-        // plausibel am Wind liegt, nicht nur beim Bug-Wechsel.
+        // der Wende-/Halsen-Erkennung unten - läuft bei jedem ruhigen Kurs
+        // mit, der plausibel am Wind ODER plausibel vor dem Wind liegt,
+        // nicht nur beim Bug-Wechsel. Beide Aufrufe sind einzeln durch ihr
+        // eigenes Toleranzband gated (SMART_CLOSEHAULED_LEARN_BAND_DEG bzw.
+        // SMART_DOWNWIND_LEARN_BAND_DEG um den jeweils aktuellen Schätzwert)
+        // - ein Am-Wind-Kurs verändert also nie versehentlich den
+        // Vorwind-Winkel und umgekehrt.
         if (smartModeEnabled) {
             maybeLearnCloseHauledAngle(abs(awa))
+            maybeLearnDownwindAngle(abs(awa))
         }
 
         if (abs(awa) < Constants.TACK_SIGN_DEADZONE_DEG) return // Bug-Zuordnung unsicher

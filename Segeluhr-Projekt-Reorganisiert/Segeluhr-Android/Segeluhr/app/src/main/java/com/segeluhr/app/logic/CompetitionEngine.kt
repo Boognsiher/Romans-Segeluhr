@@ -48,6 +48,7 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         mark1: GeoPoint?,
         mark2: GeoPoint?,
         closehauledAngleDeg: Double = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG,
+        downwindAngleDeg: Double = Constants.DEFAULT_DOWNWIND_ANGLE_DEG,
     ): CompetitionGuidance? {
         val lat = fix.lat ?: return null
         val lon = fix.lon ?: return null
@@ -65,7 +66,7 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         return when (leg) {
             CompetitionLeg.UPWIND -> tickUpwind(fix, lat, lon, wd, mark1, mark2, closehauledAngleDeg)
             CompetitionLeg.REACH_TO_OFFSET -> tickReach(lat, lon, mark2!!)
-            CompetitionLeg.DOWNWIND -> tickDownwind(fix, lat, lon, wd)
+            CompetitionLeg.DOWNWIND -> tickDownwind(fix, lat, lon, wd, downwindAngleDeg)
         }
     }
 
@@ -188,8 +189,18 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         )
     }
 
-    private fun tickDownwind(fix: Fix, lat: Double, lon: Double, wd: Double): CompetitionGuidance {
-        val bearing = GeoUtils.normalize360(wd + 180)
+    private fun tickDownwind(fix: Fix, lat: Double, lon: Double, wd: Double, downwindAngleDeg: Double): CompetitionGuidance {
+        // Ohne eigenen Leetonnen-Wegpunkt ("kein Leetonnen-Wegpunkt vorgesehen",
+        // siehe Klassendoku) gibt es kein Ziel, gegen das sich ein "besserer"
+        // Bug bestimmen liesse - anders als bei UPWIND/HomeEngine bleibt die
+        // aktuell gefahrene Gybe-Seite deshalb einfach erhalten (10.08.2026:
+        // gleiche Vorzeichen-Konvention wie currentTackSign/recommendedTackSign
+        // in closehauledGuidance() weiter oben). Bei downwindAngleDeg = 180°
+        // (noch nichts gelernt) liefert das exakt wd+180 wie bisher,
+        // unabhängig vom Vorzeichen.
+        val cog = fix.cogDeg
+        val gybeSign = if (cog != null && GeoUtils.angleDiff(cog, wd) > 0) 1 else -1
+        val bearing = GeoUtils.normalize360(wd + gybeSign * downwindAngleDeg)
 
         legTracker.sample(fix.cogDeg, fix.lat, fix.lon, fix.sogKn)
         val steady = legTracker.steady(Constants.RACE_COURSE_MAX_DEV)

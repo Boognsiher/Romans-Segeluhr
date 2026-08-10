@@ -43,8 +43,19 @@ object Constants {
     const val SMART_CLOSEHAULED_LEARN_BAND_DEG = 20.0
     /** Smart-Modus: klein gehalten, damit einzelne Schläge den Wert nicht sofort verreissen ("träge", wie beim Heimweg-ETA-Fix). */
     const val SMART_CLOSEHAULED_EMA_ALPHA = 0.03
-    /** Erst ab dieser Änderung erneut persistieren, sonst würde der Smart-Modus DataStore mit Mini-Schreibvorgängen fluten. */
+    /** Erst ab dieser Änderung erneut persistieren, sonst würde der Smart-Modus DataStore mit Mini-Schreibvorgängen fluten. Gilt seit 10.08.2026 für Wende- UND Vorwind-Winkel gemeinsam. */
     const val CLOSEHAULED_PERSIST_THRESHOLD_DEG = 0.5
+
+    // Vorwind-Pendant zur Boots-Kalibrierung (10.08.2026, siehe
+    // docs/Erweiterung_Boots_Kalibrierung.md "Vorwind-Winkel"): anders als
+    // der Wendewinkel gibt es dafür KEINEN eigenen Kalibrierungsmodus (kein
+    // dediziertes Halsen-Manöver mit Timeout/Plausibilitätsprüfung wie beim
+    // Amwind-Kalibrierungsmodus) - lernt NUR über den bereits bestehenden
+    // Smart-Modus während des normalen Segelns.
+    /** Fallback, solange noch nichts gelernt wurde: 180° = exakt das bisherige Verhalten (Wind+180° direkt, kein Vorwind-Winkel-Offset). */
+    const val DEFAULT_DOWNWIND_ANGLE_DEG = 180.0
+    /** Analog SMART_CLOSEHAULED_LEARN_BAND_DEG, nur für die Vorwind-Seite. */
+    const val SMART_DOWNWIND_LEARN_BAND_DEG = 20.0
 
     // 5-4-1 Startsequenz
     const val COUNTDOWN_DURATION_MS = 5 * 60 * 1000L

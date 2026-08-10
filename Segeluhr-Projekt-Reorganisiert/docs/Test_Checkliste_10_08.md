@@ -59,6 +59,15 @@ angefasst wird** — alles Weitere baut auf einer laufenden App auf.
       erfassen, Wendewinkel ändert sich sichtbar
 - [ ] Smart-Modus umschalten — Verhalten wechselt (Details siehe Doku)
 
+### 2c-2. Vorwind-Winkel (Halse-Erkennung, siehe Erweiterung_Boots_Kalibrierung.md)
+- [ ] Wind-Tab zeigt "Vorwind-Winkel" unter dem Wendewinkel (Musto-Profil:
+      Startwert 149°, neues Profil: 180°)
+- [ ] Smart-Modus aktiv + eine Weile Vorwind/Halbwind gesegelt → Wert ändert
+      sich langsam (nicht sprunghaft)
+- [ ] Heimweg-Modus mit Zielpunkt fast direkt vor dem Wind aktivieren →
+      Status zeigt "Halse Richtung Heimweg empfehlenswert!" statt "Wende"
+- [ ] "Wendewinkel zurücksetzen"-Button setzt auch den Vorwind-Winkel zurück
+
 ### 2d. Mehrere Boots-Profile
 - [ ] Setup-Tab → Sektion "Boots-Profil" sichtbar
 - [ ] Grundprofil heisst "Musto Skiff", Wendewinkel-Startwert 43°

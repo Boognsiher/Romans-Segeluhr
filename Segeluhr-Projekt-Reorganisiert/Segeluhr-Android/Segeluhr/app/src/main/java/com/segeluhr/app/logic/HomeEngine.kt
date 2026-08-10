@@ -11,6 +11,10 @@ import kotlin.math.abs
  *  - Wende-Vorschlag, falls der direkte Kurs zum Ziel zu dicht am Wind liegt
  *    (innerhalb des Anluv-Limits, per Boots-Kalibrierung gelernt oder
  *    Standard 45°) und daher gekreuzt werden muss
+ *  - Halse-Vorschlag (10.08.2026 ergänzt), falls der direkte Kurs zum Ziel
+ *    zu tief vor dem Wind liegt (jenseits des per Smart-Modus gelernten
+ *    Vorwind-Winkels, Standard 180° = deaktiviert/altes Verhalten) —
+ *    spiegelbildlich zur Wende-Logik, derselbe Code-Pfad behandelt beide Fälle
  *  - ETA über die tatsächlich gemessene Annäherung Richtung Ziel (VMC,
  *    "Velocity Made Good" — siehe [HomeProgressTracker])
  *
@@ -42,6 +46,7 @@ class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink
         windCalibrated: Boolean,
         home: GeoPoint?,
         closehauledAngleDeg: Double = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG,
+        downwindAngleDeg: Double = Constants.DEFAULT_DOWNWIND_ANGLE_DEG,
     ): HomeGuidance? {
         val lat = fix.lat ?: return null
         val lon = fix.lon ?: return null
@@ -74,7 +79,15 @@ class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink
         }
 
         val angleToWind = GeoUtils.angleDiff(bearingToHome, windDir)
-        val canSailDirect = abs(angleToWind) >= closehauledAngleDeg
+        val absAngle = abs(angleToWind)
+        // Zwei Gründe, warum der direkte Kurs nicht segelbar ist: zu dicht am
+        // Wind (Kreuzen/Wende nötig, wie bisher) ODER zu tief vor dem Wind
+        // (Halsen nötig, seit 10.08.2026 - siehe downwindAngleDeg-Doku in
+        // WindEngine). Bei generischem Standardwert 180° ist tooDeep nie
+        // wahr (absAngle kann nie > 180 sein) - exakt das alte Verhalten.
+        val tooClose = absAngle < closehauledAngleDeg
+        val tooDeep = absAngle > downwindAngleDeg
+        val canSailDirect = !tooClose && !tooDeep
 
         val recommendedHeading: Double
         var maneuverNeeded = false
@@ -82,11 +95,12 @@ class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink
         if (canSailDirect) {
             recommendedHeading = bearingToHome
         } else {
-            val closehauled1 = GeoUtils.normalize360(windDir - closehauledAngleDeg)
-            val closehauled2 = GeoUtils.normalize360(windDir + closehauledAngleDeg)
-            recommendedHeading = if (abs(GeoUtils.angleDiff(closehauled1, bearingToHome)) <=
-                abs(GeoUtils.angleDiff(closehauled2, bearingToHome))
-            ) closehauled1 else closehauled2
+            val limitAngle = if (tooClose) closehauledAngleDeg else downwindAngleDeg
+            val option1 = GeoUtils.normalize360(windDir - limitAngle)
+            val option2 = GeoUtils.normalize360(windDir + limitAngle)
+            recommendedHeading = if (abs(GeoUtils.angleDiff(option1, bearingToHome)) <=
+                abs(GeoUtils.angleDiff(option2, bearingToHome))
+            ) option1 else option2
 
             val cog = fix.cogDeg
             if (cog != null) {
@@ -99,7 +113,8 @@ class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink
         // Nur beim WECHSEL vibrieren (neu empfohlen), nicht dauerhaft bei jedem Tick
         if (maneuverNeeded && lastManeuverNeeded != true) {
             vib.maneuverCmd()
-            status.setStatus("Wende Richtung Heimweg empfehlenswert!", StatusLevel.AMBER)
+            val verb = if (tooDeep) "Halse" else "Wende"
+            status.setStatus("$verb Richtung Heimweg empfehlenswert!", StatusLevel.AMBER)
         }
         lastManeuverNeeded = maneuverNeeded
 

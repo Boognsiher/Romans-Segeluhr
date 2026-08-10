@@ -54,8 +54,68 @@ NICHT die eigentliche Windrichtungs-Kalibrierung.
 
 Symmetrische Annahme (Backbord-/Steuerbord-Wendewinkel identisch) — wie
 beim bisherigen 45°-Fixwert auch, kein echtes Polardiagramm mit
-unterschiedlichen Winkeln je Bug. Passt zum gewählten Umfang: nur der
-Wendewinkel wird kalibriert, keine Geschwindigkeits-/Polar-Daten.
+unterschiedlichen Winkeln je Bug. Passt zum gewählten Umfang: nur die
+Wende-/Vorwind-Winkel werden kalibriert, keine vollständigen
+Geschwindigkeits-/Polar-Daten (siehe Abschnitt "Warum kein TWS-Polardiagramm"
+unten für die konkrete Abwägung).
+
+## Vorwind-Winkel / Halse-Erkennung (10.08.2026)
+
+Ergänzt das bisher rein Am-Wind-fokussierte System um ein Pendant für die
+Vorwind-Seite — Anstoss war eine [Referenzdatei zu Polar-basierter
+Segelnavigation](https://github.com/rgleason/tactics_pi) (Analyse des
+OpenCPN-Plugins `tactics_pi`, GPLv3 — hier nur als **konzeptionelle
+Inspiration** genutzt, kein übernommener Code, siehe Lizenz-Hinweis in der
+Referenzdatei selbst).
+
+### Warum kein TWS-Polardiagramm (Windstärke-Bänder)
+
+`tactics_pi` arbeitet mit einer vollen Polar-Tabelle (Windgeschwindigkeit ×
+Windwinkel → Bootsgeschwindigkeit) und wählt darüber TWS-abhängige optimale
+Winkel. Die Segeluhr hat **keinen TWS-Sensor** — Windrichtung wird nur aus
+dem gesegelten Kurs abgeleitet (siehe Klassendoku oben), Windstärke gar
+nicht gemessen. Ein Windstärke-Band-Modell (z.B. 3 Bänder wie in der
+Musto-Skiff-Referenzdatei) liesse sich also nie zuverlässig der aktuell
+richtigen Zeile zuordnen. Entscheidung Roman (10.08.2026): stattdessen den
+bereits bestehenden Smart-Modus um eine zweite, unabhängige Grösse
+erweitern — ein Wert, keine TWS-Tabelle.
+
+### Mechanik
+
+- **Kein eigener Kalibrierungsmodus** für den Vorwind-Winkel — anders als
+  beim Wendewinkel gibt es keine dedizierte Zwei-Schläge-Messung mit
+  Plausibilitätsprüfung. Nur der bestehende **Smart-Modus**-Schalter lernt
+  ihn mit, per EMA, genau wie den Wendewinkel — derselbe `tickContinuous()`,
+  zwei unabhängige Toleranzbänder (`SMART_CLOSEHAULED_LEARN_BAND_DEG` um
+  den Wendewinkel, `SMART_DOWNWIND_LEARN_BAND_DEG` um den Vorwind-Winkel),
+  überschneiden sich bei den üblichen Werten (~45° vs. ~150-180°) nicht.
+- **`WindEngine.downwindAngleDeg`**, Default `Constants.DEFAULT_DOWNWIND_ANGLE_DEG`
+  = 180° — das ist bewusst ein No-Op-Wert: 180° = exakt "vor dem Wind",
+  identisch zum bisherigen festen `Wind + 180°`-Verhalten, bis der
+  Smart-Modus einen abweichenden Wert gelernt hat.
+- **`HomeEngine.tick()`**: kennt jetzt neben "zu dicht am Wind → Wende
+  nötig" auch "zu tief vor dem Wind → Halse nötig" (`tooDeep`-Zweig,
+  spiegelbildlich zum bestehenden Wende-Zweig, gleicher Code-Pfad wählt die
+  näherliegende der beiden symmetrischen Kurs-Optionen). Status-Text
+  unterscheidet "Wende" vs. "Halse".
+- **`CompetitionEngine.tickDownwind()`**: hat KEINEN eigenen
+  Leetonnen-Wegpunkt ("bewusst nicht vorgesehen", siehe Klassendoku dort) —
+  ohne Ziel gibt es kein "besserer Bug"-Konzept wie bei Wende/Halse Richtung
+  eines echten Punkts. Stattdessen wird die aktuell gefahrene Gybe-Seite
+  beibehalten und als Zielkurs `Wind ± downwindAngleDeg` (statt starr
+  `Wind + 180°`) genutzt — realistischerer Kurs, aber weiterhin keine
+  Manöver-Empfehlung auf diesem Leg (`maneuverNeeded` bleibt `false`, wie
+  bisher).
+- **Grundprofil "Musto Skiff"**: `downwindAngleDeg = 149°`, gleiche
+  Herleitung wie der 43°-Wendewinkel — Mittelwert der drei geschätzten
+  Vorwind-TWA-Bänder aus `docs/musto_skiff_reference_data.json`
+  (Leichtwind 130-145°, Haupt-Racebereich 140-155°, Starkwind 155-170° —
+  Mittelpunkte 137.5/147.5/162.5 gemittelt ≈ 149°). Neue Profile starten
+  weiterhin beim generischen 180°-Fallback.
+- **UI**: Wind-Tab zeigt "Vorwind-Winkel" unter dem Wendewinkel (kein
+  Kalibrierläufe-Zähler, da kein Kalibrierungsmodus dafür existiert),
+  Setup-Tab-Profilliste zeigt beide Werte kompakt in einer Zeile.
+  "Wendewinkel zurücksetzen"-Button setzt jetzt beide Winkel zurück.
 
 ## Mehrere Boots-Profile (10.08.2026)
 
@@ -92,9 +152,7 @@ Wert zu verlieren.
   wird vom ViewModel bei jedem Profilwechsel per `restoreBoatProfile()`
   umgeschaltet (nicht bei jeder Detail-Änderung desselben Profils, sonst
   würde jede Smart-Modus-Mikrokorrektur unnötig neu "laden").
-- **Downwind-Polardaten aus der Referenzdatei NICHT verwendet** — bewusst
-  ausserhalb des gewählten Umfangs (nur Wendewinkel, siehe "Bewusste
-  Vereinfachung" oben). `CompetitionEngine`/`HomeEngine` navigieren
-  Vorwind-Etappen weiterhin ohne Winkel-Optimierung (direkt `Wind + 180°`).
+- ~~Downwind-Polardaten aus der Referenzdatei NICHT verwendet~~ — **10.08.2026
+  nachgeholt**, siehe Abschnitt "Vorwind-Winkel / Halse-Erkennung" oben.
 
 **Noch nicht kompiliert/getestet.**

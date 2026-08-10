@@ -71,6 +71,12 @@ fun WindScreen(
                 "${"%.0f".format(state.closehauledAngleDeg)}° (Standardwert, noch nicht kalibriert)"
             }
             StatRow("Wendewinkel", angleText, valueColor = Teal)
+            val downwindText = if (state.downwindAngleDeg < 179.5) {
+                "${"%.0f".format(state.downwindAngleDeg)}° (Smart-Modus gelernt)"
+            } else {
+                "180° (Standardwert, direkt vor dem Wind)"
+            }
+            StatRow("Vorwind-Winkel", downwindText, valueColor = Teal)
             Text(
                 "Anderes Profil wählen: Setup-Tab → \"Boots-Profil\".",
                 fontSize = 11.sp, color = TextDim, modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
@@ -99,7 +105,7 @@ fun WindScreen(
                 Column(Modifier.weight(1f).padding(end = 8.dp)) {
                     Text("Smart-Modus")
                     Text(
-                        "Passt den Wendewinkel während des normalen Segelns leise weiter an.",
+                        "Passt Wende- UND Vorwind-Winkel während des normalen Segelns leise weiter an.",
                         fontSize = 11.sp, color = TextDim,
                     )
                 }

@@ -59,7 +59,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         vib = haptics,
         status = statusSink,
         onWindChanged = { dir, calibrated -> settingsRepo.setWindCalibration(dir, calibrated) },
-        onBoatProfileChanged = { id, angle, count -> settingsRepo.updateBoatProfileCalibration(id, angle, count) },
+        onBoatProfileChanged = { id, angle, count, downwindAngle -> settingsRepo.updateBoatProfileCalibration(id, angle, count, downwindAngle) },
     )
     private val trainingEngine = TrainingEngine(haptics, statusSink) { record ->
         db.maneuverDao().insert(record.toEntity())
@@ -100,7 +100,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             settingsRepo.boatProfilesFlow.collect { profiles ->
                 if (profiles.activeProfileId != lastLoadedBoatProfileId) {
                     val active = profiles.profiles.firstOrNull { it.id == profiles.activeProfileId } ?: profiles.profiles.first()
-                    windEngine.restoreBoatProfile(active.id, active.closehauledAngleDeg, active.sampleCount)
+                    windEngine.restoreBoatProfile(active.id, active.closehauledAngleDeg, active.sampleCount, active.downwindAngleDeg)
                     lastLoadedBoatProfileId = profiles.activeProfileId
                 }
                 _uiState.update { it.copy(boatProfiles = profiles.profiles, activeBoatProfileId = profiles.activeProfileId) }
@@ -236,7 +236,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         val competitionGuidance = if (competitionActive) {
             competitionEngine.tick(
                 fix, windEngine.windDir, currentWaypoints.competitionMark1, currentWaypoints.competitionMark2,
-                windEngine.closehauledAngleDeg,
+                windEngine.closehauledAngleDeg, windEngine.downwindAngleDeg,
             )
         } else null
 
@@ -292,7 +292,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         val homeGuidance = if (_uiState.value.homeModeActive) {
             homeEngine.tick(
                 fix, windEngine.windDir, windEngine.windCalibrated, currentWaypoints.home,
-                windEngine.closehauledAngleDeg,
+                windEngine.closehauledAngleDeg, windEngine.downwindAngleDeg,
             )
         } else null
 
@@ -338,6 +338,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 windRange = trend?.second,
                 closehauledAngleDeg = windEngine.closehauledAngleDeg,
                 closehauledSampleCount = windEngine.closehauledSampleCount,
+                downwindAngleDeg = windEngine.downwindAngleDeg,
                 calibrationModeEnabled = windEngine.calibrationModeEnabled,
                 smartModeEnabled = windEngine.smartModeEnabled,
                 vmg = vmg,
@@ -390,7 +391,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(smartModeEnabled = enabled) }
     }
 
-    /** Wirft nur den gelernten Wendewinkel DES AKTIVEN Profils weg (Wind-Tab-Button), nicht die Windkalibrierung. */
+    /** Wirft die gelernten Wende-/Vorwind-Winkel DES AKTIVEN Profils weg (Wind-Tab-Button), nicht die Windkalibrierung. */
     fun resetBoatCalibration() {
         viewModelScope.launch {
             windEngine.resetBoatProfile()
@@ -398,6 +399,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 it.copy(
                     closehauledAngleDeg = windEngine.closehauledAngleDeg,
                     closehauledSampleCount = windEngine.closehauledSampleCount,
+                    downwindAngleDeg = windEngine.downwindAngleDeg,
                 )
             }
         }

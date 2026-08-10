@@ -105,10 +105,14 @@ fun SetupScreen(
                             color = if (isActive) Teal else TextLight,
                             fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
                         )
+                        // Vorwind-Winkel (10.08.2026 ergänzt) hat kein eigenes
+                        // sampleCount (nur Smart-Modus, siehe BoatProfile-Doku) -
+                        // deshalb nur der Wert selbst, kompakt an den
+                        // Wendewinkel angehängt statt eine eigene Zeile.
                         val angleText = if (profile.sampleCount > 0) {
-                            "${"%.0f".format(profile.closehauledAngleDeg)}° (${profile.sampleCount} Kalibrierläufe)"
+                            "${"%.0f".format(profile.closehauledAngleDeg)}° Wende (${profile.sampleCount} Kalibrierläufe) / ${"%.0f".format(profile.downwindAngleDeg)}° Vorwind"
                         } else {
-                            "${"%.0f".format(profile.closehauledAngleDeg)}° (Standardwert)"
+                            "${"%.0f".format(profile.closehauledAngleDeg)}° Wende / ${"%.0f".format(profile.downwindAngleDeg)}° Vorwind (Standardwerte)"
                         }
                         Text(angleText, fontSize = 11.sp, color = TextDim)
                     }

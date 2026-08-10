@@ -83,17 +83,24 @@ class SettingsRepository(private val context: Context) {
          * der drei geschätzten Am-Wind-TWA-Bänder des Musto Skiff
          * (Leichtwind 42-48°, Mittelwind/optimales Pointing 38-42°,
          * Starkwind 40-50° — Mittelpunkte 45/40/45 gemittelt = 43.3° ≈ 43°).
+         * Vorwind-Winkel (10.08.2026 ergänzt) analog aus den drei
+         * geschätzten Vorwind-TWA-Bändern derselben Referenzdaten
+         * (Leichtwind 130-145°, Haupt-Racebereich 140-155°, Starkwind
+         * 155-170° — Mittelpunkte 137.5/147.5/162.5 gemittelt = 149.2° ≈ 149°).
          * Community-Schätzwerte (Musto Skiff Class Association +
          * Vergleichsklassen 49er/RS800), KEINE echten Messdaten -
          * `sampleCount = 0` spiegelt das bewusst wider ("noch nicht
-         * kalibriert"), auch wenn der Winkel nicht mehr der generische
-         * 45°-Fallback ist.
+         * kalibriert"), auch wenn die Winkel nicht mehr die generischen
+         * Fallback-Werte (45°/180°) sind. Für den Vorwind-Winkel gibt es
+         * ohnehin kein sampleCount-Äquivalent (siehe Klassendoku
+         * BoatProfile.downwindAngleDeg).
          */
         val DEFAULT_BOAT_PROFILE = BoatProfile(
             id = "musto-skiff-default",
             name = "Musto Skiff",
             closehauledAngleDeg = 43.0,
             sampleCount = 0,
+            downwindAngleDeg = 149.0,
         )
     }
 
@@ -105,6 +112,7 @@ class SettingsRepository(private val context: Context) {
                 put("name", p.name)
                 put("closehauledAngleDeg", p.closehauledAngleDeg)
                 put("sampleCount", p.sampleCount)
+                put("downwindAngleDeg", p.downwindAngleDeg)
             })
         }
         return arr.toString()
@@ -121,6 +129,12 @@ class SettingsRepository(private val context: Context) {
                     name = o.getString("name"),
                     closehauledAngleDeg = o.getDouble("closehauledAngleDeg"),
                     sampleCount = o.getInt("sampleCount"),
+                    // optDouble mit Fallback: Profile, die vor dem 10.08.2026
+                    // gespeichert wurden, haben dieses Feld noch nicht -
+                    // sonst würde jedes bestehende Profil beim ersten Laden
+                    // nach dem Update auf parseBoatProfiles()-Exception und
+                    // damit auf DEFAULT_BOAT_PROFILE zurückfallen.
+                    downwindAngleDeg = o.optDouble("downwindAngleDeg", Constants.DEFAULT_DOWNWIND_ANGLE_DEG),
                 )
             }
         } catch (e: Exception) {
@@ -280,25 +294,30 @@ class SettingsRepository(private val context: Context) {
     // (siehe Klassenkommentar bei BOAT_PROFILES_JSON und
     // docs/Erweiterung_Boots_Kalibrierung.md)
 
-    /** Aktualisiert Wendewinkel/Kalibrierlauf-Zähler EINES Profils (Kalibrierungs-/Smart-Modus in WindEngine). */
-    suspend fun updateBoatProfileCalibration(id: String, closehauledAngleDeg: Double, sampleCount: Int) {
+    /** Aktualisiert Wende-/Vorwind-Winkel + Kalibrierlauf-Zähler EINES Profils (Kalibrierungs-/Smart-Modus in WindEngine). */
+    suspend fun updateBoatProfileCalibration(id: String, closehauledAngleDeg: Double, sampleCount: Int, downwindAngleDeg: Double) {
         context.dataStore.edit { p ->
             val current = parseBoatProfiles(p[Keys.BOAT_PROFILES_JSON]).ifEmpty { listOf(DEFAULT_BOAT_PROFILE) }.toMutableList()
             val idx = current.indexOfFirst { it.id == id }
             if (idx >= 0) {
-                current[idx] = current[idx].copy(closehauledAngleDeg = closehauledAngleDeg, sampleCount = sampleCount)
+                current[idx] = current[idx].copy(
+                    closehauledAngleDeg = closehauledAngleDeg,
+                    sampleCount = sampleCount,
+                    downwindAngleDeg = downwindAngleDeg,
+                )
                 p[Keys.BOAT_PROFILES_JSON] = serializeBoatProfiles(current)
             }
         }
     }
 
-    /** Neues Profil anlegen (Setup-Tab "Neues Profil") — startet beim generischen 45°-Standardwinkel und wird gleich aktiviert. */
+    /** Neues Profil anlegen (Setup-Tab "Neues Profil") — startet bei den generischen Standardwinkeln (45°/180°) und wird gleich aktiviert. */
     suspend fun addBoatProfile(name: String): BoatProfile {
         val newProfile = BoatProfile(
             id = UUID.randomUUID().toString(),
             name = name,
             closehauledAngleDeg = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG,
             sampleCount = 0,
+            downwindAngleDeg = Constants.DEFAULT_DOWNWIND_ANGLE_DEG,
         )
         context.dataStore.edit { p ->
             val current = parseBoatProfiles(p[Keys.BOAT_PROFILES_JSON]).ifEmpty { listOf(DEFAULT_BOAT_PROFILE) }.toMutableList()
@@ -326,9 +345,9 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    /** Setzt nur den Wendewinkel EINES Profils zurück (Wind-Tab-Button) — Name/ID bleiben erhalten. */
+    /** Setzt Wende- UND Vorwind-Winkel EINES Profils zurück (Wind-Tab-Button) — Name/ID bleiben erhalten. */
     suspend fun resetBoatProfileCalibration(id: String) {
-        updateBoatProfileCalibration(id, Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG, 0)
+        updateBoatProfileCalibration(id, Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG, 0, Constants.DEFAULT_DOWNWIND_ANGLE_DEG)
     }
 
     suspend fun setWakeLockEnabled(enabled: Boolean) {

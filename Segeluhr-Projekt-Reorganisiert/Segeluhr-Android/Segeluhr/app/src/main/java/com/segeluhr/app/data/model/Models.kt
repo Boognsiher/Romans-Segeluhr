@@ -1,5 +1,7 @@
 package com.segeluhr.app.data.model
 
+import com.segeluhr.app.core.Constants
+
 /**
  * "Ohne Uhr": Standalone, das Handy vibriert selbst (VibrationPatterns).
  * "Mit Uhr": Das Handy sendet GPS + Haptik-Kommandos per BLE an die Uhr
@@ -47,12 +49,20 @@ data class WindLogPoint(val cumulativeDeg: Double, val timestampMs: Long)
  * werden kann (z.B. eigenes Boot + Charter-/Vereinsboot). [sampleCount] = 0
  * bedeutet "noch nie kalibriert" (auch beim vorbefüllten Grundprofil, dessen
  * Winkel nur eine Schätzung aus Referenzdaten ist, keine echte Messung).
+ *
+ * [downwindAngleDeg] (10.08.2026 ergänzt): Pendant für die Vorwind-Seite,
+ * aber OHNE eigenes [sampleCount] — es gibt keinen dedizierten
+ * Halsen-Kalibrierungsmodus, der Wert kommt ausschliesslich aus dem
+ * bestehenden Smart-Modus (kontinuierliches Nachlernen während des
+ * normalen Segelns). Default 180° = "noch nichts gelernt", entspricht dem
+ * bisherigen festen Wind+180°-Verhalten.
  */
 data class BoatProfile(
     val id: String,
     val name: String,
     val closehauledAngleDeg: Double,
     val sampleCount: Int,
+    val downwindAngleDeg: Double = Constants.DEFAULT_DOWNWIND_ANGLE_DEG,
 )
 
 /**
