@@ -102,6 +102,16 @@ class MainActivity : ComponentActivity() {
 private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
 
+    // Start-Rollenwahl (siehe docs/Erweiterung_App_Stopp_Rollenwahl.md):
+    // JEDER App-Start zeigt erst diesen Wahlbildschirm, bevor irgendein
+    // anderer Screen aufgebaut wird - roleConfirmedThisSession ist bewusst
+    // nicht persistiert (siehe SegeluhrUiState-Kommentar), erscheint also
+    // wirklich bei jedem Neustart erneut.
+    if (!state.roleConfirmedThisSession) {
+        RolePickerScreen(lastRole = state.appRole, onPick = viewModel::confirmRole)
+        return
+    }
+
     // Rollen-Umschalter (siehe docs/Erweiterung_Landuhr_Kartenansicht.md):
     // im Land-Modus komplett eigener Screen-Baum statt der Segler-Tabs
     // darunter - beide Rollen haben inhaltlich nichts miteinander zu tun.
@@ -138,7 +148,7 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
 
     Scaffold(
         topBar = {
-            TopBarWithGpsStatus(fresh = state.gpsFresh, moving = state.gpsMoving)
+            TopBarWithGpsStatus(fresh = state.gpsFresh, moving = state.gpsMoving, stopped = state.appStopped)
         },
         bottomBar = {
             NavigationBar {
@@ -208,6 +218,8 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onDiagnosticsEnabledChanged = viewModel::setDiagnosticsEnabled,
                     onMarkDiagnosticsEvent = viewModel::markDiagnosticsEvent,
                     onGetDiagnosticsShareUri = viewModel::shareDiagnosticsLogUri,
+                    onStopApp = viewModel::stopApp,
+                    onStartApp = viewModel::startApp,
                 )
             }
         }
@@ -215,11 +227,15 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
 }
 
 @Composable
-private fun TopBarWithGpsStatus(fresh: Boolean, moving: Boolean) {
+private fun TopBarWithGpsStatus(fresh: Boolean, moving: Boolean, stopped: Boolean) {
     TopAppBar(
         title = { Text("⛵ Segeluhr") },
         actions = {
+            // "Gestoppt" (siehe docs/Erweiterung_App_Stopp_Rollenwahl.md) hat
+            // Vorrang vor dem normalen Fix-Status - sonst würde ein alter,
+            // eingefrorener Fix-Zustand angezeigt, obwohl GPS gar nicht mehr läuft.
             val (dotColor, label) = when {
+                stopped -> com.segeluhr.app.ui.theme.TextDim to "Gestoppt"
                 !fresh -> com.segeluhr.app.ui.theme.Red to "Kein Fix"
                 moving -> com.segeluhr.app.ui.theme.Green to "Fix · Fahrt"
                 else -> com.segeluhr.app.ui.theme.Amber to "Fix · langsam"

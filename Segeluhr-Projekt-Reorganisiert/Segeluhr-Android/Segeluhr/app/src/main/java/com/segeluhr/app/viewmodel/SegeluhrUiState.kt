@@ -108,4 +108,14 @@ data class SegeluhrUiState(
     val diagnosticsEnabled: Boolean = true,
     val diagnosticsRowCount: Int = 0,
     val diagnosticsFileName: String? = null,
+
+    // App-Stopp + Start-Rollenwahl (Erweiterung, siehe
+    // docs/Erweiterung_App_Stopp_Rollenwahl.md).
+    // roleConfirmedThisSession bewusst NICHT persistiert - soll bei JEDEM
+    // App-Start wieder false sein, damit der Land/See-Wahlbildschirm
+    // erneut erscheint, unabhängig von der (persistierten) appRole selbst.
+    val roleConfirmedThisSession: Boolean = false,
+    // appStopped ebenfalls nicht persistiert - jeder frische App-Start
+    // beginnt aktiv, Stopp ist eine bewusste Aktion innerhalb der Session.
+    val appStopped: Boolean = false,
 )

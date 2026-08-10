@@ -91,6 +91,25 @@ angefasst wird** — alles Weitere baut auf einer laufenden App auf.
       neue Kreis-Kette sichtbar unter "See-Geofence"
 - [ ] "Abbrechen" verwirft alle gesetzten Punkte, keine Kreise gespeichert
 
+### 2c-5. Start-Rollenwahl + App-Stopp (`docs/Erweiterung_App_Stopp_Rollenwahl.md`)
+- [ ] Compile-Check speziell auf `Icons.Filled.Sailing` (Material Icons
+      Extended) — falls das in der aufgelösten Icon-Paket-Version nicht
+      existiert, meldet der Compiler das sofort in `RolePickerScreen.kt`,
+      einfach durch `Icons.Filled.DirectionsBoat` ersetzen lassen
+- [ ] App frisch starten (nicht nur fortsetzen) → Wahlbildschirm "Auf dem
+      Boot"/"An Land" erscheint VOR allen anderen Screens, zuletzt genutzte
+      Rolle hat "zuletzt"-Badge
+- [ ] Eine Rolle antippen → landet direkt im jeweils richtigen Screen
+      (Tab-Leiste bzw. Land-Kartenansicht)
+- [ ] App schliessen (nicht nur minimieren, "Zuletzt verwendet" wegwischen)
+      und neu öffnen → Wahlbildschirm erscheint erneut
+- [ ] Setup-Tab → Sektion "App-Betrieb" → "Stopp" → TopBar-Statuspunkt
+      wechselt auf "Gestoppt" (grau), GPS-Werte frieren ein
+- [ ] "Start" → GPS/Statuspunkt laufen wieder normal
+- [ ] Rolle im Setup-Tab auf "An Land" wechseln (ohne vorher "Stopp" zu
+      drücken) → GPS/Tick sollten automatisch pausieren; zurück auf "Auf
+      dem Boot" → automatisch wieder aktiv
+
 ### 2d. Mehrere Boots-Profile
 - [ ] Setup-Tab → Sektion "Boots-Profil" sichtbar
 - [ ] Grundprofil heisst "Musto Skiff", Wendewinkel-Startwert 43°

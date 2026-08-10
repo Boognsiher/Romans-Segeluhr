@@ -45,6 +45,8 @@ fun SetupScreen(
     onDiagnosticsEnabledChanged: (Boolean) -> Unit,
     onMarkDiagnosticsEvent: (String) -> Unit,
     onGetDiagnosticsShareUri: () -> android.net.Uri?,
+    onStopApp: () -> Unit,
+    onStartApp: () -> Unit,
 ) {
     Column(
         Modifier
@@ -180,6 +182,33 @@ fun SetupScreen(
                     "der Land-Uhr, nicht mit dem Boot direkt). Zurück geht's im Karten-Screen selbst.",
                 fontSize = 12.sp, color = TextDim,
             )
+        }
+
+        SectionCard("App-Betrieb") {
+            Text(
+                if (state.appStopped) {
+                    "App gestoppt — GPS, Tickschleife und Uhr-Verbindung sind angehalten " +
+                        "(kein zusätzlicher Akkuverbrauch im Hintergrund). \"Start\" nimmt " +
+                        "wieder genau dort auf."
+                } else {
+                    "GPS läuft aktuell durchgehend, solange die App offen ist — bei Pausen " +
+                        "(z.B. Mittagspause am Steg) hier stoppen, um Akku zu sparen."
+                },
+                fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(bottom = 10.dp),
+            )
+            if (state.appStopped) {
+                Button(
+                    onClick = onStartApp,
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Start") }
+            } else {
+                OutlinedButton(
+                    onClick = onStopApp,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Red),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Stopp") }
+            }
         }
 
         SectionCard("Betriebsmodus") {

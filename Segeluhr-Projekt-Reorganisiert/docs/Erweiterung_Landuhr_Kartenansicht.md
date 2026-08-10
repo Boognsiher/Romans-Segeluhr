@@ -98,14 +98,14 @@ teilt damit automatisch auch die Boot-Position.
 - **Kein Vorab-Download eines Kartengebiets** — osmdroid cacht nur, was
   tatsächlich schon angeschaut wurde. Für "erstes Mal an einem neuen See,
   komplett ohne Empfang" reicht das noch nicht.
-- **SegeluhrViewModel (Segler-Rolle) läuft im Hintergrund weiter**, auch
-  während die App im Land-Modus ist — startet also weiterhin den
-  BLE-GATT-Server/Foreground-Service, auch wenn gerade niemand segelt.
-  Kein funktionaler Bug (der Server wartet einfach auf eine Verbindung, die
-  nicht kommt), aber unsauber/unnötiger Akkuverbrauch. Könnte man später
-  lazy machen (SegeluhrViewModel erst bei `AppRole.SAILOR` instanziieren),
-  aktuell bewusst nicht angefasst, um die bestehende Segler-Rolle nicht zu
-  riskieren.
+- ~~**SegeluhrViewModel (Segler-Rolle) läuft im Hintergrund weiter**, auch
+  während die App im Land-Modus ist~~ — **10.08.2026 behoben** (als
+  Nebeneffekt der App-Stopp-Erweiterung, siehe
+  `docs/Erweiterung_App_Stopp_Rollenwahl.md`): `setAppRole()` pausiert
+  GPS/Tickschleife/Foreground-Service jetzt automatisch beim Wechsel zu
+  `AppRole.SHORE` und nimmt sie beim Zurückwechseln wieder auf. Die
+  ViewModel-Instanz selbst lebt weiterhin (unverändert, siehe unten), aber
+  ohne mehr aktiv GPS abzufragen oder zu ticken.
 - **Keine Bearing/Heading-Anzeige oder Track-Linie** auf der Karte, nur ein
   einzelner Positions-Marker mit dem letzten Stand.
 

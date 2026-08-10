@@ -22,6 +22,7 @@ import com.segeluhr.app.geo.CirclePacking
 import com.segeluhr.app.geo.LakeAutoDetector
 import com.segeluhr.app.location.LocationProvider
 import com.segeluhr.app.logic.*
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.math.cos
@@ -180,22 +181,51 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
 
     fun onLocationPermissionResult(granted: Boolean) {
         _uiState.update { it.copy(locationPermissionGranted = granted) }
-        if (granted) startGps()
+        if (granted && !_uiState.value.appStopped) startGps()
     }
 
+    // Job-Referenzen für Stopp-Button (siehe docs/Erweiterung_App_Stopp_Rollenwahl.md)
+    // — ohne die liesse sich der GPS-/Tick-Kreislauf nicht gezielt anhalten,
+    // nur die ganze ViewModel-Instanz (App-Prozess-Ende) würde ihn beenden.
+    private var gpsJob: Job? = null
+    private var tickerJob: Job? = null
+
     private fun startGps() {
-        viewModelScope.launch {
+        gpsJob?.cancel()
+        gpsJob = viewModelScope.launch {
             locationProvider.fixFlow().collect { fix -> currentFix = fix }
         }
     }
 
     private fun startTicker() {
-        viewModelScope.launch {
+        tickerJob?.cancel()
+        tickerJob = viewModelScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(1000)
                 tick()
             }
         }
+    }
+
+    /**
+     * Startet GPS/Tick-Loop/Foreground-Service neu (nach [stopApp] oder beim
+     * Zurückwechseln von der Land- in die Boots-Rolle, siehe [setAppRole]).
+     * GPS startet nur, wenn die Berechtigung bereits erteilt ist — sonst
+     * holt [onLocationPermissionResult] das bei erteilter Berechtigung nach.
+     */
+    private fun resumeBackgroundWork() {
+        if (_uiState.value.locationPermissionGranted) startGps()
+        startTicker()
+        if (_uiState.value.operationMode == OperationMode.WITH_WATCH) {
+            SegeluhrForegroundService.start(getApplication())
+        }
+    }
+
+    /** Hält GPS/Tick-Loop/Foreground-Service an — KEINE Datenlöschung, nur Pause. */
+    private fun pauseBackgroundWork() {
+        gpsJob?.cancel(); gpsJob = null
+        tickerJob?.cancel(); tickerJob = null
+        SegeluhrForegroundService.stop(getApplication())
     }
 
     private fun currentlyValid(): Boolean =
@@ -677,8 +707,55 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
      * die UI im Land-Modus zeigt, und ist der einzige Schreibzugriff auf
      * SettingsRepository - so bleibt "zurueck zu Boot-Modus" aus dem
      * Land-Screen ohne zweite SettingsRepository-Instanz moeglich.
+     *
+     * 10.08.2026 ergänzt (siehe docs/Erweiterung_App_Stopp_Rollenwahl.md):
+     * koppelt die Rolle jetzt an [pauseBackgroundWork]/[resumeBackgroundWork]
+     * — im Land-Modus ergibt eigenes GPS/Tick/Foreground-Service schlicht
+     * keinen Sinn (nur die Position der ANDEREN Uhr wird angezeigt), lief
+     * bisher aber trotzdem unnötig weiter (bekannter Punkt, siehe
+     * docs/Erweiterung_Landuhr_Kartenansicht.md "Bewusst nicht Teil dieser
+     * Ausbaustufe"). Der manuelle Stopp-Button ([stopApp]/[startApp], Setup-
+     * Tab) bleibt davon unabhängig nutzbar, während man in der Boots-Rolle
+     * bleibt.
      */
     fun setAppRole(role: AppRole) {
         viewModelScope.launch { settingsRepo.setAppRole(role) }
+        if (role == AppRole.SHORE) {
+            pauseBackgroundWork()
+        } else if (!_uiState.value.appStopped) {
+            // Zurück zur Boots-Rolle: nur automatisch fortsetzen, wenn der
+            // Nutzer nicht ZUSÄTZLICH manuell gestoppt hatte (appStopped) -
+            // sonst würde ein simpler Rollenwechsel den expliziten Stopp
+            // überschreiben.
+            resumeBackgroundWork()
+        }
+    }
+
+    /**
+     * Start-Bildschirm-Wahl (See/Land, siehe docs/Erweiterung_App_Stopp_Rollenwahl.md)
+     * bei JEDEM App-Start — [SegeluhrUiState.roleConfirmedThisSession] ist
+     * bewusst NICHT persistiert (Default `false`), damit der Wahlbildschirm
+     * nach jedem Neustart wieder erscheint, auch wenn die Rolle selbst
+     * (DataStore) unverändert bleibt.
+     */
+    fun confirmRole(role: AppRole) {
+        setAppRole(role)
+        _uiState.update { it.copy(roleConfirmedThisSession = true) }
+    }
+
+    /**
+     * Setup-Tab-Stopp-Button: hält GPS, Tick-Loop und Foreground-Service an
+     * (genau der Akkuverbrauch, den Roman meinte — GPS blieb bisher
+     * durchgehend an, solange der App-Prozess lebte). Keine Datenlöschung —
+     * [startApp] nimmt exakt dort wieder auf.
+     */
+    fun stopApp() {
+        pauseBackgroundWork()
+        _uiState.update { it.copy(appStopped = true, watchConnected = false) }
+    }
+
+    fun startApp() {
+        resumeBackgroundWork()
+        _uiState.update { it.copy(appStopped = false) }
     }
 }
