@@ -8,6 +8,10 @@ den abhängigen).
 Bei jedem Fehler: Fehlermeldung/Screenshot einfach in den Claude-Code-Chat
 kopieren, nicht selbst rumdebuggen.
 
+**Diese Checkliste prüft nur "kompiliert/läuft ohne Absturz".** Für den
+eigentlichen Wasser-Törn (Reihenfolge, worauf achten, wie am meisten
+Erfahrung sammeln) siehe `docs/Testfahrt_Strategie_10_08.md`.
+
 ---
 
 ## 0. Vorbereitung
@@ -67,6 +71,15 @@ angefasst wird** — alles Weitere baut auf einer laufenden App auf.
 - [ ] Heimweg-Modus mit Zielpunkt fast direkt vor dem Wind aktivieren →
       Status zeigt "Halse Richtung Heimweg empfehlenswert!" statt "Wende"
 - [ ] "Wendewinkel zurücksetzen"-Button setzt auch den Vorwind-Winkel zurück
+
+### 2c-3. Diagnose-Log (`docs/Erweiterung_Diagnose_Log.md`)
+- [ ] Setup-Tab zeigt Sektion "Diagnose-Log", Schalter standardmässig AN
+- [ ] Nach ein paar Sekunden: Dateiname + Zeilenzähler erscheinen (> 0)
+- [ ] "Ereignis markieren" mit Notiztext → Zeilenzähler springt sofort hoch
+- [ ] "Log teilen" → Android-Share-Sheet öffnet sich (Mail/Drive/...
+      auswählbar), keine Absturz/Berechtigungs-Fehler
+- [ ] Geteilte CSV-Datei öffnen (z.B. in Excel/Texteditor) — Kopfzeile +
+      Datenzeilen mit plausiblen Werten (keine leeren Spalten überall)
 
 ### 2d. Mehrere Boots-Profile
 - [ ] Setup-Tab → Sektion "Boots-Profil" sichtbar

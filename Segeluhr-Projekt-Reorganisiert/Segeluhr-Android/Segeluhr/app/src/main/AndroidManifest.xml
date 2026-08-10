@@ -57,5 +57,17 @@
             android:exported="false"
             android:foregroundServiceType="location|connectedDevice" />
 
+        <!-- Für DiagnosticsLogger.shareUri() (Setup-Tab "Diagnose-Log teilen"),
+             siehe docs/Erweiterung_Diagnose_Log.md -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 </manifest>

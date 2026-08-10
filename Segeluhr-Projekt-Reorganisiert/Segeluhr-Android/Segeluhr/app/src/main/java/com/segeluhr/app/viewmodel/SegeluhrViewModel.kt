@@ -9,6 +9,7 @@ import com.segeluhr.app.ble.BleHapticSender
 import com.segeluhr.app.ble.BleProtocol
 import com.segeluhr.app.ble.SegeluhrForegroundService
 import com.segeluhr.app.core.*
+import com.segeluhr.app.data.diagnostics.DiagnosticsLogger
 import com.segeluhr.app.data.db.AppDatabase
 import com.segeluhr.app.data.db.toEntity
 import com.segeluhr.app.data.db.toRecord
@@ -78,6 +79,8 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private val competitionEngine = CompetitionEngine(haptics, statusSink)
     // Session-Distanz-Aufsummierung, siehe core/DistanceTracker.kt
     private val distanceTracker = DistanceTracker()
+    // Diagnose-Log für den ersten Segeltörn, siehe docs/Erweiterung_Diagnose_Log.md
+    private val diagnosticsLogger = DiagnosticsLogger(application)
 
     init {
         // Steuerbefehle von der Uhr (CMD_*, siehe BleProtocol.kt) auf die
@@ -362,6 +365,20 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 competitionGuidance = competitionGuidance,
             )
         }
+
+        // Diagnose-Log (siehe docs/Erweiterung_Diagnose_Log.md): NACH dem
+        // obigen _uiState.update() - _uiState.value spiegelt an dieser
+        // Stelle garantiert schon den neuen Zustand (StateFlow.update()
+        // läuft synchron), kein zweites Zusammenbauen der Felder nötig.
+        if (_uiState.value.diagnosticsEnabled) {
+            diagnosticsLogger.logTick(_uiState.value)
+            _uiState.update {
+                it.copy(
+                    diagnosticsRowCount = diagnosticsLogger.rowCount,
+                    diagnosticsFileName = diagnosticsLogger.currentFileName,
+                )
+            }
+        }
     }
 
     private fun trainRequirementText(): String = when {
@@ -522,6 +539,28 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
 
     fun setWakeLockEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsRepo.setWakeLockEnabled(enabled) }
+    }
+
+    // ---- Diagnose-Log (siehe docs/Erweiterung_Diagnose_Log.md) ----
+
+    fun setDiagnosticsEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(diagnosticsEnabled = enabled) }
+    }
+
+    /** Setup-Tab "Ereignis markieren" — schreibt SOFORT eine Zeile, unabhängig vom 1-Hz-Tick-Rhythmus. */
+    fun markDiagnosticsEvent(note: String) {
+        diagnosticsLogger.markEvent(_uiState.value, note)
+        _uiState.update {
+            it.copy(diagnosticsRowCount = diagnosticsLogger.rowCount, diagnosticsFileName = diagnosticsLogger.currentFileName)
+        }
+    }
+
+    /** Content-URI der aktuellen Log-Datei fürs Teilen (Setup-Tab-Button baut daraus den Share-Intent) — null, falls noch nichts geloggt wurde. */
+    fun shareDiagnosticsLogUri() = diagnosticsLogger.shareUri()
+
+    override fun onCleared() {
+        super.onCleared()
+        diagnosticsLogger.close()
     }
 
     /**

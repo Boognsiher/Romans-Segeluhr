@@ -97,4 +97,12 @@ data class SegeluhrUiState(
     // docs/Erweiterung_Landuhr_Kartenansicht.md) noch fehlt - reproduzierter
     // Bug 09.08.2026: App fand die Land-Uhr nie, SecurityException im Logcat.
     val bluetoothScanPermissionGranted: Boolean = false,
+
+    // Diagnose-Log (Erweiterung, siehe docs/Erweiterung_Diagnose_Log.md) —
+    // CSV-Mitschnitt für den ersten Segeltörn, damit sich das Verhalten der
+    // heute gebauten Features (Boots-Kalibrierung, Vorwind-Winkel,
+    // Distanz-Tracking, ...) im Nachhinein auswerten lässt.
+    val diagnosticsEnabled: Boolean = true,
+    val diagnosticsRowCount: Int = 0,
+    val diagnosticsFileName: String? = null,
 )

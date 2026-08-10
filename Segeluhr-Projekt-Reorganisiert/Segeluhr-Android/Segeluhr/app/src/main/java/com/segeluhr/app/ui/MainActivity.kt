@@ -190,6 +190,9 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onSetActiveBoatProfile = viewModel::setActiveBoatProfile,
                     onAddBoatProfile = viewModel::addBoatProfile,
                     onDeleteBoatProfile = viewModel::deleteBoatProfile,
+                    onDiagnosticsEnabledChanged = viewModel::setDiagnosticsEnabled,
+                    onMarkDiagnosticsEvent = viewModel::markDiagnosticsEvent,
+                    onGetDiagnosticsShareUri = viewModel::shareDiagnosticsLogUri,
                 )
             }
         }

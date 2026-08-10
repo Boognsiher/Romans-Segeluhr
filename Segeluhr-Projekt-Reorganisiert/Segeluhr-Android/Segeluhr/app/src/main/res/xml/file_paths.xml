@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Für DiagnosticsLogger.shareUri() (siehe docs/Erweiterung_Diagnose_Log.md) -
+     macht app-internes filesDir()/diagnostics/ übers FileProvider für Share-Intents
+     erreichbar, ohne WRITE_EXTERNAL_STORAGE-Berechtigung zu brauchen. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="diagnostics" path="diagnostics/" />
+</paths>

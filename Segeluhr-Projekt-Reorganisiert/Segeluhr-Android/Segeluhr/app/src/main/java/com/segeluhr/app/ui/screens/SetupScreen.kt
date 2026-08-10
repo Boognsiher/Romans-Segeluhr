@@ -42,6 +42,9 @@ fun SetupScreen(
     onSetActiveBoatProfile: (String) -> Unit,
     onAddBoatProfile: (String) -> Unit,
     onDeleteBoatProfile: (String) -> Unit,
+    onDiagnosticsEnabledChanged: (Boolean) -> Unit,
+    onMarkDiagnosticsEvent: (String) -> Unit,
+    onGetDiagnosticsShareUri: () -> android.net.Uri?,
 ) {
     Column(
         Modifier
@@ -244,6 +247,64 @@ fun SetupScreen(
                 Button(onClick = onRequestLocationPermission, modifier = Modifier.fillMaxWidth()) {
                     Text("Bluetooth-Berechtigung erlauben (für \"An Land\")")
                 }
+            }
+        }
+
+        SectionCard("Diagnose-Log") {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            Row(
+                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text("Aufzeichnung aktiv")
+                    Text(
+                        "Schreibt 1x/s den kompletten Segel-Zustand (GPS, Wind, gelernte Winkel, " +
+                            "Heimweg-/Wettfahrt-Guidance) als CSV mit — für die Auswertung nach dem Törn.",
+                        fontSize = 11.sp, color = TextDim,
+                    )
+                }
+                Switch(checked = state.diagnosticsEnabled, onCheckedChange = onDiagnosticsEnabledChanged)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (state.diagnosticsFileName != null) {
+                    "${state.diagnosticsFileName} — ${state.diagnosticsRowCount} Zeilen"
+                } else {
+                    "Noch keine Datei angelegt (wird beim ersten Tick erstellt)."
+                },
+                fontSize = 11.sp, color = TextDim,
+            )
+
+            Spacer(Modifier.height(12.dp))
+            var markerNote by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+            OutlinedTextField(
+                value = markerNote,
+                onValueChange = { markerNote = it },
+                label = { Text("Notiz (optional, z.B. \"gezielte Wende jetzt\")") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { onMarkDiagnosticsEvent(markerNote); markerNote = "" },
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Ereignis markieren") }
+                OutlinedButton(
+                    onClick = {
+                        val uri = onGetDiagnosticsShareUri() ?: return@OutlinedButton
+                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/csv"
+                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(android.content.Intent.createChooser(intent, "Diagnose-Log teilen"))
+                    },
+                    enabled = state.diagnosticsFileName != null,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Log teilen") }
             }
         }
 
