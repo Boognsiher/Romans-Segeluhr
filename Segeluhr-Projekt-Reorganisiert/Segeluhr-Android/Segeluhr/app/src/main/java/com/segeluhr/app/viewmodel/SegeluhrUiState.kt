@@ -87,6 +87,11 @@ data class SegeluhrUiState(
     val competitionActive: Boolean = false,
     val competitionGuidance: CompetitionGuidance? = null,
 
+    // Vereinheitlichte Bojen-Rundungserkennung (Erweiterung, siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md) — Spiegel von
+    // TrainingEngine.pendingConfirmation/CompetitionEngine.pendingConfirmation.
+    val pendingBuoyConfirmation: PendingBuoyConfirmation? = null,
+
     // Setup
     val wakeLockEnabled: Boolean = false,
     val operationMode: OperationMode = OperationMode.STANDALONE,

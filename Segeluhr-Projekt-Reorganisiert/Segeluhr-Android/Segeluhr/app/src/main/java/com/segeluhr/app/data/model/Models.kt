@@ -1,6 +1,7 @@
 package com.segeluhr.app.data.model
 
 import com.segeluhr.app.core.Constants
+import com.segeluhr.app.core.GeoPoint
 
 /**
  * "Ohne Uhr": Standalone, das Handy vibriert selbst (VibrationPatterns).
@@ -106,4 +107,29 @@ data class CompetitionGuidance(
     val maneuverNeeded: Boolean,
     val isEstimated: Boolean,
     val lapCount: Int,
+)
+
+/**
+ * Welche Engine gerade eine Bestätigung braucht (siehe
+ * docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md) — Training-Race und
+ * Competition können laut CompetitionEngine-Klassendoku parallel aktiv
+ * sein, deshalb muss der ViewModel wissen, an welche der beiden
+ * `confirmPendingRounding()`/`rejectPendingRounding()` weitergereicht wird.
+ */
+enum class BuoyConfirmSource { TRAINING, COMPETITION }
+
+/**
+ * Spiegel von `TrainingEngine.pendingConfirmation`/
+ * `CompetitionEngine.pendingConfirmation` im UiState — siehe
+ * docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md. [waypointKey] ist
+ * der SettingsRepository-Wegpunkt-Schlüssel ("buoy1"/"buoy2"/
+ * "competitionMark1"), der bei Bestätigung auf [candidatePosition]
+ * korrigiert wird. [startedAtMs] treibt den Auto-Bestätigen-Timeout
+ * (`Constants.ROUNDING_CONFIRM_TIMEOUT_MS`).
+ */
+data class PendingBuoyConfirmation(
+    val source: BuoyConfirmSource,
+    val waypointKey: String,
+    val candidatePosition: GeoPoint,
+    val startedAtMs: Long,
 )

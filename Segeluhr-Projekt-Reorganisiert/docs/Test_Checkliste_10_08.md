@@ -110,6 +110,27 @@ angefasst wird** — alles Weitere baut auf einer laufenden App auf.
       drücken) → GPS/Tick sollten automatisch pausieren; zurück auf "Auf
       dem Boot" → automatisch wieder aktiv
 
+### 2c-6. Vereinheitlichte Bojenerkennung (`docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md`)
+- [ ] Training-Tab → Racemode, beide Bojen setzen, Wind kalibrieren →
+      Rundung an der gesetzten Boje (< 20 m) wechselt sofort zur anderen
+      Boje, kein Rückfrage-Banner
+- [ ] Racemode: Amwind/Vorwind-Kurswechsel 20–150 m neben der aktiven Boje
+      (z.B. Boje versehentlich zu früh/spät gesetzt) → gelbes Banner "Boje
+      noch nicht erreicht — trotzdem als gerundet werten?" erscheint unter
+      dem Status-Banner, egal welcher Tab offen ist
+- [ ] "Ja, Boje ist hier" → Boje wird auf die aktuelle Position korrigiert
+      (Training-Tab-Wegpunktanzeige prüfen), Rundung zählt
+- [ ] "Nein, anderer Grund" → Banner verschwindet, Boje bleibt an alter
+      Position, keine Rundung gezählt
+- [ ] Banner NICHT beantworten, 20s abwarten → Banner verschwindet von
+      selbst, zählt automatisch als "Ja" (Boje wurde korrigiert)
+- [ ] Gleicher Ablauf im Competition-Modus mit gesetzter Luvbake
+      (`competitionMark1`)
+- [ ] Kurswechsel weiter als 150 m von der Boje entfernt → keine Reaktion
+      (normale Wende/Halse mitten auf dem Schlag)
+- [ ] Kein Wegpunkt gesetzt, nur Windschätzung (Competition ohne Luvbake) →
+      Amwind/Vorwind-Wechsel rundet sofort automatisch, kein Banner
+
 ### 2d. Mehrere Boots-Profile
 - [ ] Setup-Tab → Sektion "Boots-Profil" sichtbar
 - [ ] Grundprofil heisst "Musto Skiff", Wendewinkel-Startwert 43°
@@ -135,6 +156,15 @@ angefasst wird** — alles Weitere baut auf einer laufenden App auf.
       die `onHomeStatusNotify()`-Änderung — **wichtig:** diese Funktion
       verlangt jetzt mindestens 7 Byte statt 3, siehe Punkt 5 unten, falls
       Handy und Ultra aus Versehen unterschiedliche Stände haben)
+- [ ] Vereinheitlichte Bojenerkennung (siehe 2c-6): sobald das Handy das
+      Rückfrage-Banner zeigt, wechselt die Uhr automatisch auf den
+      Manöver-Tab und zeigt "Boje hier?" statt der normalen Wende/Halse-
+      Anzeige
+- [ ] Auf der Uhr: Handgelenk hochreissen (Tilt-Geste) bestätigt ("Ja"),
+      schütteln lehnt ab ("Nein") — Banner am Handy verschwindet jeweils
+      sofort
+- [ ] Taster-Fallback: kurzer Druck = Ja, langer Druck = Nein (falls
+      Gestenerkennung gerade nicht zuverlässig anspricht)
 
 ---
 

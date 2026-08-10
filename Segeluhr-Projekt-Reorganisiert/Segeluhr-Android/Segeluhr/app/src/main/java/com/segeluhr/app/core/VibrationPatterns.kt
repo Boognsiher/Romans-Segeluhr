@@ -62,4 +62,7 @@ class VibrationPatterns(context: Context) : HapticFeedback {
 
     /** Start-Signal bei 0:00 — kräftig */
     override fun startSignal() = fire(longArrayOf(0L, 900L))
+
+    /** Bojen-Rundungs-Rückfrage — 3x lang/deutlich, unterscheidbar von rounding6()'s kurzen Pulsen */
+    override fun roundingConfirmNeeded() = fire(pulses(3, dur = 250L, gap = 150L))
 }

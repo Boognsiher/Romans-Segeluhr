@@ -17,4 +17,5 @@ class BleHapticSender(private val bleManager: BleGattServerManager) : HapticFeed
     override fun rounding6() = bleManager.sendHapticCommand(BleProtocol.HAPTIC_ROUNDING6)
     override fun maneuverCmd() = bleManager.sendHapticCommand(BleProtocol.HAPTIC_MANEUVER_CMD)
     override fun startSignal() = bleManager.sendHapticCommand(BleProtocol.HAPTIC_START_SIGNAL)
+    override fun roundingConfirmNeeded() = bleManager.sendHapticCommand(BleProtocol.HAPTIC_ROUNDING_CONFIRM_NEEDED)
 }

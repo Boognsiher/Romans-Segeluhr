@@ -14,7 +14,9 @@ import com.segeluhr.app.data.db.AppDatabase
 import com.segeluhr.app.data.db.toEntity
 import com.segeluhr.app.data.db.toRecord
 import com.segeluhr.app.data.model.AppRole
+import com.segeluhr.app.data.model.BuoyConfirmSource
 import com.segeluhr.app.data.model.OperationMode
+import com.segeluhr.app.data.model.PendingBuoyConfirmation
 import com.segeluhr.app.data.model.RaceState
 import com.segeluhr.app.data.model.TrainMode
 import com.segeluhr.app.data.settings.SettingsRepository
@@ -263,7 +265,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             trainingEngine.tick(fix, windEngine.windDir, windEngine.windCalibrated)
         }
         if (trainingEngine.trainMode == TrainMode.RACE) {
-            trainingEngine.tickRaceNav(fix, currentWaypoints.buoy1, currentWaypoints.buoy2)
+            trainingEngine.tickRaceNav(fix, windEngine.windDir, windEngine.windCalibrated, currentWaypoints.buoy1, currentWaypoints.buoy2)
         }
         lakeEngine.tick(fix, trainingEngine.trainMode, currentWaypoints.lakeCircles)
 
@@ -274,11 +276,66 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             )
         } else null
 
+        updatePendingBuoyConfirmation()
+
         val countdownS = countdownEngine.tick()
 
         distanceTracker.sample(valid, fix.lat, fix.lon, fix.sogKn)
 
         renderTelemetry(fix, valid, countdownS, competitionGuidance)
+    }
+
+    /**
+     * Vereinheitlichte Bojen-Rundungserkennung (siehe
+     * docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): spiegelt
+     * TrainingEngine.pendingConfirmation/CompetitionEngine.pendingConfirmation
+     * 1:1 in den UiState und prüft den Auto-Bestätigen-Timeout. Competition
+     * hat Vorrang vor Training-Race (wie schon bei windShiftReference oben)
+     * für den seltenen Fall, dass beide gleichzeitig eine Rückfrage offen
+     * hätten — in der Praxis läuft meist nur einer der beiden Modi aktiv
+     * mit gesetzten Bojen/Marken.
+     */
+    private fun updatePendingBuoyConfirmation() {
+        val trainingPending = trainingEngine.pendingConfirmation
+        val competitionPending = competitionEngine.pendingConfirmation
+        val current = _uiState.value.pendingBuoyConfirmation
+
+        val engineStillPending = when (current?.source) {
+            BuoyConfirmSource.TRAINING -> trainingPending != null
+            BuoyConfirmSource.COMPETITION -> competitionPending != null
+            null -> false
+        }
+        if (current != null && !engineStillPending) {
+            // Engine hat die Rückfrage selbst schon aufgelöst (z.B.
+            // Trainings-Racemode zwischenzeitlich ausgeschaltet) -
+            // Spiegel nachziehen, ohne confirm/reject erneut anzustossen.
+            _uiState.update { it.copy(pendingBuoyConfirmation = null) }
+            return
+        }
+        if (current == null) {
+            val (source, waypointKey, candidatePosition) = when {
+                competitionPending != null -> Triple(BuoyConfirmSource.COMPETITION, competitionPending.waypointKey, competitionPending.candidatePosition)
+                trainingPending != null -> Triple(BuoyConfirmSource.TRAINING, trainingPending.waypointKey, trainingPending.candidatePosition)
+                else -> return
+            }
+            _uiState.update {
+                it.copy(
+                    pendingBuoyConfirmation = PendingBuoyConfirmation(
+                        source = source,
+                        waypointKey = waypointKey,
+                        candidatePosition = candidatePosition,
+                        startedAtMs = System.currentTimeMillis(),
+                    )
+                )
+            }
+            return
+        }
+        // Auto-Bestätigen-Timeout (Roman-Wunsch 10.08.2026: Standardantwort
+        // "Ja", falls beim Segeln keine Hand für eine bewusste Bestätigung
+        // frei ist — siehe Constants.ROUNDING_CONFIRM_TIMEOUT_MS).
+        if (System.currentTimeMillis() - current.startedAtMs >= Constants.ROUNDING_CONFIRM_TIMEOUT_MS) {
+            confirmBuoyRounding()
+        }
     }
 
     private fun renderTelemetry(fix: Fix, valid: Boolean, countdownS: Int?, competitionGuidance: com.segeluhr.app.data.model.CompetitionGuidance?) {
@@ -357,6 +414,12 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             maneuverNeeded = maneuverNeededForWatch,
             isTack = trainingEngine.isTackManeuver,
             competitionLegOrdinal = competitionGuidance?.leg?.ordinal,
+            // Vereinheitlichte Bojen-Rundungserkennung (siehe
+            // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md) - bewusst
+            // AUS _uiState gelesen (nicht direkt aus den Engines), weil
+            // updatePendingBuoyConfirmation() dort schon Competition-
+            // Vorrang + Auto-Timeout aufgelöst hat.
+            roundingConfirmPending = _uiState.value.pendingBuoyConfirmation != null,
         )
 
         _uiState.update {
@@ -582,6 +645,48 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { settingsRepo.clearWaypoint(key) }
     }
 
+    /**
+     * Vereinheitlichte Bojen-Rundungserkennung (siehe
+     * docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): "Ja, Boje ist
+     * hier" — schliesst die Rundung in der jeweiligen Engine SYNCHRON ab
+     * (räumt deren `pendingConfirmation` noch im selben Aufruf weg), bevor
+     * die korrigierte Position asynchron persistiert wird. Bewusst in
+     * dieser Reihenfolge: [updatePendingBuoyConfirmation] läuft 1x/s in
+     * der Tickschleife — würde die Engine ihr eigenes
+     * `pendingConfirmation` erst NACH einem `suspend`-Punkt (DataStore-
+     * Schreibvorgang) räumen, könnte ein dazwischenliegender Tick den
+     * bereits geleerten `_uiState.pendingBuoyConfirmation` fälschlich neu
+     * befüllen (Banner flackert kurz erneut auf, mit frischem Timeout).
+     * Die beiden Engines brauchen die korrigierte Position für ihre
+     * Status-Meldung nicht (die referenziert nur "gerundet", keine
+     * Koordinaten) — die Persistenz-Reihenfolge ist dafür also unkritisch.
+     * Wird sowohl vom Banner-Button (Handy) als auch vom
+     * CMD_CONFIRM_BUOY_ROUNDING-Steuerbefehl (Geste/Taster auf der Uhr) und
+     * vom Auto-Timeout ([updatePendingBuoyConfirmation]) aufgerufen.
+     */
+    fun confirmBuoyRounding() {
+        val pending = _uiState.value.pendingBuoyConfirmation ?: return
+        _uiState.update { it.copy(pendingBuoyConfirmation = null) }
+        when (pending.source) {
+            BuoyConfirmSource.TRAINING -> trainingEngine.confirmPendingRounding()
+            BuoyConfirmSource.COMPETITION -> competitionEngine.confirmPendingRounding(currentWaypoints.competitionMark2)
+        }
+        viewModelScope.launch { settingsRepo.setWaypoint(pending.waypointKey, pending.candidatePosition) }
+    }
+
+    /**
+     * "Nein, anderer Grund" — Kurswechsel war keine Rundung, der
+     * betroffene Wegpunkt bleibt unverändert. Siehe [confirmBuoyRounding].
+     */
+    fun rejectBuoyRounding() {
+        val pending = _uiState.value.pendingBuoyConfirmation ?: return
+        _uiState.update { it.copy(pendingBuoyConfirmation = null) }
+        when (pending.source) {
+            BuoyConfirmSource.TRAINING -> trainingEngine.rejectPendingRounding()
+            BuoyConfirmSource.COMPETITION -> competitionEngine.rejectPendingRounding()
+        }
+    }
+
     fun clearManeuverLog() {
         viewModelScope.launch { db.maneuverDao().clearAll() }
     }
@@ -670,6 +775,12 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             BleProtocol.CMD_HOME_MODE_TOGGLE -> setHomeModeActive(!_uiState.value.homeModeActive)
             BleProtocol.CMD_COMPETITION_END -> stopCompetition()
             BleProtocol.CMD_CLEAR_LOG -> clearManeuverLog()
+            // Vereinheitlichte Bojen-Rundungserkennung (siehe
+            // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md) - Antwort
+            // per Geste (Klio/BHI260, onGestureTiltUp()/onGestureShake())
+            // oder Taster-Fallback auf der Uhr.
+            BleProtocol.CMD_CONFIRM_BUOY_ROUNDING -> confirmBuoyRounding()
+            BleProtocol.CMD_REJECT_BUOY_ROUNDING -> rejectBuoyRounding()
         }
     }
 

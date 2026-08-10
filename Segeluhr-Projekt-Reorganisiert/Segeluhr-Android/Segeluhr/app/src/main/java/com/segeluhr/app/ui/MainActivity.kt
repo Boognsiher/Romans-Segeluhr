@@ -173,6 +173,19 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             StatusBannerHost(state.statusText, state.statusLevel)
+            // Vereinheitlichte Bojen-Rundungserkennung (siehe
+            // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md) — bewusst
+            // TAB-UNABHÄNGIG hier eingeblendet, direkt unter dem Status-
+            // Banner, damit die Rückfrage nicht verpasst wird, egal welcher
+            // Tab gerade offen ist.
+            if (state.pendingBuoyConfirmation != null) {
+                Box(Modifier.padding(14.dp, 8.dp, 14.dp, 0.dp)) {
+                    com.segeluhr.app.ui.components.BuoyRoundingConfirmBanner(
+                        onConfirm = viewModel::confirmBuoyRounding,
+                        onReject = viewModel::rejectBuoyRounding,
+                    )
+                }
+            }
             when (selectedTab) {
                 Tab.NORMAL -> NormalScreen(
                     state,

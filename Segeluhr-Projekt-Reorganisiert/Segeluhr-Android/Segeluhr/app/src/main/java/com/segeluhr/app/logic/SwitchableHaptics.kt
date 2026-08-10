@@ -36,4 +36,5 @@ class SwitchableHaptics(
     override fun rounding6() = target().rounding6()
     override fun maneuverCmd() = target().maneuverCmd()
     override fun startSignal() = target().startSignal()
+    override fun roundingConfirmNeeded() = target().roundingConfirmNeeded()
 }

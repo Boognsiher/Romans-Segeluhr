@@ -42,10 +42,18 @@ class TrainingEngine(
     var isTackManeuver: Boolean = true
         private set
 
-    // Racemode Bojen-Navigation (6.4)
-    private val raceNavTracker = CourseTracker()
-    private var raceLastSteady: Double? = null
+    // Racemode Bojen-Navigation (6.4) — Rundungserkennung seit 10.08.2026
+    // vereinheitlicht mit CompetitionEngine, siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md und
+    // logic/MarkRoundingDetector.kt.
+    private val roundingDetector = MarkRoundingDetector()
     var activeBuoyIdx: Int? = null
+        private set
+
+    data class PendingConfirmation(val waypointKey: String, val candidatePosition: GeoPoint)
+
+    /** Amwind/Vorwind-Kurswechsel abseits der aktiven Boje erkannt — wartet auf Bestätigen/Ablehnen (ViewModel). */
+    var pendingConfirmation: PendingConfirmation? = null
         private set
 
     fun setMode(mode: TrainMode, buoy1: GeoPoint?, buoy2: GeoPoint?, fix: Fix) {
@@ -79,13 +87,9 @@ class TrainingEngine(
     fun activeBuoy(buoy1: GeoPoint?, buoy2: GeoPoint?): GeoPoint? =
         when (activeBuoyIdx) { 0 -> buoy1; 1 -> buoy2; else -> null }
 
-    private fun otherBuoy(buoy1: GeoPoint?, buoy2: GeoPoint?): GeoPoint? =
-        when (activeBuoyIdx) { 0 -> buoy2; 1 -> buoy1; else -> null }
-
     private fun roundBuoy() {
         activeBuoyIdx = if (activeBuoyIdx == 0) 1 else 0
-        raceNavTracker.reset()
-        raceLastSteady = null
+        roundingDetector.reset()
         vib.rounding6()
         status.setStatus("Boje gerundet!", StatusLevel.GREEN)
     }
@@ -171,41 +175,46 @@ class TrainingEngine(
         }
     }
 
-    /** Abschnitt 6.4: Racemode-Bojen-Navigation, pausiert während COMMANDED/TURNING */
-    fun tickRaceNav(fix: Fix, buoy1: GeoPoint?, buoy2: GeoPoint?) {
+    /**
+     * Abschnitt 6.4: Racemode-Bojen-Navigation, pausiert während COMMANDED/
+     * TURNING. Rundungserkennung seit 10.08.2026 über [MarkRoundingDetector]
+     * (siehe docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md) — braucht
+     * deshalb jetzt kalibrierten Wind (vorher nicht nötig, die alte
+     * "Kurswechsel + zielt auf andere Boje"-Prüfung kam ohne Wind aus).
+     */
+    fun tickRaceNav(fix: Fix, windDir: Double?, windCalibrated: Boolean, buoy1: GeoPoint?, buoy2: GeoPoint?) {
         if (trainMode != TrainMode.RACE || buoy1 == null || buoy2 == null) return
         if (trainState == TrainState.COMMANDED || trainState == TrainState.TURNING) return
+        if (pendingConfirmation != null) return // wartet auf Bestätigen/Ablehnen, siehe [confirmPendingRounding]
         if (activeBuoyIdx == null) chooseNearerBuoy(buoy1, buoy2, fix)
         val target = activeBuoy(buoy1, buoy2) ?: return
-        val lat = fix.lat ?: return
-        val lon = fix.lon ?: return
 
-        // a) Distanzbasierte Rundung
-        val dist = GeoUtils.distanceMeters(lat, lon, target.lat, target.lon)
-        if (dist <= Constants.ROUNDING_RADIUS_M) {
-            roundBuoy()
-            return
-        }
-
-        // b) Manöver-basierte Rundung
-        raceNavTracker.sample(fix.cogDeg, fix.lat, fix.lon, fix.sogKn)
-        val avg = raceNavTracker.steady(Constants.RACE_COURSE_MAX_DEV) ?: return
-        val lastSteady = raceLastSteady
-        if (lastSteady == null) {
-            raceLastSteady = avg
-            return
-        }
-        val turn = GeoUtils.angleDiff(avg, lastSteady)
-        if (abs(turn) >= Constants.RACE_TURN_MIN_DEG) {
-            val other = otherBuoy(buoy1, buoy2)
-            if (other != null) {
-                val bearingToOther = GeoUtils.bearingDeg(lat, lon, other.lat, other.lon)
-                if (abs(GeoUtils.angleDiff(avg, bearingToOther)) <= Constants.RACE_AIM_TOLERANCE_DEG) {
-                    roundBuoy()
-                    return
-                }
+        when (val result = roundingDetector.tick(fix, windDir, windCalibrated, target)) {
+            MarkRoundingDetector.Result.Rounded -> roundBuoy()
+            is MarkRoundingDetector.Result.NeedsConfirmation -> {
+                val key = if (activeBuoyIdx == 0) "buoy1" else "buoy2"
+                pendingConfirmation = PendingConfirmation(key, result.candidatePosition)
+                vib.roundingConfirmNeeded()
+                status.setStatus("Boje noch nicht erreicht — trotzdem als gerundet werten?", StatusLevel.AMBER)
             }
+            // AutoRounded kann hier praktisch nicht vorkommen - target ist
+            // durch die obige Vorbedingung (buoy1/buoy2 beide gesetzt) nie
+            // null, siehe MarkRoundingDetector-Klassendoku.
+            is MarkRoundingDetector.Result.AutoRounded, MarkRoundingDetector.Result.None -> Unit
         }
-        raceLastSteady = avg
+    }
+
+    /** "Ja, Boje ist hier" — Wegpunkt-Korrektur ist zu diesem Zeitpunkt bereits vom ViewModel persistiert. */
+    fun confirmPendingRounding() {
+        if (pendingConfirmation == null) return
+        pendingConfirmation = null
+        roundBuoy()
+    }
+
+    /** "Nein, anderer Grund" — Kurswechsel war keine Rundung, Boje bleibt unverändert. */
+    fun rejectPendingRounding() {
+        pendingConfirmation = null
+        roundingDetector.reset()
+        status.setStatus("Kurswechsel nicht als Bojen-Rundung gewertet.", StatusLevel.NORMAL)
     }
 }

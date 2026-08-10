@@ -283,12 +283,13 @@ class BleGattServerManager(private val context: Context) {
         maneuverNeeded: Boolean,
         isTack: Boolean,
         competitionLegOrdinal: Int?,
+        roundingConfirmPending: Boolean = false,
     ) {
         val server = gattServer ?: return
         val characteristic = raceStatusCharacteristic ?: return
         if (connectedDevices.isEmpty()) return
         characteristic.value = BleProtocol.encodeRaceStatus(
-            raceStateOrdinal, countdownSeconds, maneuverNeeded, isTack, competitionLegOrdinal,
+            raceStateOrdinal, countdownSeconds, maneuverNeeded, isTack, competitionLegOrdinal, roundingConfirmPending,
         )
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, characteristic, false)

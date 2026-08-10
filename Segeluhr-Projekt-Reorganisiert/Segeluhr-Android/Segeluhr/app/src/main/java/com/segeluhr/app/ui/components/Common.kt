@@ -106,6 +106,48 @@ fun StatusBanner(text: String, level: StatusLevel) {
     }
 }
 
+/**
+ * Vereinheitlichte Bojen-Rundungserkennung (Erweiterung, siehe
+ * docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): Rückfrage-Banner
+ * für "Kurswechsel Amwind/Vorwind in der Nähe einer gesetzten Boje, aber
+ * nicht direkt an ihrer Position erkannt". Bewusst als eigenständiger,
+ * auffälligerer Banner statt einer Variante von [StatusBanner] — zwei
+ * Buttons statt reinem Text, und die Zeitangabe macht den (auf der Uhr
+ * per Geste identisch funktionierenden) Auto-Bestätigen-Timeout auch am
+ * Handy sichtbar.
+ */
+@Composable
+fun BuoyRoundingConfirmBanner(onConfirm: () -> Unit, onReject: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Panel2Dark, RoundedCornerShape(12.dp))
+            .border(1.dp, Amber, RoundedCornerShape(12.dp))
+            .padding(14.dp)
+    ) {
+        Text(
+            "Boje noch nicht erreicht — trotzdem als gerundet werten?",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextLight,
+        )
+        Text(
+            "Ohne Antwort gilt automatisch \"Ja\" (auch per Geste auf der Uhr möglich).",
+            fontSize = 11.sp,
+            color = TextDim,
+            modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = onConfirm, modifier = Modifier.weight(1f)) {
+                Text("Ja, Boje ist hier", fontSize = 13.sp)
+            }
+            OutlinedButton(onClick = onReject, modifier = Modifier.weight(1f)) {
+                Text("Nein, anderer Grund", fontSize = 13.sp)
+            }
+        }
+    }
+}
+
 @Composable
 fun WaypointRow(
     label: String,

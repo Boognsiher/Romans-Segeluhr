@@ -34,4 +34,14 @@ interface HapticFeedback {
 
     /** Start-Signal bei 0:00 — kräftig */
     fun startSignal()
+
+    /**
+     * Bojen-Rundungs-Rückfrage steht an ("Boje noch nicht erreicht —
+     * trotzdem als gerundet werten?", siehe
+     * docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md und
+     * MarkRoundingDetector.Result.NeedsConfirmation). Reine
+     * Aufmerksamkeits-Benachrichtigung — die eigentliche Antwort kommt per
+     * Geste (Uhr) oder Banner-Button (Handy), nicht per Haptik.
+     */
+    fun roundingConfirmNeeded()
 }

@@ -114,6 +114,12 @@ enum HapticCode {
     HAPTIC_ROUNDING6 = 6,
     HAPTIC_MANEUVER_CMD = 7,
     HAPTIC_START_SIGNAL = 8,
+    // Vereinheitlichte Bojen-Rundungserkennung (10.08.2026, siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): "Boje noch
+    // nicht erreicht — trotzdem als gerundet werten?" steht offen. Reine
+    // Aufmerksamkeits-Vibration, die Antwort kommt per Geste/Taster (siehe
+    // onGestureTiltUp()/onGestureShake()/onButtonShortPress() weiter unten).
+    HAPTIC_ROUNDING_CONFIRM_NEEDED = 9,
 };
 
 // CMD_*-Steuerbefehle Uhr -> Handy (siehe BleProtocol.kt)
@@ -132,6 +138,10 @@ enum ControlCmd {
     CMD_HOME_MODE_TOGGLE = 12,
     CMD_COMPETITION_END = 13,
     CMD_CLEAR_LOG = 14,
+    // Vereinheitlichte Bojen-Rundungserkennung (siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md).
+    CMD_CONFIRM_BUOY_ROUNDING = 15,
+    CMD_REJECT_BUOY_ROUNDING = 16,
 };
 
 enum WaypointId {
@@ -146,6 +156,9 @@ enum WaypointId {
 #define WIND_FLAG_CALIBRATED (1 << 0)
 #define MANEUVER_FLAG_NEEDED (1 << 0)
 #define MANEUVER_FLAG_IS_TACK (1 << 1)
+// Vereinheitlichte Bojen-Rundungserkennung (siehe
+// docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md).
+#define MANEUVER_FLAG_ROUNDING_CONFIRM_PENDING (1 << 2)
 
 // ============================================================================
 // Dekodierte Live-Daten (werden von den Notify-Callbacks gefüllt)
@@ -184,6 +197,10 @@ struct RaceData {
     bool maneuverNeeded = false;
     bool isTack = true;
     int competitionLeg = -1; // -1 = kein Competition aktiv, sonst 0=UPWIND 1=REACH 2=DOWNWIND
+    // Vereinheitlichte Bojen-Rundungserkennung (siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): "Boje noch
+    // nicht erreicht — trotzdem als gerundet werten?" steht offen.
+    bool roundingConfirmPending = false;
     bool haveData = false;
 } raceData;
 
@@ -368,6 +385,9 @@ static void onRaceStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, siz
     raceData.maneuverNeeded = (maneuverFlags & MANEUVER_FLAG_NEEDED) != 0;
     raceData.isTack = (maneuverFlags & MANEUVER_FLAG_IS_TACK) != 0;
     raceData.competitionLeg = (leg == 0xFF) ? -1 : (int)leg;
+    // Vereinheitlichte Bojen-Rundungserkennung (siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md).
+    raceData.roundingConfirmPending = (maneuverFlags & MANEUVER_FLAG_ROUNDING_CONFIRM_PENDING) != 0;
     raceData.haveData = true;
     screenNeedsRefresh = true;
 }
@@ -393,7 +413,11 @@ static void autoFocusTick() {
     if (appMode != MODE_SEGELN || tabview == nullptr) return;
 
     int priorityTab = -1; // -1 = gerade kein zeitkritischer Zustand aktiv
-    if (raceData.haveData && raceData.maneuverNeeded) {
+    // Vereinheitlichte Bojen-Rundungserkennung (siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): genauso
+    // zeitkritisch wie ein empfohlenes Manöver - der Auto-Timeout läuft,
+    // die Rückfrage soll nicht unbemerkt hinter Wind/Menü verschwinden.
+    if (raceData.haveData && (raceData.maneuverNeeded || raceData.roundingConfirmPending)) {
         priorityTab = 4; // tabManeuver
     } else if (raceData.haveData && raceData.raceState == 1 /* COUNTDOWN */) {
         priorityTab = 3; // tabCountdown
@@ -600,6 +624,11 @@ void triggerHaptic(int code) {
         case HAPTIC_ROUNDING6:    playWaveformSeq({1, 1, 1, 1});                break; // 4x Strong Click
         case HAPTIC_MANEUVER_CMD: playWaveformSeq({5, 5, 5, 5, 5});             break; // 5x Strong Buzz
         case HAPTIC_START_SIGNAL: playWaveformSeq({5, 5, 5, 5, 5, 5, 5, 5});    break; // volle 8 Slots, längstmöglicher Buzz
+        // Vereinheitlichte Bojen-Rundungserkennung (siehe
+        // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md) — bewusst
+        // eigenes Muster (3x Buzz), unterscheidbar von HAPTIC_ROUNDING6
+        // (4x Click, "Boje gerundet") - hier ist erst eine Rückfrage offen.
+        case HAPTIC_ROUNDING_CONFIRM_NEEDED: playWaveformSeq({5, 5, 5});        break; // 3x Strong Buzz
         default: break;
     }
 }
@@ -790,11 +819,29 @@ void handleIncomingQuickMessageRequest(const QuickMessageRequest &req) {
     wakeDisplay();
 }
 
+// Vereinheitlichte Bojen-Rundungserkennung (10.08.2026, siehe
+// docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): "Ja"/"Nein" auf die
+// per BLE (raceData.roundingConfirmPending) angekündigte Rückfrage. Sendet
+// den passenden CMD_*-Steuerbefehl zurück ans Handy (CHAR_CONTROL_UUID) —
+// bewusst über den bestehenden BLE-Kanal, nicht über LoRa/QuickMessages
+// (die sind für Boot<->Land, hier geht es rein ums Boot<->Handy-Paar).
+static void answerRoundingConfirm(bool confirm) {
+    sendControlCommand(confirm ? CMD_CONFIRM_BUOY_ROUNDING : CMD_REJECT_BUOY_ROUNDING);
+    triggerHaptic(HAPTIC_DONE2); // kurze Vibration, Antwort ist raus
+    raceData.roundingConfirmPending = false; // sofortiges UI-Feedback, bis das nächste Race-Status-Notify vom Handy bestätigt
+    screenNeedsRefresh = true;
+}
+
 void onButtonShortPress() {
     Serial.println("[Taster] kurz");
     if (haveIncomingQuestion) {
         // Fallback, falls Gestenerkennung unzuverlässig ist:
         sendQuickAnswer(QuickAnswer::JA);
+        return;
+    }
+    if (raceData.roundingConfirmPending) {
+        // Fallback, falls Gestenerkennung unzuverlässig ist (siehe unten):
+        answerRoundingConfirm(true);
         return;
     }
     // Sonst: im Auswahlmenü zur nächsten Frage blättern
@@ -808,6 +855,11 @@ void onButtonLongPress() {
     if (haveIncomingQuestion) {
         // Fallback, falls Gestenerkennung unzuverlässig ist:
         sendQuickAnswer(QuickAnswer::NEIN);
+        return;
+    }
+    if (raceData.roundingConfirmPending) {
+        // Fallback, falls Gestenerkennung unzuverlässig ist (siehe unten):
+        answerRoundingConfirm(false);
         return;
     }
     // Sonst: ausgewählte Frage als QuickMessageRequest senden
@@ -825,17 +877,21 @@ void onButtonLongPress() {
 
 // ---- Gesten-Antwort (primärer Weg auf dem Boot, siehe Doku Abschnitt 5) ----
 // WICHTIG: Gestenerkennung nur aktiv abfragen/auswerten, wenn
-// haveIncomingQuestion == true - sonst wird jede normale Handbewegung beim
-// Segeln als Antwort fehlinterpretiert.
+// haveIncomingQuestion == true ODER raceData.roundingConfirmPending == true
+// - sonst wird jede normale Handbewegung beim Segeln als Antwort
+// fehlinterpretiert. Bewusst dieselben Gesten wiederverwendet (Roman-Wunsch
+// 10.08.2026, "gestik nicht haptik") statt einer eigenen zweiten
+// Gesten-Zuordnung — haveIncomingQuestion hat Vorrang, falls (unwahrscheinlich)
+// beides gleichzeitig offen wäre.
 
 void onGestureTiltUp() {
-    if (!haveIncomingQuestion) return;
-    sendQuickAnswer(QuickAnswer::JA);
+    if (haveIncomingQuestion) { sendQuickAnswer(QuickAnswer::JA); return; }
+    if (raceData.roundingConfirmPending) { answerRoundingConfirm(true); return; }
 }
 
 void onGestureShake() {
-    if (!haveIncomingQuestion) return;
-    sendQuickAnswer(QuickAnswer::NEIN);
+    if (haveIncomingQuestion) { sendQuickAnswer(QuickAnswer::NEIN); return; }
+    if (raceData.roundingConfirmPending) { answerRoundingConfirm(false); return; }
 }
 
 void checkQuickMessageTimeout() {
@@ -1130,7 +1186,11 @@ static void onKlioLearningEvent(SensorBHI260AP_Klio::LeaningChangeReason reason,
 static void onKlioRecognitionEvent(uint8_t pattern_id, float count, void *user_data) {
     Serial.printf("[Klio] Erkannt: Pattern=%u Count=%.1f (Frage offen: %s)\n",
                   pattern_id, count, haveIncomingQuestion ? "ja" : "nein");
-    if (!haveIncomingQuestion) return;
+    // Vereinheitlichte Bojen-Rundungserkennung (siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): dieselbe
+    // JA/NEIN-Geste wird zusätzlich als Antwort auf eine offene
+    // Rundungs-Rückfrage ausgewertet, siehe onGestureTiltUp()/onGestureShake().
+    if (!haveIncomingQuestion && !raceData.roundingConfirmPending) return;
     if (pattern_id == GESTURE_ID_JA) onGestureTiltUp();
     else if (pattern_id == GESTURE_ID_NEIN) onGestureShake();
 }
@@ -1299,7 +1359,9 @@ static void gestureTick() {
 
         // Nur auswerten, solange fuer JA noch KEIN Klio-Muster trainiert ist -
         // sonst uebernimmt onKlioRecognitionEvent() komplett (kein Doppel-Trigger).
-        if (!klioPatternTrained[0] && haveIncomingQuestion && tiltDetected) {
+        // roundingConfirmPending seit 10.08.2026 gleichberechtigt zu
+        // haveIncomingQuestion (siehe docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md).
+        if (!klioPatternTrained[0] && (haveIncomingQuestion || raceData.roundingConfirmPending) && tiltDetected) {
             onGestureTiltUp();
             lastGestureLogMs = millis();
             return;
@@ -1316,7 +1378,9 @@ static void gestureTick() {
         }
 
         if (klioPatternTrained[1]) return; // NEIN laeuft jetzt komplett ueber Klio
-        if (!haveIncomingQuestion) return; // Shake-Logik nur auswerten, wenn tatsächlich eine Frage offen ist
+        // Shake-Logik nur auswerten, wenn tatsächlich eine Frage offen ist -
+        // roundingConfirmPending gleichberechtigt, siehe Kommentar oben bei Tilt.
+        if (!haveIncomingQuestion && !raceData.roundingConfirmPending) return;
 
         unsigned long now = millis();
         if (now - shakeDetector.windowStartMs > GESTURE_SHAKE_WINDOW_MS) {
@@ -1464,6 +1528,17 @@ static void countdownScreenUpdate() {
 }
 
 static void maneuverScreenUpdate() {
+    // Vereinheitlichte Bojen-Rundungserkennung (siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): Rückfrage hat
+    // Vorrang vor der normalen Wende/Halse-Anzeige - dringlicher, und die
+    // Antwort (Geste hoch=JA/schütteln=NEIN, Taster kurz/lang als Fallback)
+    // ist dieselbe Bedienung wie bei den bestehenden Quick-Messages.
+    if (raceData.haveData && raceData.roundingConfirmPending) {
+        lv_label_set_text(lblManeuverBig, "Boje hier?");
+        lv_obj_set_style_text_color(lblManeuverBig, lv_color_hex(0xE0A020), 0);
+        lv_label_set_text(lblManeuverSub, "Geste hoch=Ja\nschuetteln=Nein");
+        return;
+    }
     bool needed = raceData.haveData && raceData.maneuverNeeded;
     lv_label_set_text(lblManeuverBig, needed ? (raceData.isTack ? "WENDE!" : "HALSE!") : "kein Manöver\nempfohlen");
     lv_obj_set_style_text_color(lblManeuverBig, needed ? lv_color_hex(0xE0A020) : lv_color_hex(0x808080), 0);

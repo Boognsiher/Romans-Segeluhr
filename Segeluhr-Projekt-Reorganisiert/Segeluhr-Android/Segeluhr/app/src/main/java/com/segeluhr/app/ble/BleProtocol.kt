@@ -71,6 +71,11 @@ object BleProtocol {
 
     private const val MANEUVER_FLAG_NEEDED: Int = 1 shl 0
     private const val MANEUVER_FLAG_IS_TACK: Int = 1 shl 1
+    // Vereinheitlichte Bojen-Rundungserkennung (siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): "Boje noch
+    // nicht erreicht — trotzdem als gerundet werten?" steht offen, die Uhr
+    // soll die Rückfrage anzeigen und Geste/Taster als Antwort annehmen.
+    private const val MANEUVER_FLAG_ROUNDING_CONFIRM_PENDING: Int = 1 shl 2
 
     // ---- CMD_*: Steuerbefehle Uhr -> Handy über CHAR_CONTROL_UUID (1 Byte, WRITE) ----
     // Neu definiert im Zuge der T-Watch-S3-Firmware (siehe
@@ -91,6 +96,17 @@ object BleProtocol {
     const val CMD_HOME_MODE_TOGGLE: Int = 12
     const val CMD_COMPETITION_END: Int = 13
     const val CMD_CLEAR_LOG: Int = 14
+
+    // Vereinheitlichte Bojen-Rundungserkennung (10.08.2026, siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): Antwort der Uhr
+    // auf eine per MANEUVER_FLAG_ROUNDING_CONFIRM_PENDING angekündigte
+    // Rückfrage ("Boje noch nicht erreicht — trotzdem als gerundet
+    // werten?"). Ausgelöst entweder per Geste (Klio/BHI260-Sensor, siehe
+    // Firmware onGestureTiltUp()=JA/onGestureShake()=NEIN — bewusst
+    // wiederverwendet statt eines neuen Eingabewegs, siehe Klassendoku
+    // dort) oder per Taster als dokumentiertes Fallback.
+    const val CMD_CONFIRM_BUOY_ROUNDING: Int = 15
+    const val CMD_REJECT_BUOY_ROUNDING: Int = 16
 
     /** Waypoint-IDs für CMD_SET_WAYPOINT / CMD_CLEAR_WAYPOINT (2. Byte). */
     object WaypointId {
@@ -114,6 +130,12 @@ object BleProtocol {
     const val HAPTIC_ROUNDING6: Int = 6
     const val HAPTIC_MANEUVER_CMD: Int = 7
     const val HAPTIC_START_SIGNAL: Int = 8
+    // Vereinheitlichte Bojen-Rundungserkennung (siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md) — reine
+    // Ausgabe-Benachrichtigung ("Rückfrage steht an"), NICHT die
+    // Bestätigung selbst (die läuft per Geste/Taster, siehe
+    // CMD_CONFIRM_BUOY_ROUNDING/CMD_REJECT_BUOY_ROUNDING).
+    const val HAPTIC_ROUNDING_CONFIRM_NEEDED: Int = 9
 
     fun encodeHapticCommand(code: Int): ByteArray = byteArrayOf(code.toByte())
 
@@ -206,8 +228,10 @@ object BleProtocol {
      * 5-Byte RaceStatusPacket: uint8 raceState (Ordinal von RaceState:
      * 0=MENU, 1=COUNTDOWN, 2=RACE), uint16 countdownSeconds (0xFFFF = kein
      * laufender Countdown), uint8 maneuverFlags (bit0=Manöver empfohlen,
-     * bit1=Wende [1] statt Halse [0]), uint8 competitionLeg (Ordinal von
-     * CompetitionLeg, 0xFF = kein Competition aktiv). Little-Endian.
+     * bit1=Wende [1] statt Halse [0], bit2=Bojen-Rundungs-Rückfrage offen —
+     * siehe docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md), uint8
+     * competitionLeg (Ordinal von CompetitionLeg, 0xFF = kein Competition
+     * aktiv). Little-Endian.
      */
     fun encodeRaceStatus(
         raceStateOrdinal: Int,
@@ -215,11 +239,13 @@ object BleProtocol {
         maneuverNeeded: Boolean,
         isTack: Boolean,
         competitionLegOrdinal: Int?,
+        roundingConfirmPending: Boolean = false,
     ): ByteArray {
         val cd = (countdownSeconds ?: 0xFFFF).coerceIn(0, 0xFFFF)
         var maneuverFlags = 0
         if (maneuverNeeded) maneuverFlags = maneuverFlags or MANEUVER_FLAG_NEEDED
         if (isTack) maneuverFlags = maneuverFlags or MANEUVER_FLAG_IS_TACK
+        if (roundingConfirmPending) maneuverFlags = maneuverFlags or MANEUVER_FLAG_ROUNDING_CONFIRM_PENDING
         val leg = competitionLegOrdinal ?: 0xFF
 
         val buf = ByteBuffer.allocate(5).order(ByteOrder.LITTLE_ENDIAN)

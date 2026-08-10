@@ -28,8 +28,6 @@ object Constants {
     const val TRAIN_TURN_START_DEG = 15.0
     const val MANEUVER_LOG_SIZE = 20
     const val ROUNDING_RADIUS_M = 20.0
-    const val RACE_TURN_MIN_DEG = 25.0
-    const val RACE_AIM_TOLERANCE_DEG = 30.0
     const val LAKE_WARN_FACTOR = 0.80
     const val LAKE_CLEAR_FACTOR = 0.65
     const val LAKE_WARN_REPEAT_MS = 15_000L
@@ -60,4 +58,11 @@ object Constants {
     // 5-4-1 Startsequenz
     const val COUNTDOWN_DURATION_MS = 5 * 60 * 1000L
     val COUNTDOWN_MARKS_S = listOf(240, 60) // Signal bei 4:00 und 1:00, starkes Signal bei 0:00 separat
+
+    // Vereinheitlichte Bojen-/Marken-Rundungserkennung (10.08.2026, siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md, MarkRoundingDetector).
+    /** Amwind/Vorwind-Kurswechsel weiter als das von einer gesetzten Marke entfernt -> ignoriert (normale Wende/Halse mitten auf dem Schlag). */
+    const val ROUNDING_CONFIRM_RADIUS_M = 150.0
+    /** Reagiert niemand auf die "Boje hier korrigieren?"-Nachfrage, gilt sie nach dieser Zeit automatisch als bestätigt. */
+    const val ROUNDING_CONFIRM_TIMEOUT_MS = 20_000L
 }

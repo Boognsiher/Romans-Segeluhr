@@ -29,16 +29,28 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
     var lapCount: Int = 0
         private set
 
-    private val legTracker = CourseTracker()
-    private var lastSteady: Double? = null
     private var lastManeuverNeeded: Boolean? = null
+
+    // Vereinheitlichte Rundungserkennung für UPWIND (Luvbake) und DOWNWIND
+    // (immer "geschätzt", kein Leetonnen-Wegpunkt) — siehe
+    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md. EIN geteilter
+    // Detector reicht, da nie beide Legs gleichzeitig aktiv sind (wie
+    // schon beim bisherigen legTracker/lastSteady) — wird bei jedem
+    // Leg-Wechsel zurückgesetzt.
+    private val roundingDetector = MarkRoundingDetector()
+
+    data class PendingConfirmation(val waypointKey: String, val candidatePosition: GeoPoint)
+
+    /** Amwind/Vorwind-Kurswechsel abseits der gesetzten Luvbake erkannt — wartet auf Bestätigen/Ablehnen (ViewModel), siehe Klassendoku dort. */
+    var pendingConfirmation: PendingConfirmation? = null
+        private set
 
     /** Beim automatischen Start des Competition-Modus (Countdown 0:00) aufrufen */
     fun activate() {
         leg = CompetitionLeg.UPWIND
         lapCount = 0
-        legTracker.reset()
-        lastSteady = null
+        roundingDetector.reset()
+        pendingConfirmation = null
         lastManeuverNeeded = null
     }
 
@@ -59,8 +71,7 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         // weiter zu Vorwind, statt mit einer nicht mehr vorhandenen Boje zu rechnen.
         if (leg == CompetitionLeg.REACH_TO_OFFSET && mark2 == null) {
             leg = CompetitionLeg.DOWNWIND
-            legTracker.reset()
-            lastSteady = null
+            roundingDetector.reset()
         }
 
         return when (leg) {
@@ -99,40 +110,24 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
     private fun tickUpwind(
         fix: Fix, lat: Double, lon: Double, wd: Double, mark1: GeoPoint?, mark2: GeoPoint?, closehauledAngleDeg: Double,
     ): CompetitionGuidance {
-        val bearing: Double
-        val distance: Double?
-        val isEstimated: Boolean
+        val isEstimated = mark1 == null
+        val bearing = mark1?.let { GeoUtils.bearingDeg(lat, lon, it.lat, it.lon) } ?: wd
+        val distance = mark1?.let { GeoUtils.distanceMeters(lat, lon, it.lat, it.lon) }
 
-        if (mark1 != null) {
-            bearing = GeoUtils.bearingDeg(lat, lon, mark1.lat, mark1.lon)
-            distance = GeoUtils.distanceMeters(lat, lon, mark1.lat, mark1.lon)
-            isEstimated = false
-
-            // Rundung: Distanz- ODER Manöver-basiert (wie beim Trainings-Racemode)
-            legTracker.sample(fix.cogDeg, fix.lat, fix.lon, fix.sogKn)
-            val steady = legTracker.steady(Constants.RACE_COURSE_MAX_DEV)
-            var roundedByManeuver = false
-            if (steady != null) {
-                val last = lastSteady
-                if (last == null) {
-                    lastSteady = steady
-                } else {
-                    if (abs(GeoUtils.angleDiff(steady, last)) >= Constants.RACE_TURN_MIN_DEG) roundedByManeuver = true
-                    lastSteady = steady
+        // Rundungserkennung pausiert, während eine Bestätigung aussteht -
+        // siehe MarkRoundingDetector-Klassendoku. windCalibrated hier immer
+        // true: tick() ist ohne windDir != null gar nicht bis hierher
+        // gekommen (siehe "val wd = windDir ?: return null" oben).
+        if (pendingConfirmation == null) {
+            when (val result = roundingDetector.tick(fix, wd, true, mark1)) {
+                MarkRoundingDetector.Result.Rounded -> advanceLegAfterUpwind(mark2 != null)
+                is MarkRoundingDetector.Result.AutoRounded -> advanceLegAfterUpwind(false) // ohne Luvbake auch keine Entlastungsboje sinnvoll ansteuerbar
+                is MarkRoundingDetector.Result.NeedsConfirmation -> {
+                    pendingConfirmation = PendingConfirmation("competitionMark1", result.candidatePosition)
+                    vib.roundingConfirmNeeded()
+                    status.setStatus("Luvbake noch nicht erreicht — trotzdem als gerundet werten?", StatusLevel.AMBER)
                 }
-            }
-            if (distance <= Constants.ROUNDING_RADIUS_M || roundedByManeuver) {
-                advanceLegAfterUpwind(mark2 != null)
-            }
-        } else {
-            bearing = wd
-            distance = null
-            isEstimated = true
-
-            legTracker.sample(fix.cogDeg, fix.lat, fix.lon, fix.sogKn)
-            val steady = legTracker.steady(Constants.RACE_COURSE_MAX_DEV)
-            if (steady != null && abs(GeoUtils.angleDiff(steady, wd)) >= 90.0) {
-                advanceLegAfterUpwind(false) // ohne Luvbake auch keine Entlastungsboje sinnvoll ansteuerbar
+                MarkRoundingDetector.Result.None -> Unit
             }
         }
 
@@ -153,8 +148,7 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
 
     private fun advanceLegAfterUpwind(hasOffsetMark: Boolean) {
         vib.rounding6()
-        legTracker.reset()
-        lastSteady = null
+        roundingDetector.reset()
         lastManeuverNeeded = null
         if (hasOffsetMark) {
             leg = CompetitionLeg.REACH_TO_OFFSET
@@ -165,14 +159,33 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         }
     }
 
+    /**
+     * Vom ViewModel aufgerufen, nachdem die Boje (Setup-Waypoint) auf die
+     * neue Position korrigiert wurde ("Ja, Boje ist hier"). [mark2] wird
+     * separat übergeben (statt aus dem letzten `tick()` gemerkt), da
+     * zwischen Anfrage und Bestätigung Zeit vergeht — der ViewModel kennt
+     * den aktuellen Wegpunkt-Stand zuverlässiger.
+     */
+    fun confirmPendingRounding(mark2: GeoPoint?) {
+        if (pendingConfirmation == null) return
+        pendingConfirmation = null
+        advanceLegAfterUpwind(mark2 != null)
+    }
+
+    /** "Nein, anderer Grund" — Kurswechsel war keine Rundung, Boje bleibt unverändert, Leg läuft normal weiter. */
+    fun rejectPendingRounding() {
+        pendingConfirmation = null
+        roundingDetector.reset()
+        status.setStatus("Kurswechsel nicht als Luvbaken-Rundung gewertet.", StatusLevel.NORMAL)
+    }
+
     private fun tickReach(lat: Double, lon: Double, mark2: GeoPoint): CompetitionGuidance {
         val bearing = GeoUtils.bearingDeg(lat, lon, mark2.lat, mark2.lon)
         val distance = GeoUtils.distanceMeters(lat, lon, mark2.lat, mark2.lon)
 
         if (distance <= Constants.ROUNDING_RADIUS_M) {
             vib.rounding6()
-            legTracker.reset()
-            lastSteady = null
+            roundingDetector.reset()
             leg = CompetitionLeg.DOWNWIND
             status.setStatus("Entlastungsboje gerundet — Vorwind-Schlag!", StatusLevel.GREEN)
         }
@@ -202,12 +215,14 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         val gybeSign = if (cog != null && GeoUtils.angleDiff(cog, wd) > 0) 1 else -1
         val bearing = GeoUtils.normalize360(wd + gybeSign * downwindAngleDeg)
 
-        legTracker.sample(fix.cogDeg, fix.lat, fix.lon, fix.sogKn)
-        val steady = legTracker.steady(Constants.RACE_COURSE_MAX_DEV)
-        if (steady != null && abs(GeoUtils.angleDiff(steady, wd)) < 90.0) {
+        // Kein Leetonnen-Wegpunkt vorgesehen (siehe Klassendoku) -> mark
+        // immer null, MarkRoundingDetector liefert hier also nie
+        // NeedsConfirmation, nur None oder AutoRounded (sobald der
+        // Kurswechsel zurück zur Amwind-Seite erkannt wird).
+        val result = roundingDetector.tick(fix, wd, true, null)
+        if (result is MarkRoundingDetector.Result.AutoRounded) {
             vib.rounding6()
-            legTracker.reset()
-            lastSteady = null
+            roundingDetector.reset()
             lastManeuverNeeded = null
             lapCount++
             leg = CompetitionLeg.UPWIND
