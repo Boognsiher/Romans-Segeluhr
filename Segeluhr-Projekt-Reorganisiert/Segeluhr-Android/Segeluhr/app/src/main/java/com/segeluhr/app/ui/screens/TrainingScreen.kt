@@ -1,6 +1,8 @@
 package com.segeluhr.app.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.IconButton
@@ -33,7 +35,10 @@ fun TrainingScreen(
     onStartLakeDrawing: () -> Unit,
 ) {
     Column(
-        Modifier.fillMaxSize().padding(14.dp),
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         SectionCard("Trainingsmodus") {

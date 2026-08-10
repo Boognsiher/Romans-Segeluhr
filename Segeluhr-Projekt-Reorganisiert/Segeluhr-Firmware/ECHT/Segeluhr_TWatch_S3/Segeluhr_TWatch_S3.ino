@@ -1062,36 +1062,51 @@ static void buildUi() {
     lv_obj_align(lblConnIndicator, LV_ALIGN_BOTTOM_MID, 0, -10);
 
     // -- Detail-Tab --
+    // 10.08.2026: von fixen Pixel-Koordinaten (y=6/48/90/132, PacketInfo
+    // per lv_obj_align_to relativ zu lblDetailWind) auf LVGL-Flex-Column
+    // umgestellt. Grund: die Labels bekommen ihren echten Text erst
+    // NACHTRAEGLICH per detailScreenUpdate() (Aufruf hier beim Bauen der
+    // UI zeigt noch leere/Platzhalter-Labels) - eine einmalige Positions-
+    // berechnung beim Setup (ob fix oder relativ per align_to) passt danach
+    // nicht mehr zur tatsaechlichen Zeilenzahl/Hoehe, sobald echte Werte
+    // (v.a. die seit heute laengere PacketInfo-Zeile mit "bisher X km",
+    // haeufig 2-3 Zeilen) reinkommen - auf Hardware als wild ueberlappender
+    // Text beobachtet. Flex-Column lässt LVGL bei JEDER Content-Aenderung
+    // neu reflowen, dadurch strukturell ausgeschlossen statt neu geraten.
+    lv_obj_set_flex_flow(tabDetail, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(tabDetail, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(tabDetail, 8, 0);
+    lv_obj_set_style_pad_top(tabDetail, 6, 0);
+    // tabDetail bleibt scrollbar (Standard, hier nicht deaktiviert wie der
+    // Tabview-Content-Container oben) - falls der Text bei vielen Zeilen
+    // doch mal ueber den Bildschirm hinausragt, kann man scrollen statt
+    // dass es abgeschnitten/ueberlappend wird.
+
     lblDetailDistance = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailDistance, &lv_font_montserrat_28, 0);
     lv_obj_set_width(lblDetailDistance, LV_PCT(94));
     lv_label_set_long_mode(lblDetailDistance, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lblDetailDistance, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(lblDetailDistance, LV_ALIGN_TOP_MID, 0, 6);
     lblDetailSog = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailSog, &lv_font_montserrat_28, 0);
     lv_obj_set_width(lblDetailSog, LV_PCT(94));
     lv_label_set_long_mode(lblDetailSog, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lblDetailSog, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(lblDetailSog, LV_ALIGN_TOP_MID, 0, 48);
     lblDetailBattery = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailBattery, &lv_font_montserrat_28, 0);
     lv_obj_set_width(lblDetailBattery, LV_PCT(94));
     lv_label_set_long_mode(lblDetailBattery, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lblDetailBattery, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(lblDetailBattery, LV_ALIGN_TOP_MID, 0, 90);
     lblDetailWind = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailWind, &lv_font_montserrat_28, 0);
     lv_obj_set_width(lblDetailWind, LV_PCT(94));
     lv_label_set_long_mode(lblDetailWind, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lblDetailWind, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(lblDetailWind, LV_ALIGN_TOP_MID, 0, 132);
     lblDetailPacketInfo = lv_label_create(tabDetail);
     lv_obj_set_style_text_font(lblDetailPacketInfo, &lv_font_montserrat_18, 0);
     lv_obj_set_width(lblDetailPacketInfo, LV_PCT(94));
     lv_label_set_long_mode(lblDetailPacketInfo, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lblDetailPacketInfo, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(lblDetailPacketInfo, LV_ALIGN_BOTTOM_MID, 0, -10);
 
     // -- Menü-Tab --
     buildMenuTab(tabMenu);

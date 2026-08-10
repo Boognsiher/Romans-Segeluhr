@@ -13,14 +13,14 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.segeluhr.app.core.GeoPoint
 import com.segeluhr.app.ui.theme.*
 import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint as OsmGeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.CopyrightOverlay
+import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
-import org.osmdroid.views.overlay.mapevents.MapEventsOverlay
-import org.osmdroid.views.overlay.mapevents.MapEventsReceiver
 
 private const val MIN_POINTS = 3
 
