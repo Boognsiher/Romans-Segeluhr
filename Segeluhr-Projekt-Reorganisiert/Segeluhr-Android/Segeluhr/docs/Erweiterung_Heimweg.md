@@ -62,7 +62,7 @@ ETA). Das ist noch nicht umgesetzt, da dafür erst die Hardware/das
 Protokoll geklärt werden muss (Handy hat kein eingebautes LoRa-Funkmodul) —
 siehe die offene Diskussion dazu in der Projekt-Historie.
 
-## Offener Punkt (10.08.2026): ETA/VMC reagiert zu direkt auf den momentanen Kurs — "Distanz" auf der Land-Uhr dadurch verfälscht
+## Gelöst (10.08.2026): ETA/VMC reagierte zu direkt auf den momentanen Kurs — "Distanz" auf der Land-Uhr dadurch verfälscht
 
 Gefunden beim Durchspielen der Heimweg-Vorschau (siehe
 `docs/Erweiterung_Landuhr_Kartenansicht.md`-Nachbarschaft, interaktives
@@ -85,12 +85,26 @@ sobald nicht exakt direkt aufs Ziel zugesegelt wird, und "unbekannt"
 während einer Wende, selbst wenn geografisch längst spürbar näher.
 
 **Entscheidung (Roman, 10.08.2026): Logik grundsätzlich überdenken statt nur
-dokumentieren.** Die ETA/VMC-Berechnung soll **träger** werden — kurzfristige
-Kursänderungen mit grossem Momentaufnahme-Effekt (v.a. während einer Wende)
-sollen die angezeigte ETA/Distanz nicht mehr sofort durcheinanderbringen.
-Naheliegender Ansatz (noch nicht final): eine Glättung/gleitender
-Mittelwert über VMC oder direkt über die tatsächliche Distanz-Änderung
-(ähnlich dem bestehenden `CourseTracker`-Muster für den "ruhigen Kurs" bei
-der Windkalibrierung), statt der aktuellen sofortigen Tick-für-Tick-
-Neuberechnung. Konkretes Zeitfenster/Verfahren noch offen — siehe
-Implementierung, sobald entschieden.
+dokumentieren.** Die ETA/VMC-Berechnung sollte **träger** werden —
+kurzfristige Kursänderungen mit grossem Momentaufnahme-Effekt (v.a. während
+einer Wende) sollen die angezeigte ETA/Distanz nicht mehr sofort
+durcheinanderbringen.
+
+**Umsetzung:** Neue Klasse `core/HomeProgressTracker.kt` — misst die
+tatsächliche Annäherung ans Ziel über ein gleitendes 60s-Zeitfenster
+(`(Distanz vor 60s − Distanz jetzt) / 60s`), statt aus dem Momentan-Kurs zu
+rechnen. Bewusst NICHT nur eine Glättung der bisherigen Kurs-basierten VMC
+(z.B. gleitender Mittelwert/EMA) — das würde Kurs-Zacken weiterhin
+dämpfen statt ausblenden. Stattdessen zählt ausschliesslich die reale
+Positionsänderung; ein kurzzeitiger COG-Sprung während einer Wende hat
+dadurch gar keinen direkten Einfluss mehr auf ETA/Distanz. Erst wenn
+mindestens 20s Historie vorliegen, wird überhaupt ein Wert geliefert (sonst
+bewusst "ETA: unbekannt", statt einen verfrühten verrauschten Wert zu
+zeigen) — der Mittelwert wird danach mit wachsender Fensterbreite bis 60s
+zunehmend stabiler. `HomeEngine.tick()` verwendet diesen Wert jetzt für
+`HomeGuidance.vmcKn`/ETA; die Wende-Empfehlung selbst (`maneuverNeeded`)
+bleibt unverändert instantan aus dem aktuellen Kurs, da dort sofortiges
+Feedback ja gerade gewünscht ist. Tracker wird zurückgesetzt bei
+Modus-Ein/Aus **und** bei Änderung des Heimatpunkts (sonst würde alte
+Distanz-Historie zum vorherigen Ziel die neue Berechnung verfälschen).
+**Noch nicht kompiliert/getestet.**

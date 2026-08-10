@@ -3,7 +3,6 @@ package com.segeluhr.app.logic
 import com.segeluhr.app.core.*
 import com.segeluhr.app.data.model.HomeGuidance
 import kotlin.math.abs
-import kotlin.math.cos
 
 /**
  * Erweiterung "Nach Hause gehen" (nicht Teil der ursprünglichen Spezifikation,
@@ -11,7 +10,8 @@ import kotlin.math.cos
  * (Ziel anpeilen, Abstand anzeigen), aber zusätzlich mit:
  *  - Wende-Vorschlag, falls der direkte Kurs zum Ziel zu dicht am Wind liegt
  *    (innerhalb des Anluv-Limits, Standard 45°) und daher gekreuzt werden muss
- *  - ETA über die "Velocity Made Good" (VMC) Richtung Ziel
+ *  - ETA über die tatsächlich gemessene Annäherung Richtung Ziel (VMC,
+ *    "Velocity Made Good" — siehe [HomeProgressTracker])
  *
  * Bewusst NICHT über die zufällige Trainings-FSM (WAITING/COMMANDED/TURNING)
  * gelöst — hier geht es um dauerhafte Navigationsunterstützung, nicht um
@@ -25,10 +25,19 @@ class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink
     }
 
     private var lastManeuverNeeded: Boolean? = null
+    private var lastHome: GeoPoint? = null
+
+    // Offener Punkt vom 10.08.2026 (siehe docs/Erweiterung_Heimweg.md): die
+    // vorherige VMC-Berechnung aus dem Momentan-Kurs reagierte zu direkt auf
+    // Kurs-Zacken während einer Wende. Ersetzt durch eine über ein
+    // Zeitfenster gemessene tatsächliche Annäherung, siehe dortige
+    // Klassen-Doku.
+    private val progressTracker = HomeProgressTracker()
 
     /** Beim Aktivieren/Deaktivieren des Heimweg-Modus aufrufen, damit der erste Tick nicht sofort vibriert */
     fun reset() {
         lastManeuverNeeded = null
+        progressTracker.reset()
     }
 
     fun tick(fix: Fix, windDir: Double?, windCalibrated: Boolean, home: GeoPoint?): HomeGuidance? {
@@ -36,12 +45,24 @@ class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink
         val lon = fix.lon ?: return null
         if (home == null) return null
 
+        // Heimatpunkt im Setup-Tab geändert, während der Modus aktiv blieb -
+        // alte Distanz-Historie bezog sich aufs vorherige Ziel und würde die
+        // gemessene Annäherung sonst verfälschen.
+        if (home != lastHome) {
+            progressTracker.reset()
+            lastManeuverNeeded = null
+            lastHome = home
+        }
+
         val bearingToHome = GeoUtils.bearingDeg(lat, lon, home.lat, home.lon)
         val distanceM = GeoUtils.distanceMeters(lat, lon, home.lat, home.lon)
 
-        val vmcKn = if (fix.cogDeg != null && fix.sogKn != null) {
-            fix.sogKn * cos(GeoUtils.toRad(GeoUtils.angleDiff(fix.cogDeg, bearingToHome)))
-        } else 0.0
+        // Träge/geglättete VMC statt Momentan-Kurs (siehe HomeProgressTracker-
+        // Doku). null (noch nicht genug Historie) fällt bewusst auf 0.0
+        // zurück — das führt über den bestehenden etaFrom()-Pfad ganz regulär
+        // zu "ETA: unbekannt", genau wie bei "kein Fortschritt Richtung Ziel".
+        progressTracker.sample(fix.timestampMs, distanceM)
+        val vmcKn = progressTracker.averageVmcKn() ?: 0.0
         val etaSeconds = etaFrom(distanceM, vmcKn)
 
         // Ohne kalibrierten Wind kein Wende-Vorschlag möglich — nur Peilung/Distanz/ETA über direkten Kurs

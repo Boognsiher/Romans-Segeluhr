@@ -46,6 +46,11 @@ data class WindLogPoint(val cumulativeDeg: Double, val timestampMs: Long)
  * segelbar) oder der bessere der beiden Am-Wind-Kurse (falls Kreuzen nötig).
  * [maneuverNeeded] = true bedeutet: aktueller Bug passt nicht zum
  * empfohlenen Kurs, eine Wende Richtung Heimweg wird empfohlen.
+ * [vmcKn] ist seit 10.08.2026 KEINE Momentan-Berechnung aus dem aktuellen
+ * Kurs mehr, sondern die über ein Zeitfenster gemessene tatsächliche
+ * Annäherung (siehe [com.segeluhr.app.core.HomeProgressTracker]) — bewusst
+ * träge, damit kurze Kurs-Zacken (z.B. während einer Wende) nicht sofort
+ * auf ETA/VMC durchschlagen.
  */
 data class HomeGuidance(
     val bearingToHome: Double,
