@@ -2,9 +2,14 @@
 
 Segel-Trainings- und Regatta-Uhr: Android-App (Kotlin/Compose) + Uhr-Firmware
 (Arduino/ESP32), ursprünglich portiert aus einem Browser-Prototyp
-(`segeluhr.html`, jetzt `index.html`) basierend auf `Segeluhr_Spezifikation.md`
-und `BLE_Protokoll.md` (falls diese Root-Dokumente im Repo fehlen: existieren
-nur lokal beim Menschen, nicht Teil dieses Checkouts, siehe `PROJEKT_STATUS.md`).
+(`segeluhr.html`, jetzt `index.html`). Es gibt KEINE separaten
+Spezifikationsdokumente (`Segeluhr_Spezifikation.md`/`BLE_Protokoll.md`) —
+weder im Repo noch lokal beim Menschen (10.08.2026 geklärt, siehe
+`PROJEKT_STATUS.md`); frühere Sessions hatten das nur vorsorglich
+angenommen. Die "Spezifikation" lebt faktisch im Prototyp (`index.html`)
+plus den `Erweiterung_*.md`-Dokumenten unter
+`Segeluhr-Android/Segeluhr/docs/`, die jede spätere Abweichung/Ergänzung
+festhalten.
 
 **Vor jeder grösseren Änderung: `PROJEKT_STATUS.md` lesen** — zentrale
 Übersicht, was aktuell läuft (✅), Baustelle (🔧), geplant (📋) oder

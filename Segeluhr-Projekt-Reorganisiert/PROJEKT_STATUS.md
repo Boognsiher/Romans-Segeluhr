@@ -36,11 +36,13 @@ gerade läuft, was Baustelle und was nur Test ist.
   `GESTURE_TILT_TARGET_ANGLE_DEG`/`GESTURE_SHAKE_MIN_AMPLITUDE` basieren auf
   nur einer Schreibtisch-Messung bzw. sind komplett unverifiziert, siehe
   `docs/Offene_Punkte_Hardware_Test_05_08.md`.
-- **Fehlende Root-Dokumente:** `Segeluhr_Spezifikation.md` und
-  `BLE_Protokoll.md` (die ursprüngliche Basis-Spezifikation) liegen nicht
-  in diesem Repo — nur die `Erweiterung_*.md`-Ergänzungsdokumente unter
-  `Segeluhr-Android/Segeluhr/docs/`. Falls die Basisdokumente noch woanders
-  existieren, gehören sie hier in den Root-Ordner.
+- ~~**Fehlende Root-Dokumente:** `Segeluhr_Spezifikation.md`/`BLE_Protokoll.md`~~
+  — **10.08.2026 geklärt (Roman):** existieren nirgends, auch nicht lokal.
+  Waren nur eine vorsorgliche Notiz früherer Sessions, falls es sie mal
+  gegeben hätte. Die eigentliche "Spezifikation" lebt faktisch im
+  Original-Browser-Prototyp (`index.html`) plus den `Erweiterung_*.md`-
+  Dokumenten, die jede spätere Abweichung/Ergänzung festhalten — kein
+  fehlendes Dokument, kein Handlungsbedarf.
 - ~~**`distanceTraveledM`-Aufsummierung in der App**~~ — 10.08. implementiert
   (`core/DistanceTracker.kt`, Anzeige im Normal-Tab/Heimweg-Karte, Reset
   über "Alles zurücksetzen"). **Noch nicht kompiliert/getestet.**
