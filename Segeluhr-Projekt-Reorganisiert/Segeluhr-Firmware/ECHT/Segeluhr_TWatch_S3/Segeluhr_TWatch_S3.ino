@@ -778,15 +778,36 @@ static void cbOpenSchritte(lv_event_t *e) { showMenuScreen(menuSchritteScreen); 
 static void cbAlltagBack(lv_event_t *e) { showMenuScreen(menuAlltagScreen); } // von Wecker/Stoppuhr/Schritte zurueck ins Alltag-Grid
 
 /**
- * Deep-Sleep, analog zum Shutdown-Mechanismus der Boots-Uhr
- * (instance.sleep(), Standard-Wakeup: Power-Key + Touch-Panel).
+ * Deep-Sleep. Aufwachen NUR per Touch, siehe Bugfix-Kommentar unten.
  */
 static void cbShutdown(lv_event_t *e) {
     lv_label_set_text(lblStatusBig, "");
-    lv_label_set_text(lblClockBig, "Aus - zum Aufwachen\ntippen oder Power-Taste");
+    lv_label_set_text(lblClockBig, "Aus - zum Aufwachen\ntippen");
     lv_task_handler();
     delay(300);
-    instance.sleep();
+    // Feinschliff, damit ein gerade erst quittiertes Touch-Loslass-Event
+    // (vom Antippen des "Ausschalten"-Buttons selbst) sicher ausgelesen ist,
+    // bevor TP_INT als Aufwach-Quelle scharf geschaltet wird.
+    lv_task_handler();
+    // 10.08.2026 Bugfix "Ausschalten startet sofort neu": mit den
+    // instance.sleep()-Standardquellen (WAKEUP_SRC_POWER_KEY |
+    // WAKEUP_SRC_TOUCH_PANEL) wachte die Uhr JEDES Mal sofort wieder auf,
+    // auch ohne USB-Kabel und mit unbeschaedigtem Taster (beides gezielt
+    // per Diagnose-Build ausgeschlossen: esp_sleep_get_ext1_wakeup_status()
+    // zeigte auf Hardware zuverlaessig PMU_INT=1/TP_INT=0). Weiter
+    // eingegrenzt: instance.pmu.getIrqStatus() direkt bei Tastendruck (vor
+    // instance.sleep()) zeigt 0x0/PKEY_SHORT=0 - der falsche PKEY_SHORT_IRQ
+    // entsteht also WAEHREND der sleep()-Sequenz selbst (irgendwo zwischen
+    // deren pmu.clearIrqStatus() und esp_deep_sleep_start(), ~4s Fenster mit
+    // mehreren Power-Rail-Abschaltungen), nicht durch alten Zustand von
+    // vorher. Genauere Stelle wuerde Debug-Ausgaben INNERHALB der gepinnten
+    // LilyGoLib (LilyGoWatchS3.cpp) brauchen - bewusst nicht gemacht, siehe
+    // CLAUDE.md zu Bibliotheksversionen. Deshalb hier bewusst NUR Touch als
+    // Aufwach-Quelle (nachweislich sauber, TP_INT=0), Power-Taste raus.
+    // Aufwecken geht also nur noch per Antippen, nicht mehr per Taster -
+    // Trade-off in Kauf genommen, da Tippen ohnehin der primaere Weg ist
+    // (Touch-only-Bedienung dieser Uhr, siehe CLAUDE.md).
+    instance.sleep(WAKEUP_SRC_TOUCH_PANEL);
 }
 
 // Feedback nach erstem Hardware-Test: Standard-LVGL-Buttongroesse ist auf
