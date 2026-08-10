@@ -14,11 +14,25 @@ import kotlin.math.abs
  * "Zeigen" (Abschnitt 4.1, benötigt einen relativen Rotationssensor) ist in
  * der Spezifikation beschrieben, aber weder im Prototyp noch hier umgesetzt;
  * bei Bedarf als zusätzlicher Kalibrierpfad ergänzen.
+ *
+ * Seit der Erweiterung "Boots-Kalibrierung" (siehe
+ * docs/Erweiterung_Boots_Kalibrierung.md) übernimmt diese Klasse zusätzlich
+ * das Einmessen des tatsächlichen Am-Wind-Wendewinkels des Boots (bisher ein
+ * fest verdrahteter 45°-Wert in HomeEngine/CompetitionEngine) — bewusst hier
+ * und nicht in einer eigenen Klasse, weil beide Werte aus demselben
+ * Zwei-Schläge-Manöver stammen:
+ *  - **Kalibrierungsmodus** (`calibrationModeEnabled`): jeder erfolgreiche
+ *    Amwind-Kalibrierlauf verfeinert zusätzlich einen laufenden Mittelwert
+ *    des Wendewinkels (`closehauledAngleDeg`/`closehauledSampleCount`).
+ *  - **Smart-Modus** (`smartModeEnabled`): läuft während des normalen
+ *    Segelns nebenbei mit (siehe `tickContinuous`) und justiert den Wert
+ *    langsam per EMA nach, sobald ein ruhiger Kurs plausibel am Wind liegt.
  */
 class WindEngine(
     private val vib: HapticFeedback,
     private val status: StatusSink,
     private val onWindChanged: suspend (windDir: Double, calibrated: Boolean) -> Unit,
+    private val onBoatProfileChanged: suspend (closehauledAngleDeg: Double, sampleCount: Int) -> Unit,
 ) {
     var windDir: Double? = null
         private set
@@ -42,10 +56,88 @@ class WindEngine(
     private var lastRawWind: Double? = null
     private var lastWindLogAt: Long = 0L
 
+    // ---- Boots-Kalibrierung (siehe Klassen-Doku oben) ----
+    var closehauledAngleDeg: Double = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
+        private set
+    var closehauledSampleCount: Int = 0
+        private set
+    var calibrationModeEnabled: Boolean = false
+        private set
+    var smartModeEnabled: Boolean = false
+        private set
+    private var lastPersistedCloseHauledAngle: Double = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
+
     /** Beim App-Start aus der Persistenz laden */
     fun restore(windDir: Double?, calibrated: Boolean) {
         this.windDir = windDir
         this.windCalibrated = calibrated
+    }
+
+    /** Beim App-Start aus der Persistenz laden (Boots-Kalibrierung, siehe SettingsRepository.boatProfileFlow). */
+    fun restoreBoatProfile(closehauledAngleDeg: Double, sampleCount: Int) {
+        this.closehauledAngleDeg = closehauledAngleDeg
+        this.closehauledSampleCount = sampleCount
+        this.lastPersistedCloseHauledAngle = closehauledAngleDeg
+    }
+
+    /**
+     * Kalibrierungsmodus an/aus (Setup/Wind-Tab-Schalter). Bewusst NICHT
+     * persistiert (wie `homeModeActive`) — nach einem Neustart ist der
+     * Modus wieder aus, der gelernte Winkel selbst bleibt aber erhalten.
+     */
+    fun setCalibrationModeEnabled(enabled: Boolean) {
+        calibrationModeEnabled = enabled
+        status.setStatus(
+            if (enabled) "Kalibrierungsmodus aktiv — jede erfolgreiche Windkalibrierung lernt jetzt auch den Wendewinkel."
+            else "Kalibrierungsmodus beendet.",
+            StatusLevel.NORMAL,
+        )
+    }
+
+    /** Smart-Modus an/aus — ebenfalls nicht persistiert, siehe [setCalibrationModeEnabled]. */
+    fun setSmartModeEnabled(enabled: Boolean) {
+        smartModeEnabled = enabled
+    }
+
+    /** Setup-Tab-Button "Wendewinkel zurücksetzen" — wirft nur den gelernten Winkel weg, nicht die Windrichtung. */
+    suspend fun resetBoatProfile() {
+        closehauledAngleDeg = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
+        closehauledSampleCount = 0
+        lastPersistedCloseHauledAngle = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
+        onBoatProfileChanged(closehauledAngleDeg, closehauledSampleCount)
+        status.setStatus("Wendewinkel auf Standardwert (${Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG.toInt()}°) zurückgesetzt.", StatusLevel.NORMAL)
+    }
+
+    /**
+     * Laufender Mittelwert über alle bisherigen Kalibrierläufe — jeder
+     * weitere Lauf verfeinert den Wert, ein einzelner Ausreisser kippt ihn
+     * nicht sofort um. Nur vom Kalibrierungsmodus aufgerufen (siehe
+     * [tickCalibration], WAIT_TACK2-Erfolgsfall).
+     */
+    private suspend fun absorbCalibrationSample(measuredAngleDeg: Double) {
+        val newCount = closehauledSampleCount + 1
+        closehauledAngleDeg = (closehauledAngleDeg * closehauledSampleCount + measuredAngleDeg) / newCount
+        closehauledSampleCount = newCount
+        persistBoatProfileIfChanged()
+    }
+
+    /**
+     * Smart-Modus: leiser, unbegrenzt weiterlaufender Nachgleich während des
+     * normalen Segelns (siehe [tickContinuous]). Bewusst ein EMA statt eines
+     * Mittelwerts über [closehauledSampleCount] — die Kalibrierläufe sollen
+     * "verlässliche" Messungen bleiben, der Smart-Modus liefert nur leise,
+     * potenziell verrauschte Alltags-Korrekturen obendrauf.
+     */
+    private suspend fun maybeLearnCloseHauledAngle(currentAngleOffWindDeg: Double) {
+        if (abs(currentAngleOffWindDeg - closehauledAngleDeg) > Constants.SMART_CLOSEHAULED_LEARN_BAND_DEG) return
+        closehauledAngleDeg += Constants.SMART_CLOSEHAULED_EMA_ALPHA * (currentAngleOffWindDeg - closehauledAngleDeg)
+        persistBoatProfileIfChanged()
+    }
+
+    private suspend fun persistBoatProfileIfChanged() {
+        if (abs(closehauledAngleDeg - lastPersistedCloseHauledAngle) < Constants.CLOSEHAULED_PERSIST_THRESHOLD_DEG) return
+        lastPersistedCloseHauledAngle = closehauledAngleDeg
+        onBoatProfileChanged(closehauledAngleDeg, closehauledSampleCount)
     }
 
     fun startCalibration(currentlyValid: Boolean) {
@@ -118,7 +210,19 @@ class WindEngine(
                         lastSteadyCOG = null
                         tackSign = null
                         vib.done2()
-                        status.setStatus("Wind kalibriert: ${Math.round(newWindDir)}°", StatusLevel.GREEN)
+                        // Kalibrierungsmodus (Boots-Kalibrierung, siehe Klassen-Doku): der
+                        // halbe Wendewinkel ist der tatsächlich gesegelte Am-Wind-Winkel -
+                        // symmetrisch angenommen (kein Backstagsegel-Polardiagramm), passt
+                        // damit zum bestehenden HomeEngine/CompetitionEngine-Modell.
+                        if (calibrationModeEnabled) {
+                            absorbCalibrationSample(diff / 2.0)
+                            status.setStatus(
+                                "Wind kalibriert: ${Math.round(newWindDir)}° — Wendewinkel: ${"%.0f".format(closehauledAngleDeg)}° ($closehauledSampleCount Kalibrierläufe)",
+                                StatusLevel.GREEN,
+                            )
+                        } else {
+                            status.setStatus("Wind kalibriert: ${Math.round(newWindDir)}°", StatusLevel.GREEN)
+                        }
                         onWindChanged(newWindDir, true)
                     } else {
                         vib.error4()
@@ -138,6 +242,14 @@ class WindEngine(
         val avg = continuousTracker.steady(Constants.STEADY_COURSE_MAX_DEV) ?: return
 
         val awa = GeoUtils.angleDiff(avg, wd)
+
+        // Smart-Modus (Boots-Kalibrierung, siehe Klassen-Doku): unabhängig von
+        // der Wende-Erkennung unten - läuft bei jedem ruhigen Kurs mit, der
+        // plausibel am Wind liegt, nicht nur beim Bug-Wechsel.
+        if (smartModeEnabled) {
+            maybeLearnCloseHauledAngle(abs(awa))
+        }
+
         if (abs(awa) < Constants.TACK_SIGN_DEADZONE_DEG) return // Bug-Zuordnung unsicher
         val newTackSign = if (awa > 0) 1 else -1
 

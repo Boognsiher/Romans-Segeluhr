@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -27,6 +29,9 @@ fun WindScreen(
     state: SegeluhrUiState,
     onStartCalib: () -> Unit,
     onAbortCalib: () -> Unit,
+    onCalibrationModeChanged: (Boolean) -> Unit,
+    onSmartModeChanged: (Boolean) -> Unit,
+    onResetBoatCalibration: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxSize().padding(14.dp),
@@ -55,6 +60,52 @@ fun WindScreen(
                 "Ablauf: 1) Ruhigen Amwind-Kurs halten. 2) Bei Signal wenden. 3) Neuen ruhigen Kurs auf dem anderen Bug halten. Wendewinkel muss zwischen 60° und 110° liegen.",
                 fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 8.dp),
             )
+        }
+
+        SectionCard("Boots-Kalibrierung (Am-Wind-Wendewinkel)") {
+            val angleText = if (state.closehauledSampleCount > 0) {
+                "${"%.0f".format(state.closehauledAngleDeg)}° (${state.closehauledSampleCount} Kalibrierläufe)"
+            } else {
+                "${"%.0f".format(state.closehauledAngleDeg)}° (Standardwert, noch nicht kalibriert)"
+            }
+            StatRow("Wendewinkel", angleText, valueColor = Teal)
+
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text("Kalibrierungsmodus")
+                    Text(
+                        "Jede erfolgreiche Windkalibrierung oben lernt zusätzlich den Wendewinkel.",
+                        fontSize = 11.sp, color = TextDim,
+                    )
+                }
+                Switch(checked = state.calibrationModeEnabled, onCheckedChange = onCalibrationModeChanged)
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text("Smart-Modus")
+                    Text(
+                        "Passt den Wendewinkel während des normalen Segelns leise weiter an.",
+                        fontSize = 11.sp, color = TextDim,
+                    )
+                }
+                Switch(checked = state.smartModeEnabled, onCheckedChange = onSmartModeChanged)
+            }
+
+            if (state.closehauledSampleCount > 0) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = onResetBoatCalibration, modifier = Modifier.fillMaxWidth()) {
+                    Text("Wendewinkel zurücksetzen")
+                }
+            }
         }
 
         SectionCard("Windverlauf (Trend)") {

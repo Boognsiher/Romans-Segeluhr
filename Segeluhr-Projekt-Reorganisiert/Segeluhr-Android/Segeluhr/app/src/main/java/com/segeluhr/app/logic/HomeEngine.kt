@@ -9,7 +9,8 @@ import kotlin.math.abs
  * siehe docs/Erweiterung_Heimweg.md). Ähnlich der Racemode-Bojen-Peilung
  * (Ziel anpeilen, Abstand anzeigen), aber zusätzlich mit:
  *  - Wende-Vorschlag, falls der direkte Kurs zum Ziel zu dicht am Wind liegt
- *    (innerhalb des Anluv-Limits, Standard 45°) und daher gekreuzt werden muss
+ *    (innerhalb des Anluv-Limits, per Boots-Kalibrierung gelernt oder
+ *    Standard 45°) und daher gekreuzt werden muss
  *  - ETA über die tatsächlich gemessene Annäherung Richtung Ziel (VMC,
  *    "Velocity Made Good" — siehe [HomeProgressTracker])
  *
@@ -18,11 +19,6 @@ import kotlin.math.abs
  * Manöver-Drills mit zufälligem Timing.
  */
 class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink) {
-
-    companion object {
-        /** Typischer Am-Wind-Winkel; darunter gilt der direkte Kurs als nicht anliegend segelbar */
-        const val CLOSEHAULED_ANGLE_DEG = 45.0
-    }
 
     private var lastManeuverNeeded: Boolean? = null
     private var lastHome: GeoPoint? = null
@@ -40,7 +36,13 @@ class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink
         progressTracker.reset()
     }
 
-    fun tick(fix: Fix, windDir: Double?, windCalibrated: Boolean, home: GeoPoint?): HomeGuidance? {
+    fun tick(
+        fix: Fix,
+        windDir: Double?,
+        windCalibrated: Boolean,
+        home: GeoPoint?,
+        closehauledAngleDeg: Double = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG,
+    ): HomeGuidance? {
         val lat = fix.lat ?: return null
         val lon = fix.lon ?: return null
         if (home == null) return null
@@ -72,7 +74,7 @@ class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink
         }
 
         val angleToWind = GeoUtils.angleDiff(bearingToHome, windDir)
-        val canSailDirect = abs(angleToWind) >= CLOSEHAULED_ANGLE_DEG
+        val canSailDirect = abs(angleToWind) >= closehauledAngleDeg
 
         val recommendedHeading: Double
         var maneuverNeeded = false
@@ -80,8 +82,8 @@ class HomeEngine(private val vib: HapticFeedback, private val status: StatusSink
         if (canSailDirect) {
             recommendedHeading = bearingToHome
         } else {
-            val closehauled1 = GeoUtils.normalize360(windDir - CLOSEHAULED_ANGLE_DEG)
-            val closehauled2 = GeoUtils.normalize360(windDir + CLOSEHAULED_ANGLE_DEG)
+            val closehauled1 = GeoUtils.normalize360(windDir - closehauledAngleDeg)
+            val closehauled2 = GeoUtils.normalize360(windDir + closehauledAngleDeg)
             recommendedHeading = if (abs(GeoUtils.angleDiff(closehauled1, bearingToHome)) <=
                 abs(GeoUtils.angleDiff(closehauled2, bearingToHome))
             ) closehauled1 else closehauled2

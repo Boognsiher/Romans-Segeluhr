@@ -3,6 +3,7 @@ package com.segeluhr.app.data.settings
 import android.content.Context
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import com.segeluhr.app.core.Constants
 import com.segeluhr.app.core.GeoPoint
 import com.segeluhr.app.core.LakeCircle
 import com.segeluhr.app.data.model.AppRole
@@ -44,6 +45,15 @@ class SettingsRepository(private val context: Context) {
         val WIND_DIR = doublePreferencesKey("wind_dir")
         val WIND_CALIBRATED = booleanPreferencesKey("wind_calibrated")
 
+        // Boots-Kalibrierung (siehe docs/Erweiterung_Boots_Kalibrierung.md) -
+        // gelernter Am-Wind-Wendewinkel, ersetzt den vorher fest verdrahteten
+        // 45°-Wert in HomeEngine/CompetitionEngine. Bewusst getrennt von
+        // WIND_DIR/WIND_CALIBRATED: das ist eine Boots-Eigenschaft, keine
+        // Windmessung, und soll auch über eine neue Windkalibrierung hinweg
+        // erhalten bleiben.
+        val CLOSEHAULED_ANGLE_DEG = doublePreferencesKey("closehauled_angle_deg")
+        val CLOSEHAULED_SAMPLE_COUNT = intPreferencesKey("closehauled_sample_count")
+
         val WAKE_LOCK_ENABLED = booleanPreferencesKey("wake_lock_enabled")
         val OPERATION_MODE = stringPreferencesKey("operation_mode")
         val APP_ROLE = stringPreferencesKey("app_role")
@@ -59,6 +69,8 @@ class SettingsRepository(private val context: Context) {
     )
 
     data class WindCalib(val windDir: Double?, val calibrated: Boolean)
+
+    data class BoatProfile(val closehauledAngleDeg: Double, val sampleCount: Int)
 
     private fun serializeLakeCircles(circles: List<LakeCircle>): String {
         val arr = JSONArray()
@@ -106,6 +118,13 @@ class SettingsRepository(private val context: Context) {
 
     val windCalibFlow: Flow<WindCalib> = context.dataStore.data.map { p ->
         WindCalib(p[Keys.WIND_DIR], p[Keys.WIND_CALIBRATED] ?: false)
+    }
+
+    val boatProfileFlow: Flow<BoatProfile> = context.dataStore.data.map { p ->
+        BoatProfile(
+            p[Keys.CLOSEHAULED_ANGLE_DEG] ?: Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG,
+            p[Keys.CLOSEHAULED_SAMPLE_COUNT] ?: 0,
+        )
     }
 
     val wakeLockEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[Keys.WAKE_LOCK_ENABLED] ?: false }
@@ -195,6 +214,13 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { p ->
             p[Keys.WIND_DIR] = windDir
             p[Keys.WIND_CALIBRATED] = calibrated
+        }
+    }
+
+    suspend fun setBoatProfile(closehauledAngleDeg: Double, sampleCount: Int) {
+        context.dataStore.edit { p ->
+            p[Keys.CLOSEHAULED_ANGLE_DEG] = closehauledAngleDeg
+            p[Keys.CLOSEHAULED_SAMPLE_COUNT] = sampleCount
         }
     }
 

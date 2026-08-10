@@ -24,11 +24,6 @@ import kotlin.math.abs
  */
 class CompetitionEngine(private val vib: HapticFeedback, private val status: StatusSink) {
 
-    companion object {
-        /** Gleicher Am-Wind-Winkel-Ansatz wie im Heimweg-Modus (HomeEngine) */
-        const val CLOSEHAULED_ANGLE_DEG = 45.0
-    }
-
     var leg: CompetitionLeg = CompetitionLeg.UPWIND
         private set
     var lapCount: Int = 0
@@ -47,7 +42,13 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         lastManeuverNeeded = null
     }
 
-    fun tick(fix: Fix, windDir: Double?, mark1: GeoPoint?, mark2: GeoPoint?): CompetitionGuidance? {
+    fun tick(
+        fix: Fix,
+        windDir: Double?,
+        mark1: GeoPoint?,
+        mark2: GeoPoint?,
+        closehauledAngleDeg: Double = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG,
+    ): CompetitionGuidance? {
         val lat = fix.lat ?: return null
         val lon = fix.lon ?: return null
         val wd = windDir ?: return null
@@ -62,20 +63,20 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         }
 
         return when (leg) {
-            CompetitionLeg.UPWIND -> tickUpwind(fix, lat, lon, wd, mark1, mark2)
+            CompetitionLeg.UPWIND -> tickUpwind(fix, lat, lon, wd, mark1, mark2, closehauledAngleDeg)
             CompetitionLeg.REACH_TO_OFFSET -> tickReach(lat, lon, mark2!!)
             CompetitionLeg.DOWNWIND -> tickDownwind(fix, lat, lon, wd)
         }
     }
 
     /** Gleiche Am-Wind-Logik wie HomeEngine: direkter Kurs oder besserer Kreuz-Kurs + Wende-Bedarf */
-    private fun closehauledGuidance(fix: Fix, wd: Double, bearingToTarget: Double): Pair<Double, Boolean> {
+    private fun closehauledGuidance(fix: Fix, wd: Double, bearingToTarget: Double, closehauledAngleDeg: Double): Pair<Double, Boolean> {
         val angleToWind = GeoUtils.angleDiff(bearingToTarget, wd)
-        val canSailDirect = abs(angleToWind) >= CLOSEHAULED_ANGLE_DEG
+        val canSailDirect = abs(angleToWind) >= closehauledAngleDeg
         if (canSailDirect) return bearingToTarget to false
 
-        val ch1 = GeoUtils.normalize360(wd - CLOSEHAULED_ANGLE_DEG)
-        val ch2 = GeoUtils.normalize360(wd + CLOSEHAULED_ANGLE_DEG)
+        val ch1 = GeoUtils.normalize360(wd - closehauledAngleDeg)
+        val ch2 = GeoUtils.normalize360(wd + closehauledAngleDeg)
         val recommended = if (abs(GeoUtils.angleDiff(ch1, bearingToTarget)) <=
             abs(GeoUtils.angleDiff(ch2, bearingToTarget))
         ) ch1 else ch2
@@ -94,7 +95,9 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         lastManeuverNeeded = maneuverNeeded
     }
 
-    private fun tickUpwind(fix: Fix, lat: Double, lon: Double, wd: Double, mark1: GeoPoint?, mark2: GeoPoint?): CompetitionGuidance {
+    private fun tickUpwind(
+        fix: Fix, lat: Double, lon: Double, wd: Double, mark1: GeoPoint?, mark2: GeoPoint?, closehauledAngleDeg: Double,
+    ): CompetitionGuidance {
         val bearing: Double
         val distance: Double?
         val isEstimated: Boolean
@@ -132,7 +135,7 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
             }
         }
 
-        val (recommended, maneuverNeeded) = closehauledGuidance(fix, wd, bearing)
+        val (recommended, maneuverNeeded) = closehauledGuidance(fix, wd, bearing, closehauledAngleDeg)
         maybeVibrateManeuver(maneuverNeeded, if (isEstimated) "Luvtonne (geschätzt)" else "Luvbake")
 
         return CompetitionGuidance(

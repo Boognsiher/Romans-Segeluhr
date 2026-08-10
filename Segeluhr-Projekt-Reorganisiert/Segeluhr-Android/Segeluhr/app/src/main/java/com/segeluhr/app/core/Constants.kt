@@ -34,6 +34,18 @@ object Constants {
     const val LAKE_CLEAR_FACTOR = 0.65
     const val LAKE_WARN_REPEAT_MS = 15_000L
 
+    // Boots-Kalibrierung (Erweiterung, siehe docs/Erweiterung_Boots_Kalibrierung.md):
+    // ersetzt den bisher fest verdrahteten 45°-Am-Wind-Winkel in HomeEngine/
+    // CompetitionEngine durch einen pro Boot lernbaren Wert.
+    /** Fallback, solange noch kein einziger Kalibrierlauf stattgefunden hat. */
+    const val DEFAULT_CLOSEHAULED_ANGLE_DEG = 45.0
+    /** Smart-Modus: nur Momente lernen, die plausibel "am Wind" sind — Toleranzband um den aktuellen Schätzwert. */
+    const val SMART_CLOSEHAULED_LEARN_BAND_DEG = 20.0
+    /** Smart-Modus: klein gehalten, damit einzelne Schläge den Wert nicht sofort verreissen ("träge", wie beim Heimweg-ETA-Fix). */
+    const val SMART_CLOSEHAULED_EMA_ALPHA = 0.03
+    /** Erst ab dieser Änderung erneut persistieren, sonst würde der Smart-Modus DataStore mit Mini-Schreibvorgängen fluten. */
+    const val CLOSEHAULED_PERSIST_THRESHOLD_DEG = 0.5
+
     // 5-4-1 Startsequenz
     const val COUNTDOWN_DURATION_MS = 5 * 60 * 1000L
     val COUNTDOWN_MARKS_S = listOf(240, 60) // Signal bei 4:00 und 1:00, starkes Signal bei 0:00 separat

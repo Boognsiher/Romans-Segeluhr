@@ -161,7 +161,14 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onReset = viewModel::resetCountdown,
                     onSyncToNextMinute = viewModel::syncCountdownToNextMinute,
                 )
-                Tab.WIND -> WindScreen(state, onStartCalib = viewModel::startAmwindCalibration, onAbortCalib = viewModel::abortCalibration)
+                Tab.WIND -> WindScreen(
+                    state,
+                    onStartCalib = viewModel::startAmwindCalibration,
+                    onAbortCalib = viewModel::abortCalibration,
+                    onCalibrationModeChanged = viewModel::setCalibrationModeEnabled,
+                    onSmartModeChanged = viewModel::setSmartModeEnabled,
+                    onResetBoatCalibration = viewModel::resetBoatCalibration,
+                )
                 Tab.TRAINING -> TrainingScreen(
                     state,
                     onSetMode = viewModel::setTrainMode,

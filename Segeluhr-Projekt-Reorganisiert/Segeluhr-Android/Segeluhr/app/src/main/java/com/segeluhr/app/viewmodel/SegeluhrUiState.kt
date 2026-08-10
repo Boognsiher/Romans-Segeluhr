@@ -23,6 +23,12 @@ data class SegeluhrUiState(
     val windNet: Double? = null,
     val windRange: Double? = null,
 
+    // Boots-Kalibrierung (Erweiterung, siehe docs/Erweiterung_Boots_Kalibrierung.md)
+    val closehauledAngleDeg: Double = 45.0,
+    val closehauledSampleCount: Int = 0,
+    val calibrationModeEnabled: Boolean = false,
+    val smartModeEnabled: Boolean = false,
+
     // Abgeleitete Telemetrie
     val vmg: Double? = null,
     val lineBiasDeg: Double? = null,

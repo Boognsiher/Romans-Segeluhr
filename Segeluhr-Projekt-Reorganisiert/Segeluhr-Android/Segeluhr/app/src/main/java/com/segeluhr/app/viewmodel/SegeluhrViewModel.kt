@@ -51,9 +51,12 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(statusText = text, statusLevel = level) }
     }
 
-    private val windEngine = WindEngine(haptics, statusSink) { dir, calibrated ->
-        settingsRepo.setWindCalibration(dir, calibrated)
-    }
+    private val windEngine = WindEngine(
+        vib = haptics,
+        status = statusSink,
+        onWindChanged = { dir, calibrated -> settingsRepo.setWindCalibration(dir, calibrated) },
+        onBoatProfileChanged = { angle, count -> settingsRepo.setBoatProfile(angle, count) },
+    )
     private val trainingEngine = TrainingEngine(haptics, statusSink) { record ->
         db.maneuverDao().insert(record.toEntity())
         db.maneuverDao().trimTo()
@@ -82,6 +85,13 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             val calib = settingsRepo.windCalibFlow.first()
             windEngine.restore(calib.windDir, calib.calibrated)
+        }
+        viewModelScope.launch {
+            val profile = settingsRepo.boatProfileFlow.first()
+            windEngine.restoreBoatProfile(profile.closehauledAngleDeg, profile.sampleCount)
+            _uiState.update {
+                it.copy(closehauledAngleDeg = profile.closehauledAngleDeg, closehauledSampleCount = profile.sampleCount)
+            }
         }
         viewModelScope.launch {
             settingsRepo.waypointsFlow.collect { wp ->
@@ -211,7 +221,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         lakeEngine.tick(fix, trainingEngine.trainMode, currentWaypoints.lakeCircles)
 
         val competitionGuidance = if (competitionActive) {
-            competitionEngine.tick(fix, windEngine.windDir, currentWaypoints.competitionMark1, currentWaypoints.competitionMark2)
+            competitionEngine.tick(
+                fix, windEngine.windDir, currentWaypoints.competitionMark1, currentWaypoints.competitionMark2,
+                windEngine.closehauledAngleDeg,
+            )
         } else null
 
         val countdownS = countdownEngine.tick()
@@ -264,7 +277,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         val trend = windEngine.trendStats()
 
         val homeGuidance = if (_uiState.value.homeModeActive) {
-            homeEngine.tick(fix, windEngine.windDir, windEngine.windCalibrated, currentWaypoints.home)
+            homeEngine.tick(
+                fix, windEngine.windDir, windEngine.windCalibrated, currentWaypoints.home,
+                windEngine.closehauledAngleDeg,
+            )
         } else null
 
         // Sendet an die Ultra-Watch, egal ob gerade "Mit Uhr" aktiv ist —
@@ -306,6 +322,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 windLog = windEngine.windLog,
                 windNet = trend?.first,
                 windRange = trend?.second,
+                closehauledAngleDeg = windEngine.closehauledAngleDeg,
+                closehauledSampleCount = windEngine.closehauledSampleCount,
+                calibrationModeEnabled = windEngine.calibrationModeEnabled,
+                smartModeEnabled = windEngine.smartModeEnabled,
                 vmg = vmg,
                 lineBiasDeg = lineBiasDeg,
                 lineBiasFavors = lineBiasFavors,
@@ -340,6 +360,34 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
 
     fun startAmwindCalibration() = windEngine.startCalibration(currentlyValid())
     fun abortCalibration() = windEngine.abortCalibration()
+
+    /**
+     * Boots-Kalibrierung (siehe docs/Erweiterung_Boots_Kalibrierung.md).
+     * Direktes _uiState-Update zusätzlich zum Engine-Aufruf, damit der
+     * Schalter sofort reagiert statt erst beim nächsten 1-Hz-Tick.
+     */
+    fun setCalibrationModeEnabled(enabled: Boolean) {
+        windEngine.setCalibrationModeEnabled(enabled)
+        _uiState.update { it.copy(calibrationModeEnabled = enabled) }
+    }
+
+    fun setSmartModeEnabled(enabled: Boolean) {
+        windEngine.setSmartModeEnabled(enabled)
+        _uiState.update { it.copy(smartModeEnabled = enabled) }
+    }
+
+    /** Wirft nur den gelernten Wendewinkel weg (Setup/Wind-Tab-Button), nicht die Windkalibrierung. */
+    fun resetBoatCalibration() {
+        viewModelScope.launch {
+            windEngine.resetBoatProfile()
+            _uiState.update {
+                it.copy(
+                    closehauledAngleDeg = windEngine.closehauledAngleDeg,
+                    closehauledSampleCount = windEngine.closehauledSampleCount,
+                )
+            }
+        }
+    }
 
     fun startCountdown() = countdownEngine.start()
     fun resetCountdown() = countdownEngine.reset()
