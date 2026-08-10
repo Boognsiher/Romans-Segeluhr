@@ -41,6 +41,21 @@ data class ManeuverRecord(
 data class WindLogPoint(val cumulativeDeg: Double, val timestampMs: Long)
 
 /**
+ * Ein Boots-Profil für die Boots-Kalibrierung (Erweiterung, siehe
+ * docs/Erweiterung_Boots_Kalibrierung.md) — eigener gelernter Wendewinkel
+ * pro Boot, damit dieselbe App-Installation für mehrere Boote genutzt
+ * werden kann (z.B. eigenes Boot + Charter-/Vereinsboot). [sampleCount] = 0
+ * bedeutet "noch nie kalibriert" (auch beim vorbefüllten Grundprofil, dessen
+ * Winkel nur eine Schätzung aus Referenzdaten ist, keine echte Messung).
+ */
+data class BoatProfile(
+    val id: String,
+    val name: String,
+    val closehauledAngleDeg: Double,
+    val sampleCount: Int,
+)
+
+/**
  * Ergebnis der Heimweg-Führung (Erweiterung, siehe docs/Erweiterung_Heimweg.md).
  * [recommendedHeading] ist entweder die direkte Peilung (falls anliegend
  * segelbar) oder der bessere der beiden Am-Wind-Kurse (falls Kreuzen nötig).

@@ -46,6 +46,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     // zu S.fix / mainTick() im Browser-Prototyp).
     private var currentFix: Fix = Fix()
     private var currentWaypoints = SettingsRepository.Waypoints(null, null, null, null, null)
+    // Boots-Kalibrierung: nur bei tatsächlichem Profilwechsel windEngine
+    // neu befüllen, nicht bei jeder Aenderung innerhalb desselben aktiven
+    // Profils (siehe init{}-Collector unten).
+    private var lastLoadedBoatProfileId: String? = null
 
     private val statusSink = StatusSink { text, level ->
         _uiState.update { it.copy(statusText = text, statusLevel = level) }
@@ -55,7 +59,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         vib = haptics,
         status = statusSink,
         onWindChanged = { dir, calibrated -> settingsRepo.setWindCalibration(dir, calibrated) },
-        onBoatProfileChanged = { angle, count -> settingsRepo.setBoatProfile(angle, count) },
+        onBoatProfileChanged = { id, angle, count -> settingsRepo.updateBoatProfileCalibration(id, angle, count) },
     )
     private val trainingEngine = TrainingEngine(haptics, statusSink) { record ->
         db.maneuverDao().insert(record.toEntity())
@@ -87,10 +91,19 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             windEngine.restore(calib.windDir, calib.calibrated)
         }
         viewModelScope.launch {
-            val profile = settingsRepo.boatProfileFlow.first()
-            windEngine.restoreBoatProfile(profile.closehauledAngleDeg, profile.sampleCount)
-            _uiState.update {
-                it.copy(closehauledAngleDeg = profile.closehauledAngleDeg, closehauledSampleCount = profile.sampleCount)
+            // Laufend (nicht nur .first()): Profilliste + aktives Profil können
+            // sich jederzeit über die Setup-Tab-Verwaltung ändern (neu anlegen/
+            // wechseln/löschen). windEngine wird aber NUR bei einem tatsächlichen
+            // Wechsel des aktiven Profils neu befüllt (siehe lastLoadedBoatProfileId)
+            // — die eigentlichen Live-Werte während des Segelns kommen weiterhin
+            // pro Tick direkt aus windEngine (siehe renderTelemetry), nicht von hier.
+            settingsRepo.boatProfilesFlow.collect { profiles ->
+                if (profiles.activeProfileId != lastLoadedBoatProfileId) {
+                    val active = profiles.profiles.firstOrNull { it.id == profiles.activeProfileId } ?: profiles.profiles.first()
+                    windEngine.restoreBoatProfile(active.id, active.closehauledAngleDeg, active.sampleCount)
+                    lastLoadedBoatProfileId = profiles.activeProfileId
+                }
+                _uiState.update { it.copy(boatProfiles = profiles.profiles, activeBoatProfileId = profiles.activeProfileId) }
             }
         }
         viewModelScope.launch {
@@ -376,7 +389,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(smartModeEnabled = enabled) }
     }
 
-    /** Wirft nur den gelernten Wendewinkel weg (Setup/Wind-Tab-Button), nicht die Windkalibrierung. */
+    /** Wirft nur den gelernten Wendewinkel DES AKTIVEN Profils weg (Wind-Tab-Button), nicht die Windkalibrierung. */
     fun resetBoatCalibration() {
         viewModelScope.launch {
             windEngine.resetBoatProfile()
@@ -387,6 +400,27 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 )
             }
         }
+    }
+
+    // ---- Mehrere Boots-Profile (Setup-Tab, siehe docs/Erweiterung_Boots_Kalibrierung.md) ----
+    // uiState.boatProfiles/activeBoatProfileId aktualisieren sich automatisch
+    // über den boatProfilesFlow-Collector in init{} - hier nur die DataStore-
+    // Aktion auslösen.
+
+    /** Legt ein neues Profil an (Standard-Wendewinkel 45°) und aktiviert es sofort. */
+    fun addBoatProfile(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch { settingsRepo.addBoatProfile(trimmed) }
+    }
+
+    fun setActiveBoatProfile(id: String) {
+        viewModelScope.launch { settingsRepo.setActiveBoatProfile(id) }
+    }
+
+    /** Löscht ein Profil (mindestens eines bleibt immer bestehen, siehe SettingsRepository). */
+    fun deleteBoatProfile(id: String) {
+        viewModelScope.launch { settingsRepo.deleteBoatProfile(id) }
     }
 
     fun startCountdown() = countdownEngine.start()

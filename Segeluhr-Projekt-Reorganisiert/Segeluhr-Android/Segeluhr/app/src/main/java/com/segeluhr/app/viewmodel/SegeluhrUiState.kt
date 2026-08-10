@@ -23,11 +23,15 @@ data class SegeluhrUiState(
     val windNet: Double? = null,
     val windRange: Double? = null,
 
-    // Boots-Kalibrierung (Erweiterung, siehe docs/Erweiterung_Boots_Kalibrierung.md)
+    // Boots-Kalibrierung (Erweiterung, siehe docs/Erweiterung_Boots_Kalibrierung.md).
+    // closehauledAngleDeg/closehauledSampleCount spiegeln IMMER das gerade
+    // aktive Profil (boatProfiles.first { it.id == activeBoatProfileId }).
     val closehauledAngleDeg: Double = 45.0,
     val closehauledSampleCount: Int = 0,
     val calibrationModeEnabled: Boolean = false,
     val smartModeEnabled: Boolean = false,
+    val boatProfiles: List<BoatProfile> = emptyList(),
+    val activeBoatProfileId: String = "",
 
     // Abgeleitete Telemetrie
     val vmg: Double? = null,

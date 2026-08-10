@@ -7,7 +7,9 @@ import com.segeluhr.app.core.Constants
 import com.segeluhr.app.core.GeoPoint
 import com.segeluhr.app.core.LakeCircle
 import com.segeluhr.app.data.model.AppRole
+import com.segeluhr.app.data.model.BoatProfile
 import com.segeluhr.app.data.model.OperationMode
+import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -46,13 +48,14 @@ class SettingsRepository(private val context: Context) {
         val WIND_CALIBRATED = booleanPreferencesKey("wind_calibrated")
 
         // Boots-Kalibrierung (siehe docs/Erweiterung_Boots_Kalibrierung.md) -
-        // gelernter Am-Wind-Wendewinkel, ersetzt den vorher fest verdrahteten
-        // 45°-Wert in HomeEngine/CompetitionEngine. Bewusst getrennt von
-        // WIND_DIR/WIND_CALIBRATED: das ist eine Boots-Eigenschaft, keine
-        // Windmessung, und soll auch über eine neue Windkalibrierung hinweg
-        // erhalten bleiben.
-        val CLOSEHAULED_ANGLE_DEG = doublePreferencesKey("closehauled_angle_deg")
-        val CLOSEHAULED_SAMPLE_COUNT = intPreferencesKey("closehauled_sample_count")
+        // MEHRERE benannte Profile (z.B. pro Boot), je mit eigenem gelernten
+        // Am-Wind-Wendewinkel, ersetzt den vorher fest verdrahteten 45°-Wert
+        // in HomeEngine/CompetitionEngine. Gleiches JSON-Array-Muster wie
+        // LAKE_CIRCLES_JSON. Bewusst getrennt von WIND_DIR/WIND_CALIBRATED:
+        // das ist eine Boots-Eigenschaft, keine Windmessung, und soll auch
+        // über eine neue Windkalibrierung hinweg erhalten bleiben.
+        val BOAT_PROFILES_JSON = stringPreferencesKey("boat_profiles_json")
+        val ACTIVE_BOAT_PROFILE_ID = stringPreferencesKey("active_boat_profile_id")
 
         val WAKE_LOCK_ENABLED = booleanPreferencesKey("wake_lock_enabled")
         val OPERATION_MODE = stringPreferencesKey("operation_mode")
@@ -70,7 +73,60 @@ class SettingsRepository(private val context: Context) {
 
     data class WindCalib(val windDir: Double?, val calibrated: Boolean)
 
-    data class BoatProfile(val closehauledAngleDeg: Double, val sampleCount: Int)
+    /** [activeProfileId] zeigt immer auf ein Element aus [profiles] — nie leer, siehe [boatProfilesFlow]. */
+    data class BoatProfiles(val profiles: List<BoatProfile>, val activeProfileId: String)
+
+    companion object {
+        /**
+         * Grundprofil, mit dem jede Installation startet (siehe
+         * docs/Erweiterung_Boots_Kalibrierung.md). Wendewinkel = Mittelwert
+         * der drei geschätzten Am-Wind-TWA-Bänder des Musto Skiff
+         * (Leichtwind 42-48°, Mittelwind/optimales Pointing 38-42°,
+         * Starkwind 40-50° — Mittelpunkte 45/40/45 gemittelt = 43.3° ≈ 43°).
+         * Community-Schätzwerte (Musto Skiff Class Association +
+         * Vergleichsklassen 49er/RS800), KEINE echten Messdaten -
+         * `sampleCount = 0` spiegelt das bewusst wider ("noch nicht
+         * kalibriert"), auch wenn der Winkel nicht mehr der generische
+         * 45°-Fallback ist.
+         */
+        val DEFAULT_BOAT_PROFILE = BoatProfile(
+            id = "musto-skiff-default",
+            name = "Musto Skiff",
+            closehauledAngleDeg = 43.0,
+            sampleCount = 0,
+        )
+    }
+
+    private fun serializeBoatProfiles(profiles: List<BoatProfile>): String {
+        val arr = JSONArray()
+        profiles.forEach { p ->
+            arr.put(JSONObject().apply {
+                put("id", p.id)
+                put("name", p.name)
+                put("closehauledAngleDeg", p.closehauledAngleDeg)
+                put("sampleCount", p.sampleCount)
+            })
+        }
+        return arr.toString()
+    }
+
+    private fun parseBoatProfiles(json: String?): List<BoatProfile> {
+        if (json.isNullOrBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                BoatProfile(
+                    id = o.getString("id"),
+                    name = o.getString("name"),
+                    closehauledAngleDeg = o.getDouble("closehauledAngleDeg"),
+                    sampleCount = o.getInt("sampleCount"),
+                )
+            }
+        } catch (e: Exception) {
+            emptyList() // beschädigtes/altes Format - lieber leer als abstürzen (fällt dann auf DEFAULT_BOAT_PROFILE zurück)
+        }
+    }
 
     private fun serializeLakeCircles(circles: List<LakeCircle>): String {
         val arr = JSONArray()
@@ -120,11 +176,14 @@ class SettingsRepository(private val context: Context) {
         WindCalib(p[Keys.WIND_DIR], p[Keys.WIND_CALIBRATED] ?: false)
     }
 
-    val boatProfileFlow: Flow<BoatProfile> = context.dataStore.data.map { p ->
-        BoatProfile(
-            p[Keys.CLOSEHAULED_ANGLE_DEG] ?: Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG,
-            p[Keys.CLOSEHAULED_SAMPLE_COUNT] ?: 0,
-        )
+    val boatProfilesFlow: Flow<BoatProfiles> = context.dataStore.data.map { p ->
+        val stored = parseBoatProfiles(p[Keys.BOAT_PROFILES_JSON])
+        val profiles = stored.ifEmpty { listOf(DEFAULT_BOAT_PROFILE) }
+        // Zeigt die gespeicherte ID auf kein (mehr) vorhandenes Profil (z.B.
+        // gelöscht) oder ist noch nie gesetzt -> erstes Profil übernehmen.
+        val activeId = p[Keys.ACTIVE_BOAT_PROFILE_ID]?.takeIf { id -> profiles.any { it.id == id } }
+            ?: profiles.first().id
+        BoatProfiles(profiles, activeId)
     }
 
     val wakeLockEnabledFlow: Flow<Boolean> = context.dataStore.data.map { it[Keys.WAKE_LOCK_ENABLED] ?: false }
@@ -217,11 +276,59 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    suspend fun setBoatProfile(closehauledAngleDeg: Double, sampleCount: Int) {
+    // ---- Boots-Kalibrierung: mehrere Profile ----
+    // (siehe Klassenkommentar bei BOAT_PROFILES_JSON und
+    // docs/Erweiterung_Boots_Kalibrierung.md)
+
+    /** Aktualisiert Wendewinkel/Kalibrierlauf-Zähler EINES Profils (Kalibrierungs-/Smart-Modus in WindEngine). */
+    suspend fun updateBoatProfileCalibration(id: String, closehauledAngleDeg: Double, sampleCount: Int) {
         context.dataStore.edit { p ->
-            p[Keys.CLOSEHAULED_ANGLE_DEG] = closehauledAngleDeg
-            p[Keys.CLOSEHAULED_SAMPLE_COUNT] = sampleCount
+            val current = parseBoatProfiles(p[Keys.BOAT_PROFILES_JSON]).ifEmpty { listOf(DEFAULT_BOAT_PROFILE) }.toMutableList()
+            val idx = current.indexOfFirst { it.id == id }
+            if (idx >= 0) {
+                current[idx] = current[idx].copy(closehauledAngleDeg = closehauledAngleDeg, sampleCount = sampleCount)
+                p[Keys.BOAT_PROFILES_JSON] = serializeBoatProfiles(current)
+            }
         }
+    }
+
+    /** Neues Profil anlegen (Setup-Tab "Neues Profil") — startet beim generischen 45°-Standardwinkel und wird gleich aktiviert. */
+    suspend fun addBoatProfile(name: String): BoatProfile {
+        val newProfile = BoatProfile(
+            id = UUID.randomUUID().toString(),
+            name = name,
+            closehauledAngleDeg = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG,
+            sampleCount = 0,
+        )
+        context.dataStore.edit { p ->
+            val current = parseBoatProfiles(p[Keys.BOAT_PROFILES_JSON]).ifEmpty { listOf(DEFAULT_BOAT_PROFILE) }.toMutableList()
+            current.add(newProfile)
+            p[Keys.BOAT_PROFILES_JSON] = serializeBoatProfiles(current)
+            p[Keys.ACTIVE_BOAT_PROFILE_ID] = newProfile.id
+        }
+        return newProfile
+    }
+
+    suspend fun setActiveBoatProfile(id: String) {
+        context.dataStore.edit { p -> p[Keys.ACTIVE_BOAT_PROFILE_ID] = id }
+    }
+
+    /** Löscht ein Profil — mindestens eines bleibt immer bestehen. War es das aktive, übernimmt ein verbleibendes. */
+    suspend fun deleteBoatProfile(id: String) {
+        context.dataStore.edit { p ->
+            val current = parseBoatProfiles(p[Keys.BOAT_PROFILES_JSON]).ifEmpty { listOf(DEFAULT_BOAT_PROFILE) }.toMutableList()
+            if (current.size <= 1) return@edit
+            current.removeAll { it.id == id }
+            p[Keys.BOAT_PROFILES_JSON] = serializeBoatProfiles(current)
+            if (p[Keys.ACTIVE_BOAT_PROFILE_ID] == id) {
+                p[Keys.ACTIVE_BOAT_PROFILE_ID] = current.first().id
+            }
+        }
+    }
+
+    /** Setzt nur den Wendewinkel EINES Profils zurück (Wind-Tab-Button) — Name/ID bleiben erhalten. */
+    suspend fun resetBoatProfileCalibration(id: String) {
+        updateBoatProfileCalibration(id, Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG, 0)
     }
 
     suspend fun setWakeLockEnabled(enabled: Boolean) {

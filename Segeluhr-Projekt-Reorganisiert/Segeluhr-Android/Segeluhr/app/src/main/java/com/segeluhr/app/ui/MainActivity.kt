@@ -187,6 +187,9 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onAppRoleChanged = viewModel::setAppRole,
                     onRequestLocationPermission = onRequestPermissions,
                     onResetAll = viewModel::resetAll,
+                    onSetActiveBoatProfile = viewModel::setActiveBoatProfile,
+                    onAddBoatProfile = viewModel::addBoatProfile,
+                    onDeleteBoatProfile = viewModel::deleteBoatProfile,
                 )
             }
         }

@@ -1,8 +1,11 @@
 package com.segeluhr.app.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -10,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.segeluhr.app.core.GeoPoint
@@ -21,6 +25,7 @@ import com.segeluhr.app.ui.theme.Amber
 import com.segeluhr.app.ui.theme.Red
 import com.segeluhr.app.ui.theme.Teal
 import com.segeluhr.app.ui.theme.TextDim
+import com.segeluhr.app.ui.theme.TextLight
 import com.segeluhr.app.ui.theme.Panel2Dark
 import com.segeluhr.app.viewmodel.SegeluhrUiState
 
@@ -34,6 +39,9 @@ fun SetupScreen(
     onAppRoleChanged: (AppRole) -> Unit,
     onRequestLocationPermission: () -> Unit,
     onResetAll: () -> Unit,
+    onSetActiveBoatProfile: (String) -> Unit,
+    onAddBoatProfile: (String) -> Unit,
+    onDeleteBoatProfile: (String) -> Unit,
 ) {
     Column(
         Modifier
@@ -74,6 +82,70 @@ fun SetupScreen(
                 "Für den Competition-Modus (startet automatisch beim Startsignal). Ohne gesetzte Luvbake wird sie genau gegen den Wind geschätzt. Die Entlastungsboje ist optional — falls gesetzt, wird nach der Luvbake ein kurzer Halbwind-Schlag dorthin eingeplant.",
                 fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
             )
+        }
+
+        SectionCard("Boots-Profil") {
+            Text(
+                "Eigener Wendewinkel pro Boot — z.B. eigenes Boot + Charterboot getrennt kalibrieren. Kalibriert wird im Wind-Tab, wirkt immer auf das hier aktive Profil.",
+                fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(bottom = 8.dp),
+            )
+            state.boatProfiles.forEach { profile ->
+                val isActive = profile.id == state.activeBoatProfileId
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !isActive) { onSetActiveBoatProfile(profile.id) }
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text(
+                            profile.name,
+                            color = if (isActive) Teal else TextLight,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                        )
+                        val angleText = if (profile.sampleCount > 0) {
+                            "${"%.0f".format(profile.closehauledAngleDeg)}° (${profile.sampleCount} Kalibrierläufe)"
+                        } else {
+                            "${"%.0f".format(profile.closehauledAngleDeg)}° (Standardwert)"
+                        }
+                        Text(angleText, fontSize = 11.sp, color = TextDim)
+                    }
+                    if (state.boatProfiles.size > 1) {
+                        IconButton(onClick = { onDeleteBoatProfile(profile.id) }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Profil \"${profile.name}\" löschen", tint = TextDim)
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+            var addingProfile by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            var newProfileName by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+            if (!addingProfile) {
+                OutlinedButton(onClick = { newProfileName = ""; addingProfile = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("+ Neues Profil")
+                }
+            } else {
+                OutlinedTextField(
+                    value = newProfileName,
+                    onValueChange = { newProfileName = it },
+                    label = { Text("Name, z.B. Bootsname") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onAddBoatProfile(newProfileName); addingProfile = false },
+                        enabled = newProfileName.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Anlegen") }
+                    OutlinedButton(onClick = { addingProfile = false }, modifier = Modifier.weight(1f)) { Text("Abbrechen") }
+                }
+            }
         }
 
         SectionCard("Rolle") {
@@ -180,7 +252,7 @@ fun SetupScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Alle Daten löschen") }
             } else {
-                Text("Wirklich ALLE Daten (Wegpunkte, Log, Windkalibrierung) löschen?", fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                Text("Wirklich ALLE Daten (Wegpunkte, Log, Windkalibrierung, Boots-Profile) löschen?", fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { onResetAll(); confirming = false },

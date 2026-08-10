@@ -63,12 +63,18 @@ fun WindScreen(
         }
 
         SectionCard("Boots-Kalibrierung (Am-Wind-Wendewinkel)") {
+            val activeProfileName = state.boatProfiles.firstOrNull { it.id == state.activeBoatProfileId }?.name ?: "—"
+            StatRow("Aktives Profil", activeProfileName, valueColor = TextDim)
             val angleText = if (state.closehauledSampleCount > 0) {
                 "${"%.0f".format(state.closehauledAngleDeg)}° (${state.closehauledSampleCount} Kalibrierläufe)"
             } else {
                 "${"%.0f".format(state.closehauledAngleDeg)}° (Standardwert, noch nicht kalibriert)"
             }
             StatRow("Wendewinkel", angleText, valueColor = Teal)
+            Text(
+                "Anderes Profil wählen: Setup-Tab → \"Boots-Profil\".",
+                fontSize = 11.sp, color = TextDim, modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+            )
 
             Spacer(Modifier.height(10.dp))
             Row(

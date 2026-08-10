@@ -37,7 +37,8 @@ derselben Klasse statt einer parallelen Kopie der Zwei-Schläge-Erkennung.
 
 Beide Modi sind **bewusst nicht persistiert** (wie `homeModeActive`) — nach
 einem Neustart sind sie wieder aus, der gelernte Winkel selbst bleibt aber
-über `SettingsRepository.boatProfileFlow` erhalten.
+über `SettingsRepository.boatProfilesFlow` erhalten (siehe "Mehrere
+Boots-Profile" unten).
 
 ## Wo der Wert verwendet wird
 
@@ -56,17 +57,43 @@ beim bisherigen 45°-Fixwert auch, kein echtes Polardiagramm mit
 unterschiedlichen Winkeln je Bug. Passt zum gewählten Umfang: nur der
 Wendewinkel wird kalibriert, keine Geschwindigkeits-/Polar-Daten.
 
-## Offener Punkt (10.08.2026): Mehrere Boots-Profile
+## Mehrere Boots-Profile (10.08.2026)
 
-Aktuell genau **ein** globaler Wendewinkel-Wert pro App-Installation
-(`SettingsRepository.boatProfileFlow`, ein DataStore-Eintrag). Roman
-möchte mehrere benannte Profile (z.B. für verschiedene Boote) anlegen und
-zwischen ihnen wechseln können, plus ein vorbefülltes Grundprofil mit
-geschätzten Startwerten statt des reinen 45°-Fallbacks. Geplanter Umbau
-(noch nicht umgesetzt, wartet auf die genauen Startwerte vom Nutzer):
-Liste von Profilen als JSON in DataStore (gleiches Muster wie
-`LAKE_CIRCLES_JSON`) + Zeiger "aktives Profil", Profilverwaltung
-vermutlich im Setup-Tab, Kalibrierungsmechanik (dieser Stand hier) bleibt
-unverändert im Wind-Tab und wirkt auf das jeweils aktive Profil.
+Statt eines einzelnen globalen Werts gibt es jetzt benannte Profile (z.B.
+für verschiedene Boote) — Motivation: eigenes Boot + Charter-/Vereinsboot
+getrennt kalibrieren, oder ein neues Boot einmessen, ohne den bisherigen
+Wert zu verlieren.
+
+- **Speicherung**: `SettingsRepository.BoatProfiles(profiles, activeProfileId)`
+  — Liste als JSON in DataStore (`BOAT_PROFILES_JSON`, gleiches Muster wie
+  `LAKE_CIRCLES_JSON`), `ACTIVE_BOAT_PROFILE_ID` zeigt auf das aktive.
+  Zeigt die gespeicherte ID auf kein (mehr) vorhandenes Profil (z.B.
+  gelöscht), fällt der Flow automatisch auf das erste verbleibende zurück.
+  Mindestens ein Profil bleibt immer bestehen (`deleteBoatProfile`
+  verweigert das Löschen des letzten).
+- **Grundprofil** (`SettingsRepository.DEFAULT_BOAT_PROFILE`, id
+  `musto-skiff-default`): jede Installation startet mit einem Profil
+  "Musto Skiff", Wendewinkel 43° statt des reinen 45°-Fallbacks — Mittelwert
+  der drei geschätzten Am-Wind-TWA-Bänder aus der vom Nutzer bereitgestellten
+  Referenzdatei (Musto Skiff Class Association + Vergleichsklassen 49er/
+  RS800: Leichtwind 42-48°, Mittelwind/optimales Pointing 38-42°, Starkwind
+  40-50° — Mittelpunkte 45/40/45 gemittelt ≈ 43°). Ausdrücklich
+  Community-Schätzwerte, keine echten Messdaten (`sampleCount = 0`, wie in
+  der Quelle selbst empfohlen: "Startwerte für ein lernendes Modell, nicht
+  verifizierte Messdaten"). Ein **neu angelegtes** Profil (Setup-Tab "+ Neues
+  Profil") startet dagegen beim generischen `Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG`
+  (45°) — für beliebige künftige Boote gibt's keine Referenzdaten.
+- **Profilverwaltung**: Setup-Tab, neue Sektion "Boots-Profil" — Liste
+  aller Profile (antippen aktiviert), "+ Neues Profil" (Name eingeben),
+  Löschen per ×-Icon (ausgeblendet, wenn nur noch eines übrig ist).
+- **Kalibrierungsmechanik unverändert im Wind-Tab** (siehe oben), wirkt
+  aber immer auf das gerade aktive Profil — `WindEngine.activeProfileId`
+  wird vom ViewModel bei jedem Profilwechsel per `restoreBoatProfile()`
+  umgeschaltet (nicht bei jeder Detail-Änderung desselben Profils, sonst
+  würde jede Smart-Modus-Mikrokorrektur unnötig neu "laden").
+- **Downwind-Polardaten aus der Referenzdatei NICHT verwendet** — bewusst
+  ausserhalb des gewählten Umfangs (nur Wendewinkel, siehe "Bewusste
+  Vereinfachung" oben). `CompetitionEngine`/`HomeEngine` navigieren
+  Vorwind-Etappen weiterhin ohne Winkel-Optimierung (direkt `Wind + 180°`).
 
 **Noch nicht kompiliert/getestet.**

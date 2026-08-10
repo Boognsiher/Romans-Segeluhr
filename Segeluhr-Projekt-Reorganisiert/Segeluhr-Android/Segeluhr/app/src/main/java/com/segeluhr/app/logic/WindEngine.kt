@@ -27,12 +27,17 @@ import kotlin.math.abs
  *  - **Smart-Modus** (`smartModeEnabled`): läuft während des normalen
  *    Segelns nebenbei mit (siehe `tickContinuous`) und justiert den Wert
  *    langsam per EMA nach, sobald ein ruhiger Kurs plausibel am Wind liegt.
+ *
+ * Es gibt mehrere benannte Boots-Profile (siehe
+ * `SettingsRepository.boatProfilesFlow`) — diese Klasse kennt zu jedem
+ * Zeitpunkt nur das gerade AKTIVE Profil (`activeProfileId`). Beim
+ * Profilwechsel ruft der ViewModel [restoreBoatProfile] erneut auf.
  */
 class WindEngine(
     private val vib: HapticFeedback,
     private val status: StatusSink,
     private val onWindChanged: suspend (windDir: Double, calibrated: Boolean) -> Unit,
-    private val onBoatProfileChanged: suspend (closehauledAngleDeg: Double, sampleCount: Int) -> Unit,
+    private val onBoatProfileChanged: suspend (profileId: String, closehauledAngleDeg: Double, sampleCount: Int) -> Unit,
 ) {
     var windDir: Double? = null
         private set
@@ -57,6 +62,12 @@ class WindEngine(
     private var lastWindLogAt: Long = 0L
 
     // ---- Boots-Kalibrierung (siehe Klassen-Doku oben) ----
+    // Immer Zustand des gerade AKTIVEN Profils (siehe Erweiterung "Mehrere
+    // Boots-Profile", docs/Erweiterung_Boots_Kalibrierung.md) - beim
+    // Profilwechsel ruft der ViewModel [restoreBoatProfile] erneut auf, um
+    // diese Werte auf das neu aktivierte Profil umzuschalten.
+    var activeProfileId: String = ""
+        private set
     var closehauledAngleDeg: Double = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
         private set
     var closehauledSampleCount: Int = 0
@@ -73,8 +84,15 @@ class WindEngine(
         this.windCalibrated = calibrated
     }
 
-    /** Beim App-Start aus der Persistenz laden (Boots-Kalibrierung, siehe SettingsRepository.boatProfileFlow). */
-    fun restoreBoatProfile(closehauledAngleDeg: Double, sampleCount: Int) {
+    /**
+     * Beim App-Start UND bei jedem Profilwechsel aufrufen (siehe
+     * SettingsRepository.boatProfilesFlow) — schaltet Kalibrierungsmodus/
+     * Smart-Modus auf das neu aktive Profil um. Modi selbst
+     * (`calibrationModeEnabled`/`smartModeEnabled`) bleiben dabei
+     * unverändert, nur WAS sie kalibrieren wechselt.
+     */
+    fun restoreBoatProfile(profileId: String, closehauledAngleDeg: Double, sampleCount: Int) {
+        this.activeProfileId = profileId
         this.closehauledAngleDeg = closehauledAngleDeg
         this.closehauledSampleCount = sampleCount
         this.lastPersistedCloseHauledAngle = closehauledAngleDeg
@@ -99,12 +117,12 @@ class WindEngine(
         smartModeEnabled = enabled
     }
 
-    /** Setup-Tab-Button "Wendewinkel zurücksetzen" — wirft nur den gelernten Winkel weg, nicht die Windrichtung. */
+    /** Wind-Tab-Button "Wendewinkel zurücksetzen" — wirft nur den gelernten Winkel DES AKTIVEN Profils weg. */
     suspend fun resetBoatProfile() {
         closehauledAngleDeg = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
         closehauledSampleCount = 0
         lastPersistedCloseHauledAngle = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
-        onBoatProfileChanged(closehauledAngleDeg, closehauledSampleCount)
+        onBoatProfileChanged(activeProfileId, closehauledAngleDeg, closehauledSampleCount)
         status.setStatus("Wendewinkel auf Standardwert (${Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG.toInt()}°) zurückgesetzt.", StatusLevel.NORMAL)
     }
 
@@ -137,7 +155,7 @@ class WindEngine(
     private suspend fun persistBoatProfileIfChanged() {
         if (abs(closehauledAngleDeg - lastPersistedCloseHauledAngle) < Constants.CLOSEHAULED_PERSIST_THRESHOLD_DEG) return
         lastPersistedCloseHauledAngle = closehauledAngleDeg
-        onBoatProfileChanged(closehauledAngleDeg, closehauledSampleCount)
+        onBoatProfileChanged(activeProfileId, closehauledAngleDeg, closehauledSampleCount)
     }
 
     fun startCalibration(currentlyValid: Boolean) {
