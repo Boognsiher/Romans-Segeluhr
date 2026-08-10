@@ -101,7 +101,11 @@ eine längere Session/echten Segeltörn verifiziert:
 ## 🔵 Bekannte, bewusst nicht behobene Lücken
 
 - **Ton bei Quick-Messages auf der Land-Uhr**: laut Doku offener Punkt, nur
-  Vibration implementiert (respektiert Stumm-Modus).
+  Vibration implementiert (respektiert Stumm-Modus). **10.08.: recherchiert**
+  — S3 hat tatsächlich einen Lautsprecher (MAX98357A, bestätigt über
+  offizielle LilyGoLib-Hardware-Doku), API-Skizze + offene Fragen (Version/
+  `#define`-Flag) siehe `docs/Erweiterung_S3_Ton_QuickMessages.md`. Bewusst
+  noch nicht in `Segeluhr_TWatch_S3.ino` eingebaut, siehe Begründung dort.
 - **`distanceRemainingM`**: grobe Schätzung aus `ETA × aktuelle
   Geschwindigkeit`, kein echtes Distanz-Feld im BLE-Protokoll.
 - **Physischer Taster-Fallback auf der S3**: bewusst nicht verdrahtet
