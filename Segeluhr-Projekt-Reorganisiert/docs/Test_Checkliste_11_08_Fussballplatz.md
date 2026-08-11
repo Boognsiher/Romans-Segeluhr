@@ -7,10 +7,13 @@ GPS-Sicht, feste Referenzpunkte (Torlinien, Mittelkreis, Eckfahnen) zum
 Abschreiten bekannter Distanzen — und man kann laufen/joggen, um Bewegung
 zu simulieren, ohne aufs Wasser zu müssen.
 
-**Wichtige Einschränkung zuerst:** Windabhängige Punkte (Wind-Kalibrierung,
-Vorwind-Winkel-Lernen) lassen sich auf dem Platz **nicht sinnvoll** testen —
-die brauchen echten Wind unter Segeln. Die stehen unten unter "Heute NICHT
-testbar", nicht in der Hauptliste.
+**Wind-Kalibrierung geht doch, per Simulation:** `WindEngine.tickCalibration()`
+ist komplett GPS-Kurs-basiert (COG/Speed), es gibt keinen echten Windsensor
+— das Boot "kennt" Wind nur über gehaltene Kurse. Zwei Schläge zügig
+ablaufen/joggen mit einer Wende dazwischen reicht also, um den Mechanismus
+(inkl. Wendewinkel-Kalibrierung) sauber zu testen. Details dazu in 2f
+unten. Nicht simulierbar ist nur die *Bedeutung* des Ergebnisses (der
+"Wind" entspricht keinem echten Wind) — als Funktionstest zählt das nicht.
 
 Bei jedem Fehler: Fehlermeldung/Screenshot einfach in den Claude-Code-Chat
 kopieren, nicht selbst rumdebuggen.
@@ -118,18 +121,50 @@ Mittelpunkt des Mittelkreises als Wegpunkt setzen:
       (Power-Taste bewusst NICHT testen als Weckquelle — bekannter Bug,
       siehe unten)
 
+### 2f. Wind-Kalibrierung + Wendewinkel simulieren (zu Fuss)
+
+Mechanik (`WindEngine.kt`): "ruhiger Kurs" = 8 aufeinanderfolgende
+Sekunden mit ≤8° Kursabweichung bei ≥1.5 kn (~2.8 km/h, zügiges Gehen
+reicht, Joggen ist sicherer für sauberen GPS-Kurs). Wende erkannt ab
+≥50° Kursänderung. Winkel zwischen beiden Kursen muss 60°–110° sein,
+sonst "unplausibel". 90 s Zeit pro Phase.
+
+- [ ] Wind-Tab → "Kalibrierungsmodus" AN
+- [ ] "Kalibrieren starten" antippen
+- [ ] **Schlag 1**: zügig ~10–15 s geradeaus (z. B. entlang einer
+      Seitenlinie) — App zeigt "Jetzt wenden!", sobald der Kurs als
+      ruhig erkannt wurde
+- [ ] **Wenden**: im Bogen drehen (nicht stehenbleiben — GPS-Kurs
+      braucht Bewegung), am einfachsten auf die Torlinie wechseln
+      (~90° zur Seitenlinie, liegt sauber im 60–110°-Fenster und ergibt
+      einen realistischen Wendewinkel um die 45°)
+- [ ] **Schlag 2**: wieder ~10–15 s geradeaus, ruhig halten
+- [ ] App bestätigt "Wind kalibriert: X° — Wendewinkel: Y° (N
+      Kalibrierläufe)" — mehrfach mit anderen Ecken/Winkeln wiederholen,
+      verfeinert den laufenden Mittelwert genau wie beim echten Segeln
+- [ ] Einmal bewusst einen zu spitzen/zu weiten Winkel laufen (< 60°
+      oder > 110°) → "Wendewinkel unplausibel" sollte erscheinen, kein
+      Crash, Zustand geht zurück auf IDLE
+
+**Vorwind-Winkel (Smart-Modus)** — schwieriger, weil kein eigener
+Kalibrierlauf, sondern trägen EMA (α = 0.03) im laufenden Smart-Modus:
+- [ ] Wind-Tab → "Smart-Modus" AN (zusätzlich zum Kalibrierungsmodus)
+- [ ] Nach einer Kalibrierung (oben) eine Runde möglichst genau
+      entgegengesetzt zur gerade kalibrierten Windrichtung laufen (±20°
+      um den aktuellen Schätzwert, Standard 180°/149° je nach Profil)
+- [ ] Wind-Tab beobachten: "Vorwind-Winkel" bewegt sich nur sehr langsam
+      — nach einem Durchgang meist noch nicht sichtbar, erst nach
+      mehreren Minuten/Wiederholungen ein klein wenig erwartbar (kein
+      Bug, wie bei der echten Testfahrt-Strategie beschrieben)
+
+**Erwartbare Nebenwirkung, kein Bug:** gelegentliche "Wind-Shift:
+Lift/Header"-Meldungen beim Laufen — normale Folge davon, dass ein
+gelaufener Kurs nie so sauber ist wie ein echter Segelkurs, nicht
+ernst nehmen für die Auswertung.
+
 ---
 
-## 3. Heute NICHT sinnvoll testbar (windabhängig, nicht auf dem Platz)
-
-Diese Punkte aus `PROJEKT_STATUS.md` brauchen echtes Segeln mit Wind —
-auf dem Fussballplatz absichtlich auslassen, nicht als "kaputt" werten:
-
-- **Boots-Kalibrierung / Wendewinkel** (Wind-Tab, Kalibrierungsmodus) —
-  braucht echten Am-Wind-Kurs unter Segeln
-- **Vorwind-Winkel-Lernen** (Halse-Erkennung) — genauso windabhängig
-
-## 4. Bekannter offener Punkt, den man am Rand mittesten könnte
+## 3. Bekannter offener Punkt, den man am Rand mittesten könnte
 
 - **PMU-Power-Taste als Deep-Sleep-Aufwach-Quelle** ist auf der S3
   nachweislich kaputt (weckt sofort wieder auf), Fix bisher nur auf
@@ -141,7 +176,7 @@ auf dem Fussballplatz absichtlich auslassen, nicht als "kaputt" werten:
 
 ---
 
-## 5. Nach dem Test
+## 4. Nach dem Test
 
 - [ ] Setup-Tab → "Log teilen" → CSV per Mail/Drive sichern
 - [ ] Auffälligkeiten (Absturz, falsches Verhalten, ungefähre Uhrzeit)
