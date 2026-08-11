@@ -162,6 +162,29 @@ Lift/Header"-Meldungen beim Laufen — normale Folge davon, dass ein
 gelaufener Kurs nie so sauber ist wie ein echter Segelkurs, nicht
 ernst nehmen für die Auswertung.
 
+### 2g. See-Geofence (`logic/LakeGeofenceEngine.kt`)
+
+Rein distanzbasiert (Abstand zum nächsten Kreis der Geofence-Kette),
+läuft aber **nur während der Trainingsmodus aktiv ist** (Training-Tab
+≠ "Aus"). Automatische See-Erkennung (Overpass/OSM) ergibt auf einem
+Fussballplatz keinen Sinn — stattdessen die manuelle Zeichnen-Funktion
+nutzen, die im Repo ohnehin für Seen ohne OSM-Daten gedacht ist.
+
+- [ ] Training-Tab → "See-Grenze auf Karte einzeichnen" → kleine Grenze
+      um einen Teil des Platzes antippen (z. B. nur einen Strafraum,
+      ≥ 3 Punkte) → "Fertig", neue Kreis-Kette erscheint
+- [ ] Training-Tab: einen Modus ≠ "Aus" starten (Tack-only reicht,
+      Geofence-Check läuft nur bei aktivem Training)
+- [ ] Vom Mittelpunkt der gezeichneten Fläche langsam Richtung Rand
+      rauslaufen — bei ~80 % des jeweiligen Kreisradius: Vibration +
+      rote Statuszeile "See-Rand-Warnung!"
+- [ ] Am Rand stehen bleiben/weiter aussen bleiben (> 80 %) — Warnung
+      wiederholt sich alle ~15 s, kein Dauer-Alarm
+- [ ] Zurück Richtung Mitte laufen — Warnung verschwindet erst unter
+      ~65 % (Hysterese), nicht schon direkt unter 80 %
+- [ ] Training-Tab auf "Aus" stellen, ausserhalb der Grenze bleiben —
+      keine weiteren Warnungen mehr (Geofence-Check pausiert komplett)
+
 ---
 
 ## 3. Bekannter offener Punkt, den man am Rand mittesten könnte
