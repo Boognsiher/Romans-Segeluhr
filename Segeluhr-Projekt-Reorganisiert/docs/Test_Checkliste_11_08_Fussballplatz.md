@@ -185,6 +185,35 @@ nutzen, die im Repo ohnehin für Seen ohne OSM-Daten gedacht ist.
 - [ ] Training-Tab auf "Aus" stellen, ausserhalb der Grenze bleiben —
       keine weiteren Warnungen mehr (Geofence-Check pausiert komplett)
 
+### 2h. Kommandiertes Manöver + Score (`logic/TrainingEngine.kt`)
+
+**Nicht zu verwechseln mit dem geplanten IMU-Manöver-Tracking** (siehe
+`docs/Erweiterung_Manoever_Performance_Tracking.md` — Status dort
+"KONZEPT", keine Codezeile existiert). Das hier ist der bestehende,
+bereits fertig gebaute Original-Spezifikations-Mechanismus, rein
+GPS-/Speed-basiert, kein IMU/Gesten-Sensor nötig:
+
+- [ ] Training-Tab → Modus "Wenden" oder "Halsen" (oder "Race") starten
+- [ ] Ruhigen Kurs halten, bis App zufällig kommandiert: "Jetzt
+      WENDEN!"/"Jetzt HALSEN!" (Vibration)
+- [ ] Manöver ausführen: Kursänderung ≥ 15° löst "Drehung erkannt" aus,
+      erneuter ruhiger Kurs (≥ 15° von der Ausgangsrichtung entfernt)
+      beendet die Messung
+- [ ] App zeigt "Manöver abgeschlossen — Score X" (0–100, `100 −
+      Geschwindigkeitsverlust×2 − Überzeit×3`, Überzeit ab 5 s Dauer)
+- [ ] Manöver-Log (Training-Tab) zeigt den neuen Eintrag mit Dauer,
+      Geschwindigkeitsverlust % und Score
+- [ ] Einmal bewusst zu spät/gar nicht reagieren (60 s Timeout) →
+      "Manöver verpasst.", kein Log-Eintrag, neuer Kommando-Timer startet
+- [ ] Mehrere Manöver hintereinander → Log füllt sich (Ringpuffer, zeigt
+      die letzten 20)
+
+**Erwartbare Nebenwirkung, kein Bug:** zu Fuss simulierte Geschwindigkeitsverluste
+beim Abbiegen fallen meist deutlich grösser aus als beim echten Segeln
+(Gehen/Joggen bremst in eine Kurve stärker ab als ein gleitendes Boot) —
+niedrige Scores heute Abend sind also kein Hinweis auf einen Bug in der
+Score-Formel.
+
 ---
 
 ## 3. Bekannter offener Punkt, den man am Rand mittesten könnte
