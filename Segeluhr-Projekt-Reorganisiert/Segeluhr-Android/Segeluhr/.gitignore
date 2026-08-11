@@ -1,0 +1,19 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# Android Studio project-level idea files (keep shared settings out of noise)
+.idea/*
+!.idea/.gitignore
+!.idea/vcs.xml
+
+# Gradle wrapper / build outputs
+**/build/
+**/.gradle/
