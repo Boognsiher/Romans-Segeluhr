@@ -214,6 +214,57 @@ beim Abbiegen fallen meist deutlich grösser aus als beim echten Segeln
 niedrige Scores heute Abend sind also kein Hinweis auf einen Bug in der
 Score-Formel.
 
+### 2i. Start-Countdown (`logic/StartCountdownEngine.kt`)
+
+Reiner Timer, **komplett ohne GPS** — überall testbar, auch drinnen falls
+zeitlich knapp. Das ist die eigentliche "Uhr" der Segeluhr und läuft am
+Samstag im Ernstfall genauso.
+
+- [ ] Normal-Tab: Countdown starten (5:00)
+- [ ] Bei 4:00 und bei 1:00: Vibrationssignal, Anzeige zählt weiter
+      korrekt runter
+- [ ] Bei 0:00: starkes Signal (Start), Anzeige wechselt automatisch auf
+      Race-Timer ("+m:ss", zählt jetzt hoch statt runter)
+- [ ] "Sync auf nächste Minute" während der COUNTDOWN-Phase antippen →
+      Restzeit springt auf die nächste volle Minute runter (zum
+      Angleichen an einen gehörten Startschuss)
+- [ ] Reset/Abbrechen während des Countdowns → zurück in den Ausgangszustand,
+      kein hängender Timer
+
+### 2j. Competition-Modus End-to-End (`logic/CompetitionEngine.kt`)
+
+**Der eigentliche Samstag-Testfall.** Aktiviert sich automatisch, sobald
+der Countdown oben 0:00 erreicht (`onRaceStart`) — läuft unabhängig vom
+Training-Tab. Nutzt den in 2f simulierten Wendewinkel/Vorwind-Winkel.
+
+- [ ] Vor dem Start: Wind bereits kalibriert (siehe 2f) — Competition
+      nutzt `closehauledAngleDeg`/`downwindAngleDeg` des aktiven
+      Boots-Profils für die Kurs-Empfehlungen
+- [ ] Optional: Luvbake (mark1) und Entlastungsboje (mark2) als
+      Wegpunkte setzen (z. B. zwei Punkte auf dem Platz) — einmal MIT
+      und einmal OHNE testen, um beide Modi (echte Bake vs. "geschätzt
+      gegen den Wind") abzudecken
+- [ ] Countdown durchlaufen lassen (2i) — bei 0:00 aktiviert sich
+      Competition automatisch: Leg "Luvbake"/"Luvtonne (geschätzt)",
+      Runde 0
+- [ ] Auf die Luvbake bzw. den geschätzten Luvtonnen-Kurs zusteuern,
+      Wende-Empfehlung beobachten
+- [ ] Luvbake runden: < 20 m automatisch, 20–150 m löst dasselbe
+      Rückfrage-Banner wie in 2c/2h aus → je nach Entlastungsboje
+      entweder "weiter zur Entlastungsboje" oder direkt "Vorwind-Schlag"
+- [ ] Falls Entlastungsboje gesetzt: dorthin laufen — < 20 m rundet hier
+      IMMER automatisch (kein Rückfrage-Banner auf diesem Leg) → weiter
+      zu Vorwind
+- [ ] Vorwind-Leg: kein Wegpunkt, Kurs wird geschätzt (Wind ± gelernter
+      Vorwind-Winkel aus 2f), aktuell gefahrene Gybe-Seite bleibt erhalten
+- [ ] Kurswechsel zurück Richtung Amwind laufen → automatische Rundung
+      (kein Banner, da kein Wegpunkt), Rundenzähler +1, zurück ins
+      Luvbake-Leg
+- [ ] Mindestens 2 volle Runden fahren, Rundenzähler in der UI prüfen
+- [ ] Einmal bewusst gleichzeitig Training-Tab UND Competition aktiv
+      lassen — beide sollten unabhängig nebeneinander laufen, ohne sich
+      gegenseitig zu stören (siehe Klassendoku)
+
 ---
 
 ## 3. Bekannter offener Punkt, den man am Rand mittesten könnte
