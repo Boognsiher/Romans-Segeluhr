@@ -154,6 +154,12 @@ fun WaypointRow(
     coordText: String,
     onSet: () -> Unit,
     onClear: () -> Unit,
+    // NEU (12.08.2026, siehe docs/Erweiterung_Boje_Kartenauswahl.md):
+    // optionale Alternative zu onSet (immer aktuelle GPS-Position) — zeigt
+    // bei Nicht-null einen zusätzlichen "Karte"-Button, der eine
+    // Kartenauswahl (WaypointMapPickScreen) öffnet. Default null lässt alle
+    // bestehenden Aufrufstellen (See-Kreise, Rand erfassen) unverändert.
+    onSetFromMap: (() -> Unit)? = null,
 ) {
     Row(
         Modifier
@@ -168,6 +174,10 @@ fun WaypointRow(
         }
         Row {
             OutlinedButton(onClick = onSet) { Text("Setzen", fontSize = 12.sp) }
+            if (onSetFromMap != null) {
+                Spacer(Modifier.width(6.dp))
+                OutlinedButton(onClick = onSetFromMap) { Text("Karte", fontSize = 12.sp) }
+            }
             Spacer(Modifier.width(6.dp))
             IconButton(onClick = onClear) { Text("×", color = TextDim, fontSize = 18.sp) }
         }

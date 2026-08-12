@@ -31,6 +31,19 @@ private enum class Tab(val label: String) {
     NORMAL("Normal"), START("Start"), WIND("Wind"), TRAINING("Training"), LOG("Log"), SETUP("Setup"),
 }
 
+/**
+ * Anzeigetext für WaypointMapPickScreen (siehe
+ * docs/Erweiterung_Boje_Kartenauswahl.md) — dieselben Labels wie in den
+ * jeweiligen WaypointRow-Aufrufen (TrainingScreen.kt/SetupScreen.kt).
+ */
+private fun waypointLabelFor(key: String): String = when (key) {
+    "buoy1" -> "Boje 1"
+    "buoy2" -> "Boje 2"
+    "competitionMark1" -> "Luvbake (Hauptbake)"
+    "competitionMark2" -> "Entlastungsboje (Halbwind)"
+    else -> "Wegpunkt"
+}
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: SegeluhrViewModel by viewModels()
@@ -144,6 +157,23 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
         return
     }
 
+    // Kartenauswahl für einen einzelnen Wegpunkt (siehe
+    // docs/Erweiterung_Boje_Kartenauswahl.md) — gleiches Ersetzungsmuster
+    // wie lakeDrawModeActive oben, nur pro Wegpunkt-Key.
+    val waypointMapPickKey = state.waypointMapPickKey
+    if (waypointMapPickKey != null) {
+        val fix = state.gpsFix
+        WaypointMapPickScreen(
+            label = waypointLabelFor(waypointMapPickKey),
+            startCenter = if (fix.lat != null && fix.lon != null) {
+                com.segeluhr.app.core.GeoPoint(fix.lat, fix.lon)
+            } else null,
+            onFinish = viewModel::finishWaypointMapPick,
+            onCancel = viewModel::cancelWaypointMapPick,
+        )
+        return
+    }
+
     var selectedTab by remember { mutableStateOf(Tab.NORMAL) }
 
     Scaffold(
@@ -214,6 +244,7 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onAutoDetectLake = viewModel::autoDetectLake,
                     onRemoveLakeCircle = viewModel::removeLakeCircle,
                     onStartLakeDrawing = viewModel::startLakeDrawing,
+                    onSetWaypointFromMap = viewModel::startWaypointMapPick,
                 )
                 Tab.LOG -> LogScreen(state, onClearLog = viewModel::clearManeuverLog)
                 Tab.SETUP -> SetupScreen(
@@ -233,6 +264,7 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onGetDiagnosticsShareUri = viewModel::shareDiagnosticsLogUri,
                     onStopApp = viewModel::stopApp,
                     onStartApp = viewModel::startApp,
+                    onSetWaypointFromMap = viewModel::startWaypointMapPick,
                 )
             }
         }

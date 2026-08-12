@@ -103,6 +103,17 @@ static const char *CHAR_HOME_STATUS_UUID  = "6f6e0006-b5a3-f393-e0a9-e50e24dcca9
 static const char *CHAR_WIND_UUID         = "6f6e0007-b5a3-f393-e0a9-e50e24dcca9e";
 static const char *CHAR_RACE_STATUS_UUID  = "6f6e0008-b5a3-f393-e0a9-e50e24dcca9e";
 static const char *CHAR_TIME_SYNC_UUID    = "6f6e0009-b5a3-f393-e0a9-e50e24dcca9e";
+// NEU (12.08.2026, siehe BleProtocol.CHAR_WAYPOINTS_STATUS_UUID)
+static const char *CHAR_WAYPOINTS_STATUS_UUID = "6f6e000a-b5a3-f393-e0a9-e50e24dcca9e";
+
+// Bit-Zuordnung fuer WaypointsStatusPacket, siehe BleProtocol.WaypointSetFlag
+// (eigene, kompakte Nummerierung - NICHT 1:1 WaypointId).
+#define WPSET_BUOY1             (1 << 0)
+#define WPSET_BUOY2             (1 << 1)
+#define WPSET_TARGET            (1 << 2)
+#define WPSET_HOME              (1 << 3)
+#define WPSET_COMPETITION_MARK1 (1 << 4)
+#define WPSET_COMPETITION_MARK2 (1 << 5)
 
 // Haptik-Codes (Abschnitt 7 der Spezifikation)
 enum HapticCode {
@@ -153,7 +164,12 @@ enum WaypointId {
 #define GPS_FLAG_BATTERY_LOW (1 << 1)
 #define HOME_FLAG_ACTIVE     (1 << 0)
 #define HOME_FLAG_MANEUVER   (1 << 1)
+// NEU (12.08.2026, Roman-Wunschliste "vor dem naechsten Test", siehe
+// docs/Erweiterung_TWatch_Ultra_NavRedesign.md) - einmaliger Puls vom Handy,
+// siehe onHomeStatusNotify()/BleProtocol.kt HOME_FLAG_ARRIVED-Kommentar.
+#define HOME_FLAG_ARRIVED    (1 << 2)
 #define WIND_FLAG_CALIBRATED (1 << 0)
+#define WIND_FLAG_LIFT        (1 << 1) // siehe BleProtocol.kt WIND_FLAG_LIFT-Kommentar
 #define MANEUVER_FLAG_NEEDED (1 << 0)
 #define MANEUVER_FLAG_IS_TACK (1 << 1)
 // Vereinheitlichte Bojen-Rundungserkennung (siehe
@@ -181,6 +197,10 @@ struct HomeData {
     bool maneuverNeeded = false;
     int etaMinutes = -1;     // -1 = keine ETA
     uint32_t distanceTraveledM = 0; // Session-Gesamtstrecke vom Handy, unabhängig vom Heimweg-Modus
+    // Nav-Tab-Redesign (11.08.2026, siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md):
+    // "Speed zum Ziel", 0x7FFF vom Handy = keine VMC verfügbar -> haveVmc=false.
+    double vmcKn = 0;
+    bool haveVmc = false;
     bool haveData = false;
 } homeData;
 
@@ -188,6 +208,9 @@ struct WindData {
     double dirDeg = -1;      // -1 = nicht kalibriert
     bool calibrated = false;
     double trendDeg = 0;
+    // Nav-Tab-Redesign: -1=unbekannt (kein COG/unkalibriert), 0=Header, 1=Lift
+    // (siehe BleProtocol.kt WIND_FLAG_LIFT-Kommentar für die Konvention).
+    int liftState = -1;
     bool haveData = false;
 } windData;
 
@@ -201,6 +224,9 @@ struct RaceData {
     // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): "Boje noch
     // nicht erreicht — trotzdem als gerundet werten?" steht offen.
     bool roundingConfirmPending = false;
+    // Nav-Tab-Redesign: "Speed zum Ziel" zur aktuellen Competition-Marke.
+    double vmcKn = 0;
+    bool haveVmc = false;
     bool haveData = false;
 } raceData;
 
@@ -252,6 +278,7 @@ static NimBLERemoteCharacteristic *chHaptic = nullptr;
 static NimBLERemoteCharacteristic *chHomeStatus = nullptr;
 static NimBLERemoteCharacteristic *chWind = nullptr;
 static NimBLERemoteCharacteristic *chRaceStatus = nullptr;
+static NimBLERemoteCharacteristic *chWaypointsStatus = nullptr; // NEU 12.08.2026
 
 static volatile bool bleConnected = false;
 static volatile bool doConnect = false;
@@ -269,6 +296,31 @@ static uint32_t lastScanAttemptMs = 0;
 static volatile bool pendingConnectSwitchToSegeln = false;
 static volatile bool screenNeedsRefresh = false;
 static volatile int pendingHapticCode = -1;
+// NEU (12.08.2026, siehe HOME_FLAG_ARRIVED-Kommentar oben): das Handy
+// schickt dieses Bit bewusst nur EINMALIG (Ankunfts-Puls) - onHomeStatusNotify()
+// muss den eigentlichen sendQuickMessageRequest()-Aufruf (fasst Radio/Crypto
+// an) genau wie bei Haptik/LVGL erst im loop()-Task nachholen.
+static volatile bool pendingArrivedNotice = false;
+
+// Fehlalarm-Schutz für die Gesten-Antworten (12.08.2026, siehe ausführliche
+// Klassendoku bei GESTURE_TILT_TARGET_ANGLE_DEG und bei onGestureTiltUp()
+// weiter unten) - Deklarationen bewusst HIER (statt bei den zugehörigen
+// Funktionen), weil triggerHaptic() und onButtonShortPress()/
+// onButtonLongPress() (alle drei früher im File) sie schon brauchen und
+// .ino-Dateien nur Funktions-, keine Variablen-Vorwärtsdeklarationen
+// generieren.
+static unsigned long maneuverGestureSuppressUntilMs = 0;
+static const unsigned long MANEUVER_GESTURE_SUPPRESS_MS = 20000;
+static const uint8_t PENDING_ANSWER_NONE = 0;
+static const uint8_t PENDING_ANSWER_QUICK_JA = 1;
+static const uint8_t PENDING_ANSWER_QUICK_NEIN = 2;
+static const uint8_t PENDING_ANSWER_ROUNDING_CONFIRM = 3;
+static const uint8_t PENDING_ANSWER_ROUNDING_REJECT = 4;
+static uint8_t pendingAnswerKind = PENDING_ANSWER_NONE;
+static unsigned long pendingAnswerAtMs = 0;
+static const unsigned long ANSWER_CONFIRM_WINDOW_MS = 3000;
+static lv_obj_t *pendingAnswerOverlay = nullptr; // gebaut in buildUi()
+static lv_obj_t *lblPendingAnswer = nullptr;
 
 // ============================================================================
 // App-Modus: ALLTAG (Uhrzeit/Wecker/Stoppuhr/Batterie, kein Handy nötig)
@@ -348,18 +400,29 @@ static void onHapticNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t 
 
 static void onHomeStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
     // Seit 10.08.2026 7 Byte statt 3 (neues uint32 distanceTraveledM am Ende,
-    // siehe docs/BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md) - Mindestlänge
-    // dafür auf 7 angehoben. Handy und Uhr müssen für dieses Feld immer
-    // zusammen neu geflasht/gebaut werden, sonst bleibt distanceTraveledM
-    // auf 0 (kürzeres altes Paket würde hier sonst verworfen).
-    if (len < 7) return;
+    // siehe docs/BLE_Protokoll_Ergaenzung_Heimweg_LoRa.md), seit 11.08.2026
+    // 9 Byte (zusaetzlich int16 vmcCkn, siehe BleProtocol.kt-Kommentar) -
+    // Mindestlaenge entsprechend angehoben. Handy und Uhr muessen fuer diese
+    // Felder immer zusammen neu geflasht/gebaut werden, sonst wird ein
+    // kuerzeres altes Paket hier verworfen.
+    if (len < 9) return;
     uint8_t flags = data[0];
     uint16_t eta = rdU16(data + 1);
+    int16_t vmcCkn = rdI16(data + 7);
     homeData.active = (flags & HOME_FLAG_ACTIVE) != 0;
     homeData.maneuverNeeded = (flags & HOME_FLAG_MANEUVER) != 0;
     homeData.etaMinutes = (eta == 0xFFFF) ? -1 : (int)eta;
     homeData.distanceTraveledM = rdU32(data + 3);
+    homeData.haveVmc = (vmcCkn != 0x7FFF);
+    homeData.vmcKn = homeData.haveVmc ? (vmcCkn / 100.0) : 0;
     homeData.haveData = true;
+    // Bewusst ohne eigene Flanken-Erkennung hier - das Handy setzt das Bit
+    // schon nur fuer GENAU ein Notify (siehe SegeluhrViewModel-Ankunftserkennung),
+    // ist also selbst schon der Puls. sendQuickMessageRequest() faengt Radio/
+    // Crypto an -> nur Flag setzen, bleTick() erledigt den echten Versand.
+    if ((flags & HOME_FLAG_ARRIVED) != 0) {
+        pendingArrivedNotice = true;
+    }
     screenNeedsRefresh = true;
 }
 
@@ -371,16 +434,23 @@ static void onWindNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t le
     windData.calibrated = (flags & WIND_FLAG_CALIBRATED) != 0;
     windData.dirDeg = (dirDdeg == 0xFFFF) ? -1 : (dirDdeg / 10.0);
     windData.trendDeg = trendDdeg / 10.0;
+    // liftState nur aussagekraeftig, solange kalibriert - siehe
+    // ViewModel-Berechnung (isLift bleibt dort null ohne COG/Kalibrierung,
+    // WIND_FLAG_LIFT ist dann einfach nicht gesetzt).
+    windData.liftState = windData.calibrated ? ((flags & WIND_FLAG_LIFT) ? 1 : 0) : -1;
     windData.haveData = true;
     screenNeedsRefresh = true;
 }
 
 static void onRaceStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
-    if (len < 5) return;
+    // Seit 11.08.2026 7 Byte statt 5 (zusaetzlich int16 vmcCkn, siehe
+    // BleProtocol.kt-Kommentar).
+    if (len < 7) return;
     raceData.raceState = data[0];
     uint16_t cd = rdU16(data + 1);
     uint8_t maneuverFlags = data[3];
     uint8_t leg = data[4];
+    int16_t vmcCkn = rdI16(data + 5);
     raceData.countdownSeconds = (cd == 0xFFFF) ? -1 : (int)cd;
     raceData.maneuverNeeded = (maneuverFlags & MANEUVER_FLAG_NEEDED) != 0;
     raceData.isTack = (maneuverFlags & MANEUVER_FLAG_IS_TACK) != 0;
@@ -388,75 +458,88 @@ static void onRaceStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, siz
     // Vereinheitlichte Bojen-Rundungserkennung (siehe
     // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md).
     raceData.roundingConfirmPending = (maneuverFlags & MANEUVER_FLAG_ROUNDING_CONFIRM_PENDING) != 0;
+    raceData.haveVmc = (vmcCkn != 0x7FFF);
+    raceData.vmcKn = raceData.haveVmc ? (vmcCkn / 100.0) : 0;
     raceData.haveData = true;
     screenNeedsRefresh = true;
 }
 
+// NEU (12.08.2026, siehe BleProtocol.CHAR_WAYPOINTS_STATUS_UUID/WPSET_*-Defines
+// oben): faerbt die "X setzen"-Buttons im Menue-Tab gruen ein, sobald die
+// jeweilige Koordinate tatsaechlich beim Handy angekommen/persistiert ist -
+// menuScreenUpdate() liest diese Bits.
+static uint8_t waypointsSetFlags = 0;
+static bool haveWaypointsStatusData = false;
+
+static void onWaypointsStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
+    if (len < 1) return;
+    waypointsSetFlags = data[0];
+    haveWaypointsStatusData = true;
+    screenNeedsRefresh = true;
+}
+
 /**
- * Automatische Bildschirm-Priorisierung (Erweiterung, siehe
- * docs/Erweiterung_TWatch_S3_AutoFocus.md): die Uhr steckt beim Segeln in
- * einem wasserdichten Sack, Touch-Bedienung ist dort nicht möglich. Statt
- * manuell zu wischen, zeigt die Uhr von selbst den gerade wichtigsten
- * Screen. Reihenfolge (wichtigstes zuerst):
- *   1) Manöver empfohlen (zeitkritisch)
- *   2) Countdown läuft
- *   3) Heimweg aktiv
- *   4) Nav (ruhiger Standard)
- * Wind/Menü bleiben nur per manuellem Wisch erreichbar (z.B. an Land vor
- * dem Versiegeln der Uhr).
+ * Bugfix/Ersetzung 11.08.2026 (Roman-Wunsch, siehe
+ * docs/Erweiterung_TWatch_Ultra_NavRedesign.md): die bisherige
+ * Zwangsumschaltung (siehe Git-Historie/Erweiterung_TWatch_S3_AutoFocus.md)
+ * hat bei jedem zeitkritischen Zustand den Tab gewechselt, auch wenn der
+ * Nutzer gerade bewusst woanders war ("Bedienkomfort" wurde absichtlich
+ * der Sicherheit untergeordnet - in der Praxis aber als bevormundend
+ * empfunden). ERSETZT durch zwei sanftere Signale, Tab-Wahl bleibt IMMER
+ * frei:
+ *   1) autoFocusTick(): faerbt den Tab-Button eines Tabs mit "aktivem"
+ *      Zustand gruen ein (Countdown laeuft, Heimweg aktiv, Manoever/
+ *      Rueckfrage offen) - rein informativ, kein Wechsel.
+ *   2) showCommandOverlay() (aufgerufen aus triggerHaptic(), siehe dort):
+ *      zeigt ein neues Kommando (z.B. "WENDE!") 5s als Overlay ueber dem
+ *      GERADE AKTIVEN Screen, blendet sich danach von selbst wieder aus -
+ *      der Nutzer bleibt auf seinem Screen, verpasst das Kommando aber nicht.
  */
-// Merkt sich den zuletzt erzwungenen "zeitkritischen" Tab (-1 = keiner) --
-// für die Flankenerkennung in autoFocusTick() unten.
-static int lastAutoFocusPriorityTab = -1;
+static void setTabActiveVisual(lv_obj_t *tabBar, int index, bool active) {
+    if (tabBar == nullptr) return;
+    lv_obj_t *btn = lv_obj_get_child(tabBar, index);
+    if (btn == nullptr) return;
+    lv_obj_set_style_text_color(btn, active ? lv_color_hex(0x30D060) : lv_color_hex(0xFFFFFF), 0);
+}
 
 static void autoFocusTick() {
     if (appMode != MODE_SEGELN || tabview == nullptr) return;
+    lv_obj_t *tabBar = lv_tabview_get_tab_bar(tabview);
 
-    int priorityTab = -1; // -1 = gerade kein zeitkritischer Zustand aktiv
-    // Vereinheitlichte Bojen-Rundungserkennung (siehe
-    // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): genauso
-    // zeitkritisch wie ein empfohlenes Manöver - der Auto-Timeout läuft,
-    // die Rückfrage soll nicht unbemerkt hinter Wind/Menü verschwinden.
-    if (raceData.haveData && (raceData.maneuverNeeded || raceData.roundingConfirmPending)) {
-        priorityTab = 4; // tabManeuver
-    } else if (raceData.haveData && raceData.raceState == 1 /* COUNTDOWN */) {
-        priorityTab = 3; // tabCountdown
-    } else if (homeData.haveData && homeData.active) {
-        priorityTab = 2; // tabHome
-    }
+    bool maneuverActive = raceData.haveData && (raceData.maneuverNeeded || raceData.roundingConfirmPending);
+    bool countdownActive = raceData.haveData && raceData.raceState == 1 /* COUNTDOWN */;
+    bool homeActive = homeData.haveData && homeData.active;
 
-    int activeTab = (int)lv_tabview_get_tab_act(tabview);
-
-    if (priorityTab != -1) {
-        // Zeitkritisch -> IMMER durchsetzen, überschreibt auch manuelle
-        // Navigation (Sicherheit/Rechtzeitigkeit geht vor Bedienkomfort).
-        if (activeTab != priorityTab) {
-            lv_tabview_set_active(tabview, priorityTab, LV_ANIM_ON);
-        }
-    } else if (lastAutoFocusPriorityTab != -1) {
-        // Bugfix 06.08.2026: gerade eben noch zeitkritisch, jetzt nicht mehr
-        // -> EINMALIG auf Nav als "ruhigen Standard" zurückfallen (Flanke).
-        // Vorher wurde das bei JEDEM Tick erzwungen (~1x/s durch echte
-        // BLE-Notifies vom Handy), auch wenn der Nutzer längst manuell zu
-        // Wind/Heim/CD/Man/Menu gewechselt hatte -> alle Tabs ausser Nav
-        // waren praktisch unbedienbar, sprangen ständig zurück.
-        if (activeTab != 0) {
-            lv_tabview_set_active(tabview, 0, LV_ANIM_ON);
-        }
-    }
-    // Wenn priorityTab == -1 UND vorher auch schon -1 war: nichts tun, der
-    // Nutzer darf frei zwischen allen sechs Tabs navigieren.
-    lastAutoFocusPriorityTab = priorityTab;
+    setTabActiveVisual(tabBar, 4, maneuverActive);  // tabManeuver
+    setTabActiveVisual(tabBar, 3, countdownActive); // tabCountdown
+    setTabActiveVisual(tabBar, 2, homeActive);      // tabHome
 }
 
-/** Sendet einen CMD_*-Steuerbefehl ans Handy (optional +1 Byte Payload, z.B. Waypoint-ID). */
+/**
+ * Sendet einen CMD_*-Steuerbefehl ans Handy (optional +1 Byte Payload, z.B.
+ * Waypoint-ID).
+ *
+ * Bugfix 12.08.2026 (Roman-Feedback: "Home setzen" auf der Uhr tat sichtbar
+ * nichts): writeValue()s dritter Parameter war `false` ("Write ohne
+ * Antwort"), aber CHAR_CONTROL_UUID ist auf der Handy-Seite
+ * (BleGattServerManager.kt) nur mit PROPERTY_WRITE/PERMISSION_WRITE
+ * deklariert - KEIN PROPERTY_WRITE_NO_RESPONSE. writeValue() mit
+ * response=false wartet nie auf ein ATT-Acknowledgement und meldet schon
+ * dann Erfolg, wenn NimBLE das Paket nur LOKAL erfolgreich losgeschickt hat
+ * (siehe NimBLERemoteValueAttribute::writeValue() - der `!response`-Zweig
+ * ruft nur ble_gattc_write_no_rsp_flat() auf und geht sofort zu "Done") -
+ * ob das Handy es wegen der fehlenden Eigenschaft tatsächlich annimmt, ist
+ * stack-abhängig und war hier offenbar nicht der Fall. Fix: `true`
+ * (Write MIT Antwort), passend zur deklarierten Handy-Eigenschaft - blockiert
+ * kurz bis zum Ack, für einzelne Tastendrücke irrelevant.
+ */
 static void sendControlCommand(uint8_t cmd, int payloadByte = -1) {
     if (!bleConnected || chControl == nullptr) return;
     uint8_t buf[2];
     buf[0] = cmd;
     size_t n = 1;
     if (payloadByte >= 0) { buf[1] = (uint8_t)payloadByte; n = 2; }
-    chControl->writeValue(buf, n, false);
+    chControl->writeValue(buf, n, true);
 }
 
 // ---- Verbindungs-Callback ----
@@ -472,7 +555,7 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     void onDisconnect(NimBLEClient *pClient, int reason) override {
         Serial.printf("[BLE] Verbindung getrennt (Reason %d)\n", reason);
         bleConnected = false;
-        chGps = chBattery = chControl = chHaptic = chHomeStatus = chWind = chRaceStatus = nullptr;
+        chGps = chBattery = chControl = chHaptic = chHomeStatus = chWind = chRaceStatus = chWaypointsStatus = nullptr;
         // Kein sofortiger Rückfall nach Alltag — kurze Dropouts (siehe
         // SEGELN_FALLBACK_GRACE_MS) werden toleriert, appModeTick() im
         // loop() übernimmt den eigentlichen Rückfall nach Ablauf der Frist.
@@ -530,6 +613,7 @@ static bool connectToServer() {
     subscribe(svc, CHAR_HOME_STATUS_UUID, &chHomeStatus, onHomeStatusNotify);
     subscribe(svc, CHAR_WIND_UUID, &chWind, onWindNotify);
     subscribe(svc, CHAR_RACE_STATUS_UUID, &chRaceStatus, onRaceStatusNotify);
+    subscribe(svc, CHAR_WAYPOINTS_STATUS_UUID, &chWaypointsStatus, onWaypointsStatusNotify);
     chControl = svc->getCharacteristic(CHAR_CONTROL_UUID);
 
     // Zeit-Sync: einmalig auslesen und RTC stellen (siehe
@@ -583,6 +667,10 @@ static void bleTick() {
         pendingHapticCode = -1;
         triggerHaptic(code);
     }
+    if (pendingArrivedNotice) {
+        pendingArrivedNotice = false;
+        sendQuickMessageRequest(QuickQuestion::BIN_ZURUECK);
+    }
     if (screenNeedsRefresh) {
         screenNeedsRefresh = false;
         refreshActiveScreen();
@@ -596,6 +684,18 @@ static void bleTick() {
 // TI-DRV2605-Effektbibliothek (Auswahl), angenähert an die Timings aus
 // VibrationPatterns.kt. Bis zu 8 Waveform-Slots können verkettet werden,
 // dazwischen 0 = Ende der Sequenz.
+
+// Kommando-Overlay (siehe autoFocusTick()-Klassendoku weiter unten): zeigt
+// neue Kommandos (Wende/Halse/Start/Rundung) 5s lang ueber dem gerade
+// aktiven Screen, statt wie bisher fest dorthin umzuschalten. Globals hier
+// (vor triggerHaptic()) statt bei den restlichen LVGL-UI-Globals weiter
+// unten, weil showCommandOverlay()/triggerHaptic() sie schon frueher im
+// Compile-Ablauf brauchen (.ino-Dateien generieren nur Funktions-, keine
+// Variablen-Vorwaertsdeklarationen).
+static lv_obj_t *lblCommandOverlay = nullptr;
+static bool commandOverlayActive = false;
+static unsigned long commandOverlayShownMs = 0;
+static const unsigned long COMMAND_OVERLAY_DURATION_MS = 5000;
 
 static void playWaveformSeq(std::initializer_list<uint8_t> effects) {
     int slot = 0;
@@ -614,6 +714,28 @@ static void playWaveformSeq(std::initializer_list<uint8_t> effects) {
 // einzigen Stellschrauben für "stärker" sind: die kräftigsten ROM-Effekte
 // (die "100%"-Varianten) UND möglichst lange/volle Ketten über alle 8
 // Waveform-Slots, statt kurzer Einzel-Klicks.
+// Siehe autoFocusTick()-Klassendoku: ersetzt die alte Zwangsumschaltung.
+// Aufgerufen aus triggerHaptic() unten - das laeuft bereits im loop()-Task
+// (siehe dortiger Kommentar "erst im loop()-Task ausführen"), LVGL-Aufrufe
+// hier sind also sicher, kein Umweg über ein Flag wie bei den NimBLE-
+// Callbacks nötig.
+static void showCommandOverlay(const char *text) {
+    if (lblCommandOverlay == nullptr) return;
+    lv_label_set_text(lblCommandOverlay, text);
+    lv_obj_clear_flag(lblCommandOverlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(lblCommandOverlay);
+    commandOverlayActive = true;
+    commandOverlayShownMs = millis();
+}
+
+static void commandOverlayTick() {
+    if (!commandOverlayActive) return;
+    if (millis() - commandOverlayShownMs >= COMMAND_OVERLAY_DURATION_MS) {
+        lv_obj_add_flag(lblCommandOverlay, LV_OBJ_FLAG_HIDDEN);
+        commandOverlayActive = false;
+    }
+}
+
 void triggerHaptic(int code) {
     switch (code) {
         case HAPTIC_STEP1:        playWaveformSeq({5, 5});                      break; // 2x Strong Buzz
@@ -621,13 +743,25 @@ void triggerHaptic(int code) {
         case HAPTIC_HEADER3:      playWaveformSeq({1, 1, 1});                   break; // 3x Strong Click
         case HAPTIC_ERROR4:       playWaveformSeq({5, 5, 5, 5});                break; // 4x Strong Buzz
         case HAPTIC_LAKE_WARN5:   playWaveformSeq({5, 5, 5});                   break; // 3x Strong Buzz
-        case HAPTIC_ROUNDING6:    playWaveformSeq({1, 1, 1, 1});                break; // 4x Strong Click
-        case HAPTIC_MANEUVER_CMD: playWaveformSeq({5, 5, 5, 5, 5});             break; // 5x Strong Buzz
-        case HAPTIC_START_SIGNAL: playWaveformSeq({5, 5, 5, 5, 5, 5, 5, 5});    break; // volle 8 Slots, längstmöglicher Buzz
+        case HAPTIC_ROUNDING6:    playWaveformSeq({1, 1, 1, 1});
+                                   showCommandOverlay("Boje gerundet!");        break; // 4x Strong Click
+        case HAPTIC_MANEUVER_CMD: playWaveformSeq({5, 5, 5, 5, 5});
+                                   showCommandOverlay(raceData.isTack ? "WENDE!" : "HALSE!");
+                                   // Fehlalarm-Schutz (siehe MANEUVER_GESTURE_SUPPRESS_MS-Doku oben):
+                                   // Wende/Halse steht bevor, Tiller-Extension-Handwechsel ist das
+                                   // groesste bekannte Fehlalarm-Risiko fuer die Ja/Nein-Gesten.
+                                   maneuverGestureSuppressUntilMs = millis() + MANEUVER_GESTURE_SUPPRESS_MS;
+                                   break; // 5x Strong Buzz
+        case HAPTIC_START_SIGNAL: playWaveformSeq({5, 5, 5, 5, 5, 5, 5, 5});
+                                   showCommandOverlay("START!");                break; // volle 8 Slots, längstmöglicher Buzz
         // Vereinheitlichte Bojen-Rundungserkennung (siehe
         // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md) — bewusst
         // eigenes Muster (3x Buzz), unterscheidbar von HAPTIC_ROUNDING6
         // (4x Click, "Boje gerundet") - hier ist erst eine Rückfrage offen.
+        // Kein showCommandOverlay() hier: die Rückfrage steht schon fest auf
+        // tabManeuver ("Boje hier?", siehe maneuverScreenUpdate()) UND ist
+        // jetzt zusätzlich grün markiert (autoFocusTick()) - ein 5s-Overlay
+        // würde die Ja/Nein-Antwortzeit nur verkürzen wirken, ohne Mehrwert.
         case HAPTIC_ROUNDING_CONFIRM_NEEDED: playWaveformSeq({5, 5, 5});        break; // 3x Strong Buzz
         default: break;
     }
@@ -834,6 +968,9 @@ static void answerRoundingConfirm(bool confirm) {
 
 void onButtonShortPress() {
     Serial.println("[Taster] kurz");
+    // Bricht eine per Geste erkannte, noch nicht gesendete Antwort ab (siehe
+    // Bestätigungsfenster-Kommentar oben) - Vorrang vor allem anderen.
+    if (pendingAnswerKind != PENDING_ANSWER_NONE) { cbCancelPendingAnswer(nullptr); return; }
     if (haveIncomingQuestion) {
         // Fallback, falls Gestenerkennung unzuverlässig ist:
         sendQuickAnswer(QuickAnswer::JA);
@@ -852,6 +989,7 @@ void onButtonShortPress() {
 
 void onButtonLongPress() {
     Serial.println("[Taster] lang");
+    if (pendingAnswerKind != PENDING_ANSWER_NONE) { cbCancelPendingAnswer(nullptr); return; }
     if (haveIncomingQuestion) {
         // Fallback, falls Gestenerkennung unzuverlässig ist:
         sendQuickAnswer(QuickAnswer::NEIN);
@@ -863,16 +1001,81 @@ void onButtonLongPress() {
         return;
     }
     // Sonst: ausgewählte Frage als QuickMessageRequest senden
+    sendQuickMessageRequest(selectedQuestion);
+}
+
+// Ausgelagert aus onButtonLongPress() (12.08.2026, siehe HOME_FLAG_ARRIVED-
+// Kommentar oben) - derselbe Versandcode wird jetzt auch vom automatischen
+// "BIN ZURUECK!"-Trigger bei Heimweg-Ankunft genutzt (bleTick(), siehe dort).
+// Fasst Radio/Crypto an (sendEncrypted()) - NUR aus dem loop()-Task aufrufen,
+// nie direkt aus einem NimBLE-Callback (siehe Klassendoku bei den
+// pendingHapticCode/pendingArrivedNotice-Flags weiter oben).
+void sendQuickMessageRequest(QuickQuestion q) {
     QuickMessageRequest req;
     req.sequence = quickMsgSequence++;
     req.sender = DeviceId::BOOT;
-    req.question = selectedQuestion;
+    req.question = q;
     sendEncrypted((uint8_t *)&req, sizeof(req));
     waitingForAnswer = true;
     pendingRequestSequence = req.sequence;
     pendingRequestSentMillis = millis();
     Serial.printf("[Quick-Msg TX] Frage gesendet: seq=%d %s\n", req.sequence, quickQuestionText(req.question));
     updateQuickOverlay();
+}
+
+// ---- Bestätigungsfenster für GESTEN-Antworten (12.08.2026, Roman-Wunsch:
+// Schutz gegen falsche Antworten durch Fehlgesten) ----
+// NUR für den Gesten-Pfad (onGestureTiltUp()/onGestureShake() unten) - der
+// Taster-Fallback (onButtonShortPress()/onButtonLongPress()) bleibt bewusst
+// sofort/ungedrosselt, ein deklarierter Tastendruck ist kein
+// Fehlalarm-Risiko. Eine erkannte Geste wird ANSWER_CONFIRM_WINDOW_MS lang
+// als "Antwort: JA/NEIN" angezeigt statt sofort gesendet - antippen der
+// Anzeige ODER ein Tastendruck während des Fensters bricht ab (siehe
+// onButtonShortPress()/onButtonLongPress()), sonst geht die Antwort nach
+// Ablauf automatisch raus (pendingAnswerTick(), aus loop()). Konstanten/
+// Globals (PENDING_ANSWER_*, pendingAnswerKind, pendingAnswerOverlay, ...)
+// sitzen weit oben bei den anderen frühen Flag-Deklarationen, NICHT hier -
+// triggerHaptic()/onButtonShortPress() (beide vor dieser Stelle im File)
+// brauchen sie schon, und .ino-Dateien generieren nur Funktions-, keine
+// Variablen-Vorwärtsdeklarationen (siehe Kommentar dort).
+
+static void cbCancelPendingAnswer(lv_event_t *e) {
+    if (pendingAnswerKind == PENDING_ANSWER_NONE) return;
+    Serial.println("[Gesten] Erkannte Antwort abgebrochen.");
+    pendingAnswerKind = PENDING_ANSWER_NONE;
+    if (pendingAnswerOverlay != nullptr) lv_obj_add_flag(pendingAnswerOverlay, LV_OBJ_FLAG_HIDDEN);
+    triggerHaptic(HAPTIC_DONE2);
+}
+
+static void queuePendingAnswer(uint8_t kind) {
+    pendingAnswerKind = kind;
+    pendingAnswerAtMs = millis();
+    if (lblPendingAnswer == nullptr || pendingAnswerOverlay == nullptr) return; // UI evtl. noch nicht gebaut
+    const char *text = "";
+    switch (kind) {
+        case PENDING_ANSWER_QUICK_JA:         text = "Antwort: JA\n(antippen zum Abbrechen)"; break;
+        case PENDING_ANSWER_QUICK_NEIN:       text = "Antwort: NEIN\n(antippen zum Abbrechen)"; break;
+        case PENDING_ANSWER_ROUNDING_CONFIRM: text = "Boje: JA, hier\n(antippen zum Abbrechen)"; break;
+        case PENDING_ANSWER_ROUNDING_REJECT:  text = "Boje: NEIN\n(antippen zum Abbrechen)"; break;
+    }
+    lv_label_set_text(lblPendingAnswer, text);
+    lv_obj_clear_flag(pendingAnswerOverlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(pendingAnswerOverlay);
+}
+
+/** Aus loop() aufrufen: sendet eine gewartete Geste-Antwort, sobald das Bestaetigungsfenster abgelaufen ist. */
+static void pendingAnswerTick() {
+    if (pendingAnswerKind == PENDING_ANSWER_NONE) return;
+    if (millis() - pendingAnswerAtMs < ANSWER_CONFIRM_WINDOW_MS) return;
+    uint8_t kind = pendingAnswerKind;
+    pendingAnswerKind = PENDING_ANSWER_NONE;
+    if (pendingAnswerOverlay != nullptr) lv_obj_add_flag(pendingAnswerOverlay, LV_OBJ_FLAG_HIDDEN);
+    switch (kind) {
+        case PENDING_ANSWER_QUICK_JA:         sendQuickAnswer(QuickAnswer::JA);   break;
+        case PENDING_ANSWER_QUICK_NEIN:       sendQuickAnswer(QuickAnswer::NEIN); break;
+        case PENDING_ANSWER_ROUNDING_CONFIRM: answerRoundingConfirm(true);        break;
+        case PENDING_ANSWER_ROUNDING_REJECT:  answerRoundingConfirm(false);       break;
+    }
 }
 
 // ---- Gesten-Antwort (primärer Weg auf dem Boot, siehe Doku Abschnitt 5) ----
@@ -882,16 +1085,30 @@ void onButtonLongPress() {
 // fehlinterpretiert. Bewusst dieselben Gesten wiederverwendet (Roman-Wunsch
 // 10.08.2026, "gestik nicht haptik") statt einer eigenen zweiten
 // Gesten-Zuordnung — haveIncomingQuestion hat Vorrang, falls (unwahrscheinlich)
-// beides gleichzeitig offen wäre.
+// beides gleichzeitig offen wäre. Erkannte Gesten werden NICHT mehr sofort
+// gesendet, sondern über queuePendingAnswer() ins Bestätigungsfenster
+// gelegt (siehe oben) - zwei weitere Fehlalarm-Schutz-Checks davor: laufendes
+// Wende/Halse-Zeitfenster (maneuverGestureSuppressUntilMs) und "schon eine
+// Antwort in der Bestätigung" (kein Doppel-Queue).
 
 void onGestureTiltUp() {
-    if (haveIncomingQuestion) { sendQuickAnswer(QuickAnswer::JA); return; }
-    if (raceData.roundingConfirmPending) { answerRoundingConfirm(true); return; }
+    if (millis() < maneuverGestureSuppressUntilMs) {
+        Serial.println("[Gesten] Ja-Geste ignoriert (kurz nach Wende/Halse, siehe MANEUVER_GESTURE_SUPPRESS_MS).");
+        return;
+    }
+    if (pendingAnswerKind != PENDING_ANSWER_NONE) return; // schon eine Antwort in der Bestaetigung
+    if (haveIncomingQuestion) { queuePendingAnswer(PENDING_ANSWER_QUICK_JA); return; }
+    if (raceData.roundingConfirmPending) { queuePendingAnswer(PENDING_ANSWER_ROUNDING_CONFIRM); return; }
 }
 
 void onGestureShake() {
-    if (haveIncomingQuestion) { sendQuickAnswer(QuickAnswer::NEIN); return; }
-    if (raceData.roundingConfirmPending) { answerRoundingConfirm(false); return; }
+    if (millis() < maneuverGestureSuppressUntilMs) {
+        Serial.println("[Gesten] Nein-Geste ignoriert (kurz nach Wende/Halse, siehe MANEUVER_GESTURE_SUPPRESS_MS).");
+        return;
+    }
+    if (pendingAnswerKind != PENDING_ANSWER_NONE) return;
+    if (haveIncomingQuestion) { queuePendingAnswer(PENDING_ANSWER_QUICK_NEIN); return; }
+    if (raceData.roundingConfirmPending) { queuePendingAnswer(PENDING_ANSWER_ROUNDING_REJECT); return; }
 }
 
 void checkQuickMessageTimeout() {
@@ -1061,9 +1278,103 @@ static bool klioPatternTrained[2] = {false, false};
 static bool trainingActive = false;
 static uint8_t trainingTarget = GESTURE_ID_JA; // GESTURE_ID_JA oder GESTURE_ID_NEIN
 static unsigned long trainingStartedMs = 0;
-static const unsigned long TRAINING_TIMEOUT_MS = 60000; // Abbruch, falls nie "fertig" gemeldet
+// War 60000 (60s) - laut Bosch-Beispielsketch (BHI260AP_Klio_Selflearning)
+// ist EIN klio.learning()-Aufruf EINE durchgehende Session, die erst endet,
+// wenn Klio selbst "genug gelernt" meldet; es gibt keine erkennbare API, um
+// mehrere spaetere Sessions zu einem Muster zusammenzufuehren (jeder
+// erneute Trainingsaufruf ueberschreibt das vorherige Muster komplett,
+// siehe finalizeGestureTraining()). Das in
+// docs/Erweiterung_Gesten_Training_Klio.md Abschnitt 3 geplante Protokoll
+// (6 Haltungen x 2-3 Wiederholungen) muesste demnach als EINE durchgehende
+// Session gefahren werden, mit Haltungswechseln WAEHREND des Trainings -
+// dafuer war 60s zu knapp bemessen, jetzt 5 Minuten als grosszuegigerer
+// Sicherheitsrahmen (der neue "Abbrechen"-Button auf der Uhr deckt das
+// vorzeitige Beenden ab, dieser Timeout ist nur noch das Sicherheitsnetz
+// gegen ein vergessenes/haengendes Training). **Nicht auf Hardware
+// verifiziert, ob Klio wirklich einen einzelnen langen Multi-Haltungs-Lauf
+// sauber verarbeitet** - im Zweifel beim naechsten Training genau darauf
+// achten, ob die Serial-/Bildschirm-Fortschrittsanzeige waehrend der
+// Haltungswechsel weiterlaeuft oder abbricht.
+static const unsigned long TRAINING_TIMEOUT_MS = 300000;
 
 static Preferences gesturePrefs; // NVS-Namespace "klio" (Muster überleben Neustart)
+
+// On-Watch-Trainings-UI (12.08.2026, Roman-Wunsch: Klio-Training MUSS ohne
+// USB/Laptop moeglich sein - auf einem Einhand-Trapez-Skiff ist ein staendig
+// angesteckter Laptop unrealistisch). Ersetzt/ergaenzt den bisher rein
+// seriellen Weg (TRAIN JA/NEIN, siehe gestureTrainingSerialTick() weiter
+// unten - bleibt als Desktop-Fallback bestehen) um Buttons + Fortschritts-
+// Anzeige im Menue-Tab. lv_msgbox statt eigenem Overlay - gleiches Muster
+// wie cbCompetitionStopRequest() weiter unten (modal, Titel+Text+Footer-
+// Button). lblTrainingProgress wird von onKlioLearningEvent() unten live
+// aktualisiert.
+static lv_obj_t *trainingMsgbox = nullptr;
+static lv_obj_t *lblTrainingStep = nullptr;
+static lv_obj_t *lblTrainingProgress = nullptr;
+
+// Kalibrierungs-Protokoll (12.08.2026, Roman-Feedback "zeigt die Uhr die
+// Taetigkeiten an?" - bisher nein) - 1:1 aus
+// docs/Erweiterung_Gesten_Training_Klio.md Abschnitt 3 (Tabelle) uebernommen,
+// damit am Wasser kein Blick aufs Handy/Papier noetig ist. NICHT als eigene
+// Start/Stop-Phasen gedacht - Klio laeuft laut Befund in 5a der Doku als
+// EINE durchgehende Session weiter, "Naechste Haltung" wechselt nur den
+// angezeigten Hinweistext, ohne das Training neu zu starten.
+static const char *TRAINING_STEPS[] = {
+    "1/6: Trapez, steuernd\nBackbord - 2-3x wiederholen",
+    "2/6: Trapez, steuernd\nSteuerbord - 2-3x wiederholen",
+    "3/6: Im Boot sitzend, steuernd\nBackbord - 2x wiederholen",
+    "4/6: Im Boot sitzend, steuernd\nSteuerbord - 2x wiederholen",
+    "5/6: Schoten bedienen\nBackbord - 2x wiederholen",
+    "6/6: Schoten bedienen\nSteuerbord - 2x wiederholen",
+};
+static const uint8_t TRAINING_STEP_COUNT = 6;
+static uint8_t trainingStepIndex = 0;
+
+static void hideTrainingMsgbox() {
+    if (trainingMsgbox == nullptr) return;
+    lv_msgbox_close(trainingMsgbox);
+    trainingMsgbox = nullptr;
+    lblTrainingStep = nullptr;
+    lblTrainingProgress = nullptr;
+}
+
+static void cbTrainingCancelClicked(lv_event_t *e) {
+    cancelGestureTraining(); // ruft hideTrainingMsgbox() selbst auf, siehe dort
+}
+
+static void cbTrainingNextStep(lv_event_t *e) {
+    if (lblTrainingStep == nullptr) return;
+    trainingStepIndex = (trainingStepIndex + 1) % TRAINING_STEP_COUNT;
+    lv_label_set_text(lblTrainingStep, TRAINING_STEPS[trainingStepIndex]);
+}
+
+static void showTrainingMsgbox(uint8_t target) {
+    trainingStepIndex = 0;
+    trainingMsgbox = lv_msgbox_create(NULL);
+    lv_msgbox_add_title(trainingMsgbox, target == GESTURE_ID_JA ? "Training: JA" : "Training: NEIN");
+
+    lblTrainingStep = lv_msgbox_add_text(trainingMsgbox, TRAINING_STEPS[0]);
+    lv_obj_set_style_text_font(lblTrainingStep, &lv_font_montserrat_24, 0);
+
+    lblTrainingProgress = lv_msgbox_add_text(trainingMsgbox,
+        "Geste jetzt mehrfach gleichmaessig wiederholen.");
+    lv_obj_set_style_text_font(lblTrainingProgress, &lv_font_montserrat_18, 0);
+
+    lv_obj_t *btnNext = lv_msgbox_add_footer_button(trainingMsgbox, "Naechste Haltung");
+    lv_obj_add_event_cb(btnNext, cbTrainingNextStep, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *btnCancel = lv_msgbox_add_footer_button(trainingMsgbox, "Abbrechen");
+    lv_obj_add_event_cb(btnCancel, cbTrainingCancelClicked, LV_EVENT_CLICKED, nullptr);
+}
+
+/** Von den Menue-Buttons aufgerufen - startet Training UND zeigt die Fortschritts-Box, falls das tatsaechlich geklappt hat (BHI260/Klio online). */
+static void startGestureTrainingUi(uint8_t target) {
+    startGestureTraining(target);
+    if (!trainingActive) {
+        showCommandOverlay("Klio nicht verfuegbar");
+        return;
+    }
+    showTrainingMsgbox(target);
+}
 
 // Lokale Platzhalter-Schwellenwerte für den Fallback (sensor-/einheiten-
 // abhängig, siehe QuickMessages.h-Kommentar - deshalb hier und nicht dort
@@ -1076,6 +1387,36 @@ static Preferences gesturePrefs; // NVS-Namespace "klio" (Muster überleben Neus
 static const float GESTURE_TILT_TARGET_ANGLE_DEG = -30.0f; // TODO: weiter kalibrieren
 static const float GESTURE_TILT_TOLERANCE_DEG = 20.0f;     // TODO: weiter kalibrieren
 static const float GESTURE_SHAKE_MIN_AMPLITUDE = 8.0f;    // m/s^2, TODO: auf dem Wasser kalibrieren
+
+// ---- Fehlalarm-Schutz gegen falsche Geste-Antworten (12.08.2026,
+// Roman-Wunsch: "wie schuetzen wir uns vor falschen Antworten, die ich
+// generiere") - drei unabhaengige Bausteine:
+//
+// 1) Klios eigener "count"-Wert (Wiederholungszaehler) wurde bisher komplett
+//    ignoriert (jedes Recognition-Event loeste sofort aus) - jetzt
+//    Mindestwert, siehe onKlioRecognitionEvent(). TODO: auf dem Wasser
+//    kalibrieren, welcher Wert echte Gesten zuverlaessig von Rauschen trennt.
+static const float KLIO_MIN_RECOGNITION_COUNT = 2.0f;
+//
+// 2) Fallback-Tilt-Pfad hatte GAR kein Debounce (ein einzelner Sample ueber
+//    der Schwelle loeste sofort aus) - GESTURE_DEBOUNCE_SAMPLES existierte
+//    zwar schon in QuickMessages.h, wurde aber nirgends verwendet (toter
+//    Code, siehe docs/Uebersicht_Gestensteuerung.md Abschnitt 6). Jetzt in
+//    gestureTick() verdrahtet: erst nach so vielen aufeinanderfolgenden
+//    Samples ueber der Schwelle wird ausgeloest.
+//
+// 3) Groesstes bekanntes Fehlalarm-Risiko laut eigenem Kalibrierungs-
+//    Protokoll (docs/Erweiterung_Gesten_Training_Klio.md Abschnitt 3): die
+//    Tiller-Extension wird bei Wende/Halse explizit "around the back of the
+//    boat" gefuehrt - eine grosse, bewusste Handgelenk-/Armbewegung, die
+//    leicht als Geste fehlinterpretiert wird. Ab dem HAPTIC_MANEUVER_CMD-
+//    Trigger (siehe triggerHaptic()) wird die Gestenauswertung fuer dieses
+//    Fenster ausgesetzt - deckt Vorschlag + wahrscheinliche physische
+//    Ausfuehrung kurz danach ab. TODO: auf dem Wasser kalibrieren, ob 20s
+//    fuer einen Musto-Skiff-Handwechsel reichen/zu lang sind.
+//    (maneuverGestureSuppressUntilMs/MANEUVER_GESTURE_SUPPRESS_MS sitzen
+//    weit oben bei den anderen frühen Flag-Deklarationen - triggerHaptic()
+//    kommt im File vor dieser Stelle und braucht sie schon.)
 
 struct ShakeDetectorState {
     int8_t lastSign = 0;
@@ -1130,6 +1471,8 @@ static void finalizeGestureTraining(int learnIndex) {
     if (!klio.getLearnPattern(patternBuf, &patternSize)) {
         Serial.printf("[Klio] Gelerntes Muster konnte nicht gelesen werden: %s\n", klio.errorToString());
         trainingActive = false;
+        hideTrainingMsgbox();
+        showCommandOverlay("Training fehlgeschlagen");
         restoreRecognitionAfterTraining();
         return;
     }
@@ -1141,6 +1484,8 @@ static void finalizeGestureTraining(int learnIndex) {
     if (!klio.writePattern(targetId, patternBuf, patternSize)) {
         Serial.println("[Klio] Muster schreiben fehlgeschlagen!");
         trainingActive = false;
+        hideTrainingMsgbox();
+        showCommandOverlay("Training fehlgeschlagen");
         restoreRecognitionAfterTraining();
         return;
     }
@@ -1155,6 +1500,10 @@ static void finalizeGestureTraining(int learnIndex) {
     Serial.printf("[Klio] Muster '%s' fertig trainiert und gespeichert (%u Bytes, ueberlebt Neustart).\n",
                   targetName, (unsigned)patternSize);
     Serial.println("[Klio] Kurzer Erkennungstest: Geste jetzt ein paar Mal wiederholen - Ergebnis erscheint hier als '[Klio] Erkannt: ...'.");
+    hideTrainingMsgbox();
+    // "JA"/"NEIN" statt vollem Satz - showCommandOverlay() ist fuer kurze
+    // Schlagworte gedacht (siehe dortige Nutzung bei Wende/Halse/Start).
+    showCommandOverlay(targetId == GESTURE_ID_JA ? "JA trainiert!" : "NEIN trainiert!");
     restoreRecognitionAfterTraining();
 }
 
@@ -1163,12 +1512,21 @@ static void onKlioLearningEvent(SensorBHI260AP_Klio::LeaningChangeReason reason,
     switch (reason) {
         case SensorBHI260AP_Klio::LEARNING_PROGRESSING:
             Serial.printf("[Klio] Trainingsfortschritt: %lu%%\n", (unsigned long)progress);
+            if (lblTrainingProgress != nullptr) {
+                lv_label_set_text_fmt(lblTrainingProgress, "Fortschritt: %lu%%\nGeste weiter gleichmaessig wiederholen.", (unsigned long)progress);
+            }
             break;
         case SensorBHI260AP_Klio::LEARNING_NO_REPETITIVE_ACTIVITY:
             Serial.println("[Klio] Bewegung war nicht wiederholend genug - Geste gleichmaessiger wiederholen und weitermachen.");
+            if (lblTrainingProgress != nullptr) {
+                lv_label_set_text(lblTrainingProgress, "Nicht gleichmaessig genug erkannt -\nGeste bitte regelmaessiger wiederholen.");
+            }
             break;
         case SensorBHI260AP_Klio::LEARNING_NO_SIGNIFICANT:
             Serial.println("[Klio] Zu wenig Bewegung erkannt - Geste deutlicher ausfuehren und weitermachen.");
+            if (lblTrainingProgress != nullptr) {
+                lv_label_set_text(lblTrainingProgress, "Zu wenig Bewegung erkannt -\nGeste bitte deutlicher ausfuehren.");
+            }
             break;
     }
     if (learn_index != SensorBHI260AP_Klio::INVALID_LEARNING_INDEX) {
@@ -1186,6 +1544,15 @@ static void onKlioLearningEvent(SensorBHI260AP_Klio::LeaningChangeReason reason,
 static void onKlioRecognitionEvent(uint8_t pattern_id, float count, void *user_data) {
     Serial.printf("[Klio] Erkannt: Pattern=%u Count=%.1f (Frage offen: %s)\n",
                   pattern_id, count, haveIncomingQuestion ? "ja" : "nein");
+    // Fehlalarm-Schutz (12.08.2026, siehe KLIO_MIN_RECOGNITION_COUNT-Doku
+    // oben) - bisher loeste JEDES Recognition-Event sofort aus, unabhaengig
+    // von count. Bewusst NACH dem Logging (Rohwerte bleiben fuers
+    // Fehlalarm-Testen aus dem Kalibrierungs-Protokoll sichtbar, auch wenn
+    // sie hier unterhalb der Schwelle bleiben).
+    if (count < KLIO_MIN_RECOGNITION_COUNT) {
+        Serial.println("[Klio] Ignoriert (Wiederholungszahl unter Schwelle).");
+        return;
+    }
     // Vereinheitlichte Bojen-Rundungserkennung (siehe
     // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md): dieselbe
     // JA/NEIN-Geste wird zusätzlich als Antwort auf eine offene
@@ -1219,6 +1586,7 @@ static void startGestureTraining(uint8_t target) {
 }
 
 static void cancelGestureTraining() {
+    hideTrainingMsgbox(); // idempotent (No-Op falls keine Box offen) - deckt auch den Serial-CANCEL-Weg ab
     if (!trainingActive) {
         Serial.println("[Klio] Kein Training aktiv.");
         return;
@@ -1329,6 +1697,7 @@ static void setupGestureSensor() {
 // haveIncomingQuestion==true (siehe Doku-Warnung: Fehlauslösung beim Segeln).
 static unsigned long lastGestureLogMs = 0;
 static const unsigned long GESTURE_LOG_INTERVAL_MS = 1000; // Serial-Flut vermeiden (200ms hat den Monitor geflutet)
+static uint8_t tiltConsecutiveSamples = 0; // Debounce fuer den Fallback-Tilt-Pfad, siehe GESTURE_DEBOUNCE_SAMPLES-Doku oben
 
 static void gestureTick() {
     if (!bhi260Online) return;
@@ -1357,12 +1726,26 @@ static void gestureTick() {
             if (displayAsleep) wakeDisplay();
         }
 
+        // Fehlalarm-Schutz (12.08.2026, siehe GESTURE_DEBOUNCE_SAMPLES-Doku
+        // oben): bisher loeste ein EINZELNER Sample ueber der Schwelle sofort
+        // aus, kein Debounce. GESTURE_DEBOUNCE_SAMPLES gab es in
+        // QuickMessages.h schon, war aber nirgends verdrahtet (toter Code).
+        // Bewusst NUR fuer den Antwort-Trigger, nicht fuers Standby-Aufwecken
+        // oben (das darf sofort reagieren, ist kein Fehlalarm-Risiko).
+        if (tiltDetected) {
+            if (tiltConsecutiveSamples < 255) tiltConsecutiveSamples++;
+        } else {
+            tiltConsecutiveSamples = 0;
+        }
+
         // Nur auswerten, solange fuer JA noch KEIN Klio-Muster trainiert ist -
         // sonst uebernimmt onKlioRecognitionEvent() komplett (kein Doppel-Trigger).
         // roundingConfirmPending seit 10.08.2026 gleichberechtigt zu
         // haveIncomingQuestion (siehe docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md).
-        if (!klioPatternTrained[0] && (haveIncomingQuestion || raceData.roundingConfirmPending) && tiltDetected) {
+        if (!klioPatternTrained[0] && (haveIncomingQuestion || raceData.roundingConfirmPending) &&
+            tiltConsecutiveSamples >= GESTURE_DEBOUNCE_SAMPLES) {
             onGestureTiltUp();
+            tiltConsecutiveSamples = 0;
             lastGestureLogMs = millis();
             return;
         }
@@ -1406,6 +1789,16 @@ static void setupGestureSensor() {
 }
 static void gestureTick() {}
 static void gestureTrainingSerialTick() {}
+// Stubs fuer die On-Watch-Trainings-UI (12.08.2026, siehe Menu-Tab weiter
+// unten) - falls USING_BHI260_SENSOR mal fehlen sollte, sollen die
+// Trainings-Buttons nicht den Compile brechen, nur wirkungslos bleiben.
+static const uint8_t GESTURE_ID_JA = 1;
+static const uint8_t GESTURE_ID_NEIN = 2;
+static bool klioPatternTrained[2] = {false, false};
+static bool trainingActive = false;
+static void startGestureTraining(uint8_t) {}
+static void cancelGestureTraining() {}
+static void resetGesturePattern(uint8_t) {}
 #endif
 
 // ============================================================================
@@ -1425,9 +1818,17 @@ static lv_obj_t *lblStatusClock; // Bugfix 06.08.2026: RTC wird per BLE synchron
                                   // Statusleiste, die auf JEDEM Screen sichtbar ist.
 
 // Kompass/Nav-Tab
-static lv_obj_t *lblCogSog;
+// Nav-Tab-Redesign (11.08.2026, siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md):
+// vorher nur Kompass-Kreis (arcCompass, reine COG-Anzeige, ohne taktischen
+// Wert) + Speed/COG-Text - komplett ersetzt durch die tatsaechlich beim
+// Segeln relevanten Werte: Modus, Manoever-Vorschlag, Bootsspeed, Speed zum
+// Ziel (VMC), Lift/Header.
+static lv_obj_t *lblNavMode;
+static lv_obj_t *lblNavManeuver;
+static lv_obj_t *lblCogSog; // Name beibehalten (zeigt jetzt nur noch Bootsspeed, kein COG mehr)
+static lv_obj_t *lblNavVmc;
+static lv_obj_t *lblNavLift;
 static lv_obj_t *lblGpsDetail;
-static lv_obj_t *arcCompass;
 
 // Wind-Tab
 static lv_obj_t *lblWindDir;
@@ -1450,6 +1851,9 @@ static lv_obj_t *lblManeuverSub;
 static lv_obj_t *lblQuickOverlay = nullptr;
 static lv_obj_t *lblQuickSelected = nullptr;
 
+// Gesten-Training-Status-Label (Menü-Tab, siehe buildMenuTab()/menuScreenUpdate())
+static lv_obj_t *lblGestureStatus = nullptr;
+
 static void statusBarUpdate() {
     lv_label_set_text(lblBleStatus, bleConnected ? "BLE OK" : "BLE ...");
     lv_obj_set_style_text_color(lblBleStatus, bleConnected ? lv_color_hex(0x30D060) : lv_color_hex(0xD03030), 0);
@@ -1464,20 +1868,75 @@ static void statusBarUpdate() {
 }
 
 static void navScreenUpdate() {
+    // Aktiver Modus: currentBoatState ist ohnehin schon die vereinheitlichte
+    // Zustands-Ableitung mit klarer Prioritaet (siehe updateBoatState()),
+    // hier direkt wiederverwendet statt einer zweiten, evtl. abweichenden
+    // Logik. WICHTIG: refreshActiveScreen() muss updateBoatState() VOR
+    // navScreenUpdate() aufrufen, sonst zeigt dieses Label den Stand vom
+    // vorherigen Tick.
+    lv_label_set_text(lblNavMode, boatStateToDisplayText(currentBoatState));
+
+    // Farbcodierung (12.08.2026, Roman-Wunsch): rot = schlechter Kurs
+    // (Manoever empfohlen), gruen = guter Kurs (aktiv bewertet, kein
+    // Manoever noetig), grau = keine Renndaten (nichts bewertbar). Zeigt
+    // IMMER den aktuellen Rohzustand von CompetitionEngine.maneuverNeeded -
+    // bewusst NICHT durch den Grace/Cooldown-Push-Filter gedaempft (siehe
+    // dortige Klassendoku "maybeVibrateManeuver") - "wenn ich einen
+    // Vorschlag ablehne, will ich trotzdem einen Indikator haben".
+    if (raceData.haveData && raceData.maneuverNeeded) {
+        lv_label_set_text(lblNavManeuver, raceData.isTack ? "WENDE!" : "HALSE!");
+        lv_obj_set_style_text_color(lblNavManeuver, lv_color_hex(0xD03030), 0); // Rot
+    } else if (raceData.haveData) {
+        lv_label_set_text(lblNavManeuver, "kein Manoever");
+        lv_obj_set_style_text_color(lblNavManeuver, lv_color_hex(0x30D060), 0); // Gruen
+    } else {
+        lv_label_set_text(lblNavManeuver, "kein Manoever");
+        lv_obj_set_style_text_color(lblNavManeuver, lv_color_hex(0x808080), 0); // Grau: keine Renndaten
+    }
+
     if (!gpsData.haveData) {
         lv_label_set_text(lblCogSog, "warte auf GPS...");
-        lv_label_set_text(lblGpsDetail, "");
-        lv_arc_set_value(arcCompass, 0);
-        return;
-    }
-    if (gpsData.validFix) {
-        lv_label_set_text_fmt(lblCogSog, "%.0f kn\nKurs %.0f°", gpsData.sogKn, gpsData.cogDeg);
-        lv_arc_set_value(arcCompass, (int)gpsData.cogDeg);
+    } else if (gpsData.validFix) {
+        lv_label_set_text_fmt(lblCogSog, "Boot: %.1f kn", gpsData.sogKn);
     } else {
-        lv_label_set_text(lblCogSog, "kein COG");
-        lv_arc_set_value(arcCompass, 0);
+        lv_label_set_text(lblCogSog, "Boot: kein Fix");
     }
-    lv_label_set_text_fmt(lblGpsDetail, "+/-%d m, %d ms alt", gpsData.accuracyM, gpsData.fixAgeMs);
+
+    // Speed zum Ziel (VMC): Heimweg hat Vorrang vor Competition/Training,
+    // dieselbe Prioritaet wie updateBoatState() (Heimweg ist der aktiv vom
+    // Segler gewaehlte "ich will jetzt dorthin"-Modus).
+    bool haveVmc = false;
+    double vmcKn = 0;
+    if (homeData.haveData && homeData.active && homeData.haveVmc) {
+        haveVmc = true;
+        vmcKn = homeData.vmcKn;
+    } else if (raceData.haveData && raceData.competitionLeg >= 0 && raceData.haveVmc) {
+        haveVmc = true;
+        vmcKn = raceData.vmcKn;
+    }
+    if (haveVmc) {
+        lv_label_set_text_fmt(lblNavVmc, "Ziel: %.1f kn", vmcKn);
+    } else {
+        lv_label_set_text(lblNavVmc, "Ziel: --");
+    }
+
+    // Lift/Header (siehe WindData::liftState-Kommentar / BleProtocol.kt
+    // WIND_FLAG_LIFT) - leer, solange nicht bewertbar (kein COG/unkalibriert).
+    if (windData.haveData && windData.liftState == 1) {
+        lv_label_set_text(lblNavLift, LV_SYMBOL_UP " Lift");
+        lv_obj_set_style_text_color(lblNavLift, lv_color_hex(0x30D060), 0);
+    } else if (windData.haveData && windData.liftState == 0) {
+        lv_label_set_text(lblNavLift, LV_SYMBOL_DOWN " Header");
+        lv_obj_set_style_text_color(lblNavLift, lv_color_hex(0xD05030), 0);
+    } else {
+        lv_label_set_text(lblNavLift, "");
+    }
+
+    if (gpsData.haveData) {
+        lv_label_set_text_fmt(lblGpsDetail, "+/-%d m, %d ms alt", gpsData.accuracyM, gpsData.fixAgeMs);
+    } else {
+        lv_label_set_text(lblGpsDetail, "");
+    }
 }
 
 static void windScreenUpdate() {
@@ -1574,12 +2033,17 @@ static void updateQuickOverlay() {
 
 void refreshActiveScreen() {
     statusBarUpdate();
+    // VOR navScreenUpdate() (Bugfix 11.08.2026, Nav-Tab-Redesign): das
+    // Nav-Tab zeigt jetzt currentBoatState direkt an - stand vorher hinten,
+    // navScreenUpdate() haette also immer den Stand vom vorherigen Tick
+    // gezeigt (bei 1Hz-Ticks kaum merkbar, aber unnoetig falsch).
+    updateBoatState();
     navScreenUpdate();
     windScreenUpdate();
     homeScreenUpdate();
     countdownScreenUpdate();
     maneuverScreenUpdate();
-    updateBoatState();
+    menuScreenUpdate();
     autoFocusTick();
 }
 
@@ -1597,14 +2061,64 @@ static void cbHomeToggle(lv_event_t *e) { sendControlCommand(CMD_HOME_MODE_TOGGL
 static void cbCompetitionEnd(lv_event_t *e) { sendControlCommand(CMD_COMPETITION_END); }
 static void cbClearLog(lv_event_t *e) { sendControlCommand(CMD_CLEAR_LOG); }
 
+// Gesten-Training (12.08.2026, siehe startGestureTrainingUi()/lblGestureStatus
+// weiter oben) - Ja/Nein unabhaengig trainier-/zuruecksetzbar, ohne USB.
+static void cbTrainGestureJa(lv_event_t *e) { startGestureTrainingUi(GESTURE_ID_JA); }
+static void cbTrainGestureNein(lv_event_t *e) { startGestureTrainingUi(GESTURE_ID_NEIN); }
+static void cbResetGestureJa(lv_event_t *e) {
+    resetGesturePattern(GESTURE_ID_JA);
+    showCommandOverlay("Ja-Muster geloescht");
+}
+static void cbResetGestureNein(lv_event_t *e) {
+    resetGesturePattern(GESTURE_ID_NEIN);
+    showCommandOverlay("Nein-Muster geloescht");
+}
+
+// Wettfahrt-Stopp MIT Rueckfrage (12.08.2026, Roman-Wunschliste "vor dem
+// naechsten Test", siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md) -
+// eigener Button auf dem CD-Tab, bewusst NICHT derselbe Direkt-Callback wie
+// "Wettfahrt beenden" im Menü (cbCompetitionEnd, dort bewusst ohne
+// Rueckfrage belassen). Die Bestaetigung laeuft rein lokal auf der Uhr per
+// lv_msgbox - anders als die Bojen-Rundungs-Rueckfrage KEIN BLE-Roundtrip
+// noetig, das Handy muss vorher nichts wissen.
+static void cbCompetitionStopConfirmYes(lv_event_t *e) {
+    sendControlCommand(CMD_COMPETITION_END);
+    lv_msgbox_close((lv_obj_t *)lv_event_get_user_data(e));
+}
+static void cbCompetitionStopConfirmNo(lv_event_t *e) {
+    lv_msgbox_close((lv_obj_t *)lv_event_get_user_data(e));
+}
+static void cbCompetitionStopRequest(lv_event_t *e) {
+    lv_obj_t *mbox = lv_msgbox_create(NULL);
+    lv_msgbox_add_title(mbox, "Wettfahrt stoppen?");
+    lv_msgbox_add_text(mbox, "Laufende Wettfahrt wirklich beenden?");
+    lv_obj_t *btnYes = lv_msgbox_add_footer_button(mbox, "Ja, stoppen");
+    lv_obj_t *btnNo = lv_msgbox_add_footer_button(mbox, "Nein");
+    lv_obj_add_event_cb(btnYes, cbCompetitionStopConfirmYes, LV_EVENT_CLICKED, mbox);
+    lv_obj_add_event_cb(btnNo, cbCompetitionStopConfirmNo, LV_EVENT_CLICKED, mbox);
+}
+
 // Wegpunkt-Buttons brauchen die ID im Klick-Callback -> user_data
+//
+// Kurzes Overlay + Vibration nach dem Senden (12.08.2026, Roman-Feedback:
+// "Home setzen" tat sichtbar nichts - siehe sendControlCommand()-Bugfix
+// oben) - vorher gab es auf der Uhr GAR KEIN Feedback, ob ein Tastendruck
+// überhaupt gesendet wurde; ein stiller Fehlschlag (fehlender GPS-Fix auf
+// dem Handy, siehe SegeluhrViewModel.captureWaypoint()) sah dadurch
+// identisch aus zu "Button tut nichts". Bestätigt NUR den Sendevorgang,
+// NICHT ob das Handy tatsächlich einen gültigen Fix hatte - das bleibt
+// weiterhin nur im Handy-Statusbanner sichtbar.
 static void cbSetWaypoint(lv_event_t *e) {
     int id = (int)(intptr_t)lv_event_get_user_data(e);
     sendControlCommand(CMD_SET_WAYPOINT, id);
+    triggerHaptic(HAPTIC_DONE2);
+    showCommandOverlay("Wegpunkt gesendet");
 }
 static void cbClearWaypoint(lv_event_t *e) {
     int id = (int)(intptr_t)lv_event_get_user_data(e);
     sendControlCommand(CMD_CLEAR_WAYPOINT, id);
+    triggerHaptic(HAPTIC_DONE2);
+    showCommandOverlay("Wegpunkt geloescht");
 }
 
 // Touch-Alternative zum physischen Taster (siehe Doku: "Touch optional als
@@ -1641,6 +2155,21 @@ static lv_obj_t *addMenuButton(lv_obj_t *parent, const char *label, lv_event_cb_
     return btn;
 }
 
+// Kompaktere Variante von addMenuButton() fuer nebeneinander angeordnete
+// Buttons (12.08.2026, Fach-Tab-Aktionen CD/Wind) - addMenuButton() selbst
+// ist bewusst 94% breit fuer die vertikale Menü-Liste, passt nicht fuer
+// mehrere Buttons in einer Reihe.
+static lv_obj_t *addSmallActionButton(lv_obj_t *parent, const char *label, lv_event_cb_t cb) {
+    lv_obj_t *btn = lv_button_create(parent);
+    lv_obj_set_size(btn, 100, 52);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+    lv_label_set_text(lbl, label);
+    lv_obj_center(lbl);
+    return btn;
+}
+
 // text_font vererbt sich nicht zuverlässig - Section-Header bekommen ihre
 // Schrift deshalb hier zentral über diesen kleinen Helfer statt einzeln.
 static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
@@ -1648,6 +2177,80 @@ static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_24, 0);
     lv_label_set_text(lbl, text);
     return lbl;
+}
+
+// "Setzen"-Buttons je Wegpunkt (12.08.2026, siehe waypointsSetFlags oben) -
+// hier gemerkt, damit menuScreenUpdate() sie nachtraeglich einfaerben kann,
+// sobald das Handy bestaetigt, dass tatsaechlich eine Koordinate hinterlegt
+// ist (Roman-Wunsch: "Feedback ob es passt", nach dem gefundenen
+// Home-setzen-Bug oben).
+static lv_obj_t *btnSetBuoy1, *btnSetBuoy2, *btnSetTarget, *btnSetHome, *btnSetMark1, *btnSetMark2;
+
+// Baut eine Zeile: farbig einfärbbarer "X setzen"-Button (LINKS, breit) +
+// kleiner "X löschen"-Button (RECHTS) - ersetzt den frueheren einzelnen
+// "Alle Bojen loeschen"-Button. Der war ein Bug (12.08.2026 gefunden): fest
+// an WP_BUOY1 gebunden, loeschte trotz seines Namens tatsaechlich IMMER nur
+// Boje 1, Boje 2/Ziel/Home/Comp.-Marken liessen sich von der Uhr aus gar
+// nicht loeschen. Jetzt hat jeder Wegpunkt sein eigenes Button-Paar.
+static lv_obj_t *addWaypointRow(lv_obj_t *parent, const char *label, int wpId) {
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, LV_PCT(94), 56);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *btnSet = lv_button_create(row);
+    lv_obj_set_size(btnSet, 180, 52);
+    // Explizit "nicht gesetzt"-Grau schon beim Bauen (nicht erst nach dem
+    // ersten WaypointsStatus-Notify) - sonst zeigt der Button bis zur ersten
+    // Verbindung/Notify das LVGL-Standard-Theme statt eines definierten
+    // Zustands (rein kosmetisch, aber inkonsistent).
+    lv_obj_set_style_bg_color(btnSet, lv_color_hex(0x2A2A2A), 0);
+    lv_obj_add_event_cb(btnSet, cbSetWaypoint, LV_EVENT_CLICKED, (void *)(intptr_t)wpId);
+    lv_obj_t *lblSet = lv_label_create(btnSet);
+    lv_obj_set_style_text_font(lblSet, &lv_font_montserrat_20, 0);
+    lv_label_set_text(lblSet, label);
+    lv_obj_center(lblSet);
+
+    lv_obj_t *btnClear = lv_button_create(row);
+    lv_obj_set_size(btnClear, 56, 52);
+    lv_obj_set_style_bg_color(btnClear, lv_color_hex(0x802020), 0);
+    lv_obj_add_event_cb(btnClear, cbClearWaypoint, LV_EVENT_CLICKED, (void *)(intptr_t)wpId);
+    lv_obj_t *lblClear = lv_label_create(btnClear);
+    lv_obj_set_style_text_font(lblClear, &lv_font_montserrat_20, 0);
+    lv_label_set_text(lblClear, LV_SYMBOL_TRASH);
+    lv_obj_center(lblClear);
+
+    return btnSet;
+}
+
+// Faerbt die "X setzen"-Buttons nach waypointsSetFlags ein (12.08.2026) -
+// aus refreshActiveScreen() aufgerufen, nicht nur beim Bauen der UI, weil
+// sich der Status jederzeit aendern kann (neu gesetzt/geloescht, oder beim
+// (Wieder-)Verbinden nachgeliefert).
+static void setWaypointButtonColor(lv_obj_t *btn, bool isSet) {
+    if (btn == nullptr) return;
+    lv_obj_set_style_bg_color(btn, isSet ? lv_color_hex(0x1F7A44) : lv_color_hex(0x2A2A2A), 0);
+}
+
+static void menuScreenUpdate() {
+    // Gesten-Trainingsstand (12.08.2026) - rein lokal auf der Uhr (Klio-NVS),
+    // haengt NICHT von einer BLE-Verbindung/Wegpunkt-Status-Notify ab -
+    // deshalb bewusst VOR dem waypointsSetFlags-Guard unten.
+    if (lblGestureStatus != nullptr) {
+        lv_label_set_text_fmt(lblGestureStatus, "Ja: %s   Nein: %s",
+                               klioPatternTrained[0] ? "trainiert" : "nicht trainiert",
+                               klioPatternTrained[1] ? "trainiert" : "nicht trainiert");
+    }
+
+    if (!haveWaypointsStatusData) return;
+    setWaypointButtonColor(btnSetBuoy1, (waypointsSetFlags & WPSET_BUOY1) != 0);
+    setWaypointButtonColor(btnSetBuoy2, (waypointsSetFlags & WPSET_BUOY2) != 0);
+    setWaypointButtonColor(btnSetTarget, (waypointsSetFlags & WPSET_TARGET) != 0);
+    setWaypointButtonColor(btnSetHome, (waypointsSetFlags & WPSET_HOME) != 0);
+    setWaypointButtonColor(btnSetMark1, (waypointsSetFlags & WPSET_COMPETITION_MARK1) != 0);
+    setWaypointButtonColor(btnSetMark2, (waypointsSetFlags & WPSET_COMPETITION_MARK2) != 0);
 }
 
 static void buildMenuTab(lv_obj_t *parent) {
@@ -1675,14 +2278,30 @@ static void buildMenuTab(lv_obj_t *parent) {
     addMenuButton(parent, "Nur Halse", cbTrainJibe);
     addMenuButton(parent, "Race (2 Bojen)", cbTrainRace);
 
+    // Setzen (an akt. Position) + Löschen pro Wegpunkt, Button links grün
+    // sobald das Handy eine hinterlegte Koordinate bestätigt hat (siehe
+    // menuScreenUpdate()/waypointsSetFlags).
     addSubHeader(parent, "-- Wegpunkte (an akt. Position) --");
-    addMenuButton(parent, "Boje 1 setzen", cbSetWaypoint, (void *)(intptr_t)WP_BUOY1);
-    addMenuButton(parent, "Boje 2 setzen", cbSetWaypoint, (void *)(intptr_t)WP_BUOY2);
-    addMenuButton(parent, "Ziel setzen", cbSetWaypoint, (void *)(intptr_t)WP_TARGET);
-    addMenuButton(parent, "Home setzen", cbSetWaypoint, (void *)(intptr_t)WP_HOME);
-    addMenuButton(parent, "Comp.-Marke 1 setzen", cbSetWaypoint, (void *)(intptr_t)WP_COMPETITION_MARK1);
-    addMenuButton(parent, "Comp.-Marke 2 setzen", cbSetWaypoint, (void *)(intptr_t)WP_COMPETITION_MARK2);
-    addMenuButton(parent, "Alle Bojen loeschen", cbClearWaypoint, (void *)(intptr_t)WP_BUOY1);
+    btnSetBuoy1 = addWaypointRow(parent, "Boje 1 setzen", WP_BUOY1);
+    btnSetBuoy2 = addWaypointRow(parent, "Boje 2 setzen", WP_BUOY2);
+    btnSetTarget = addWaypointRow(parent, "Ziel setzen", WP_TARGET);
+    btnSetHome = addWaypointRow(parent, "Home setzen", WP_HOME);
+    btnSetMark1 = addWaypointRow(parent, "Comp.-Marke 1 setzen", WP_COMPETITION_MARK1);
+    btnSetMark2 = addWaypointRow(parent, "Comp.-Marke 2 setzen", WP_COMPETITION_MARK2);
+
+    // Gesten-Training (12.08.2026, Roman-Wunsch: Klio-Training MUSS ohne
+    // USB/Laptop moeglich sein, siehe docs/Erweiterung_Gesten_Training_Klio.md
+    // Ergaenzung "On-Watch-Training") - direkt hier statt nur ueber Serial.
+    addSubHeader(parent, "-- Gesten-Training (Klio) --");
+    lblGestureStatus = lv_label_create(parent);
+    lv_obj_set_style_text_font(lblGestureStatus, &lv_font_montserrat_18, 0);
+    lv_obj_set_width(lblGestureStatus, LV_PCT(90));
+    lv_label_set_long_mode(lblGestureStatus, LV_LABEL_LONG_WRAP);
+    // Text wird in menuScreenUpdate() gesetzt (haengt vom Trainings-Stand ab).
+    addMenuButton(parent, "Ja trainieren", cbTrainGestureJa);
+    addMenuButton(parent, "Nein trainieren", cbTrainGestureNein);
+    addMenuButton(parent, "Ja zuruecksetzen", cbResetGestureJa);
+    addMenuButton(parent, "Nein zuruecksetzen", cbResetGestureNein);
 
     addSubHeader(parent, "-- Sonstiges --");
     addMenuButton(parent, "Heimweg an/aus", cbHomeToggle);
@@ -1778,28 +2397,46 @@ static void buildSegelnScreen() {
         lv_obj_set_style_transform_rotation(lastTab, -450, 0);
     }
 
-    // -- Nav-Tab --
-    arcCompass = lv_arc_create(tabNav);
-    lv_arc_set_rotation(arcCompass, 270);
-    lv_arc_set_bg_angles(arcCompass, 0, 360);
-    lv_arc_set_range(arcCompass, 0, 359);
-    lv_obj_set_size(arcCompass, 150, 150);
-    lv_obj_align(arcCompass, LV_ALIGN_TOP_MID, 0, 10);
-    lv_obj_remove_style(arcCompass, NULL, LV_PART_KNOB); // rein informativ, nicht bedienbar
-    lv_obj_clear_flag(arcCompass, LV_OBJ_FLAG_CLICKABLE);
+    // -- Nav-Tab (Redesign 11.08.2026, siehe
+    // docs/Erweiterung_TWatch_Ultra_NavRedesign.md): vorher ein reiner
+    // Kompass-Kreis ohne taktischen Wert, jetzt eine senkrecht gestapelte
+    // Flex-Column mit den tatsaechlich relevanten Werten. --
+    lv_obj_set_flex_flow(tabNav, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(tabNav, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(tabNav, 8, 0);
+    // War 14 - Statusleiste sitzt jetzt bei y=34 statt y=10 (siehe dortiger
+    // Kommentar), pad_top entsprechend nachgezogen, damit lblNavMode nicht
+    // unter der Statusleiste verschwindet.
+    lv_obj_set_style_pad_top(tabNav, 46, 0);
+    lv_obj_clear_flag(tabNav, LV_OBJ_FLAG_SCROLLABLE); // soll komplett ohne Scrollen passen
 
     // Feedback nach Hardware-Test: text_font vererbt sich in dieser
     // LVGL-Version NICHT wie erwartet vom Screen-Container auf Kind-Labels -
     // deshalb jetzt an jedem einzelnen Label explizit gesetzt statt über
     // lv_obj_set_style_text_font(screenSegeln, ...) am Anfang der Funktion.
+    lblNavMode = lv_label_create(tabNav);
+    lv_obj_set_style_text_font(lblNavMode, &lv_font_montserrat_20, 0);
+
+    lblNavManeuver = lv_label_create(tabNav);
+    lv_obj_set_style_text_font(lblNavManeuver, &lv_font_montserrat_24, 0);
+
     lblCogSog = lv_label_create(tabNav);
     lv_obj_set_style_text_font(lblCogSog, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_align(lblCogSog, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(lblCogSog, LV_ALIGN_CENTER, 0, 10);
+
+    lblNavVmc = lv_label_create(tabNav);
+    lv_obj_set_style_text_font(lblNavVmc, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_align(lblNavVmc, LV_TEXT_ALIGN_CENTER, 0);
+
+    lblNavLift = lv_label_create(tabNav);
+    lv_obj_set_style_text_font(lblNavLift, &lv_font_montserrat_20, 0);
 
     lblGpsDetail = lv_label_create(tabNav);
-    lv_obj_set_style_text_font(lblGpsDetail, &lv_font_montserrat_20, 0);
-    lv_obj_align(lblGpsDetail, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_set_style_text_font(lblGpsDetail, &lv_font_montserrat_18, 0);
+    // Kein lv_obj_align mehr (Bugfix 11.08.2026, Nav-Tab-Redesign): tabNav
+    // ist jetzt eine Flex-Column, manuelle Ausrichtung einzelner Kinder
+    // widerspricht dem Flex-Layout - reiht sich stattdessen einfach als
+    // letztes Element unten ein.
 
     // -- Wind-Tab --
     lblWindDir = lv_label_create(tabWind);
@@ -1808,6 +2445,24 @@ static void buildSegelnScreen() {
     lblWindTrend = lv_label_create(tabWind);
     lv_obj_set_style_text_font(lblWindTrend, &lv_font_montserrat_28, 0);
     lv_obj_align(lblWindTrend, LV_ALIGN_CENTER, 0, 30);
+
+    // Fach-Tab-Aktion (12.08.2026, Roman-Wunschliste "vor dem naechsten
+    // Test", siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md): Kalibrierung
+    // direkt hier statt nur im Menü-Tab. Kein Zustands-Feedback vom Handy
+    // vorgesehen (Protokoll kennt keinen Kalibrierungs-Status) - beide
+    // Buttons bleiben deshalb bewusst immer verfuegbar. tabWind ist (anders
+    // als tabNav) nicht auf SCROLLABLE=false gestellt - passt der Container
+    // nicht mehr in den sichtbaren Bereich, scrollt der Tab einfach.
+    lv_obj_t *windActions = lv_obj_create(tabWind);
+    lv_obj_remove_style_all(windActions);
+    lv_obj_set_size(windActions, LV_PCT(96), LV_SIZE_CONTENT);
+    lv_obj_align(windActions, LV_ALIGN_TOP_MID, 0, 220);
+    lv_obj_set_flex_flow(windActions, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(windActions, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(windActions, 8, 0);
+    lv_obj_clear_flag(windActions, LV_OBJ_FLAG_SCROLLABLE);
+    addMenuButton(windActions, "Kalibrieren starten", cbWindCalStart);
+    addMenuButton(windActions, "Kalibrierung abbrechen", cbWindCalAbort);
 
     // -- Heimweg-Tab --
     lblHomeActive = lv_label_create(tabHome);
@@ -1836,6 +2491,35 @@ static void buildSegelnScreen() {
     lblCountdownBig = lv_label_create(tabCountdown);
     lv_obj_set_style_text_font(lblCountdownBig, &lv_font_montserrat_48, 0);
     lv_obj_align(lblCountdownBig, LV_ALIGN_CENTER, 0, -6);
+
+    // Fach-Tab-Aktionen (12.08.2026, Roman-Wunschliste "vor dem naechsten
+    // Test", siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md): Ring/Label
+    // bleiben unangetastet absolut zentriert, die neuen Buttons sitzen in
+    // einem eigenen Flex-Column-Container darunter. tabCountdown ist (anders
+    // als tabNav) nicht auf SCROLLABLE=false gestellt - passt der Container
+    // nicht mehr in den sichtbaren Bereich, scrollt der Tab einfach.
+    lv_obj_t *cdActions = lv_obj_create(tabCountdown);
+    lv_obj_remove_style_all(cdActions);
+    lv_obj_set_size(cdActions, LV_PCT(96), LV_SIZE_CONTENT);
+    lv_obj_align(cdActions, LV_ALIGN_TOP_MID, 0, 236);
+    lv_obj_set_flex_flow(cdActions, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(cdActions, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(cdActions, 8, 0);
+    lv_obj_clear_flag(cdActions, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *cdRow = lv_obj_create(cdActions);
+    lv_obj_remove_style_all(cdRow);
+    lv_obj_set_size(cdRow, LV_PCT(100), 56);
+    lv_obj_set_flex_flow(cdRow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(cdRow, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(cdRow, LV_OBJ_FLAG_SCROLLABLE);
+    addSmallActionButton(cdRow, "Start", cbCountdownStart);
+    addSmallActionButton(cdRow, "Reset", cbCountdownReset);
+    addSmallActionButton(cdRow, "Min.", cbCountdownSync);
+
+    // Stop MIT Rueckfrage (siehe cbCompetitionStopRequest-Klassendoku) -
+    // bewusst NICHT derselbe Callback wie "Wettfahrt beenden" im Menü.
+    addMenuButton(cdActions, "Wettfahrt stoppen", cbCompetitionStopRequest);
 
     // -- Manöver-Tab --
     lblManeuverBig = lv_label_create(tabManeuver);
@@ -2025,15 +2709,25 @@ static void buildUi() {
     // über JEDEM per lv_screen_load() geladenen Screen). Grösserer Rand
     // (14/10 statt 6/4) aus demselben Grund wie bei der Tab-Leiste unten:
     // Bildschirm ist in den Ecken leicht abgedeckt.
+    // Roman-Feedback 12.08.2026 ("vor dem naechsten Test"): bei y=10 vom
+    // Gehaeuserand in der abgedeckten Ecke verdeckt, nicht lesbar - gleiche
+    // Ursache wie das frueher dokumentierte Tab-Bar-Clipping (94px-Fix,
+    // siehe dortiger Kommentar; das rechteckige Display selbst hat KEINE
+    // runden Ecken - das Gehaeuse ueberdeckt nur einen Randstreifen).
+    // y=34 ist ein erster Schaetzwert in derselben
+    // Groessenordnung; tabNav's pad_top wurde entsprechend mit angehoben,
+    // damit sich Nav-Inhalt und Statusleiste nicht ueberlappen - ob 34px
+    // reichen, muss wie bei der Tab-Bar-Hoehe erst auf echter Hardware
+    // bestaetigt werden (siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md).
     lblBleStatus = lv_label_create(lv_layer_top());
     lv_obj_set_style_text_font(lblBleStatus, &lv_font_montserrat_20, 0);
-    lv_obj_align(lblBleStatus, LV_ALIGN_TOP_LEFT, 14, 10);
+    lv_obj_align(lblBleStatus, LV_ALIGN_TOP_LEFT, 14, 34);
     lblPhoneBattery = lv_label_create(lv_layer_top());
     lv_obj_set_style_text_font(lblPhoneBattery, &lv_font_montserrat_20, 0);
-    lv_obj_align(lblPhoneBattery, LV_ALIGN_TOP_RIGHT, -14, 10);
+    lv_obj_align(lblPhoneBattery, LV_ALIGN_TOP_RIGHT, -14, 34);
     lblStatusClock = lv_label_create(lv_layer_top());
     lv_obj_set_style_text_font(lblStatusClock, &lv_font_montserrat_20, 0);
-    lv_obj_align(lblStatusClock, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_align(lblStatusClock, LV_ALIGN_TOP_MID, 0, 34);
 
     // Quick-Message-Overlay, ebenfalls auf layer_top - standardmässig
     // versteckt, wird nur bei eingehender Frage/frischer Antwort eingeblendet
@@ -2046,6 +2740,43 @@ static void buildUi() {
     lv_obj_set_style_bg_opa(lblQuickOverlay, LV_OPA_90, 0);
     lv_obj_set_style_pad_all(lblQuickOverlay, 10, 0);
     lv_obj_add_flag(lblQuickOverlay, LV_OBJ_FLAG_HIDDEN);
+
+    // Kommando-Overlay (siehe showCommandOverlay()) - eigenes Widget statt
+    // lblQuickOverlay mitzunutzen, damit sich Quick-Message-Fragen und
+    // Wende/Halse/Start-Kommandos nicht gegenseitig verdraengen koennen,
+    // falls beide kurz hintereinander eintreffen. Deutlich grosse Schrift +
+    // kraeftige Hintergrundfarbe, da 5s beim Segeln kurz sind.
+    lblCommandOverlay = lv_label_create(lv_layer_top());
+    lv_obj_set_width(lblCommandOverlay, LV_PCT(85));
+    lv_obj_set_style_text_font(lblCommandOverlay, &lv_font_montserrat_48, 0);
+    lv_obj_align(lblCommandOverlay, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_set_style_text_align(lblCommandOverlay, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(lblCommandOverlay, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_color(lblCommandOverlay, lv_color_hex(0xE0A020), 0);
+    lv_obj_set_style_bg_opa(lblCommandOverlay, LV_OPA_90, 0);
+    lv_obj_set_style_pad_all(lblCommandOverlay, 12, 0);
+    lv_obj_add_flag(lblCommandOverlay, LV_OBJ_FLAG_HIDDEN);
+
+    // Bestätigungsfenster-Overlay fürs Geste-Antworten (12.08.2026, siehe
+    // queuePendingAnswer()-Klassendoku) - eigenes drittes Overlay, unten
+    // positioniert, damit es sich weder mit lblQuickOverlay (Center, zeigt
+    // die eingehende Frage selbst) noch lblCommandOverlay (oben) überlappt.
+    // Antippen ODER ein Tastendruck bricht ab (siehe cbCancelPendingAnswer()).
+    pendingAnswerOverlay = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(pendingAnswerOverlay, LV_PCT(85), LV_SIZE_CONTENT);
+    lv_obj_align(pendingAnswerOverlay, LV_ALIGN_BOTTOM_MID, 0, -110);
+    lv_obj_set_style_bg_color(pendingAnswerOverlay, lv_color_hex(0xE0A020), 0);
+    lv_obj_set_style_bg_opa(pendingAnswerOverlay, LV_OPA_90, 0);
+    lv_obj_set_style_radius(pendingAnswerOverlay, 10, 0);
+    lv_obj_set_style_pad_all(pendingAnswerOverlay, 12, 0);
+    lv_obj_add_flag(pendingAnswerOverlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(pendingAnswerOverlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(pendingAnswerOverlay, cbCancelPendingAnswer, LV_EVENT_CLICKED, nullptr);
+    lblPendingAnswer = lv_label_create(pendingAnswerOverlay);
+    lv_obj_set_style_text_font(lblPendingAnswer, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(lblPendingAnswer, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_align(lblPendingAnswer, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(lblPendingAnswer);
 
     buildSegelnScreen();
     buildAlltagScreen();
@@ -2091,10 +2822,12 @@ void loop() {
     loraSendTick();
     loraReceiveTick();
     checkQuickMessageTimeout();
+    pendingAnswerTick();
     buttonTick();
     gestureTick();
     gestureTrainingSerialTick();
     standbyTick();
+    commandOverlayTick();
 
     lv_timer_handler();
     delay(5);

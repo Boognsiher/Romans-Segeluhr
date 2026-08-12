@@ -65,4 +65,12 @@ object Constants {
     const val ROUNDING_CONFIRM_RADIUS_M = 150.0
     /** Reagiert niemand auf die "Boje hier korrigieren?"-Nachfrage, gilt sie nach dieser Zeit automatisch als bestätigt. */
     const val ROUNDING_CONFIRM_TIMEOUT_MS = 20_000L
+
+    // Competition-Manöver-Timing (12.08.2026, Roman-Wunschliste "vor dem
+    // nächsten Test", siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md):
+    // Vorschläge kamen im echten Rennen zu schnell/zu oft hintereinander.
+    /** Nach Competition-Start (Countdown 0:00) wird für diese Zeit kein Manöver-Vorschlag ausgelöst — erst geradeaus segeln lassen. */
+    const val COMPETITION_MANEUVER_START_GRACE_MS = 10_000L
+    /** Nach einem ausgelösten Vorschlag mindestens so lange bis zum nächsten, selbst wenn maneuverNeeded zwischendurch wieder auf false springt. */
+    const val COMPETITION_MANEUVER_SUGGEST_COOLDOWN_MS = 15_000L
 }

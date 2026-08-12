@@ -22,6 +22,14 @@ enum class QuickQuestion : uint8_t {
     NOCH_LANGE          = 7,
     BRINGST_DU_WAS_MIT  = 8,
     SEHEN_WIR_UNS_GLEICH = 9,
+    // NEU (12.08.2026, Roman-Wunschliste "vor dem naechsten Test", siehe
+    // docs/Erweiterung_TWatch_Ultra_NavRedesign.md): wird von der Ultra
+    // automatisch gesendet, sobald der Heimweg-Modus per Ankunfts-Erkennung
+    // stoppt (HOME_FLAG_ARRIVED in BleProtocol.kt) - Roman kann sie ausserdem
+    // jederzeit manuell ueber die normale Fragen-Auswahl (Taster kurz/lang)
+    // verschicken, keine Sonderbehandlung noetig, einfach ein weiterer
+    // Eintrag in derselben Liste.
+    BIN_ZURUECK         = 10,
     COUNT // NICHT als Frage nutzen - nur zur Bereichsprüfung
 };
 
@@ -37,6 +45,7 @@ inline const char* quickQuestionText(QuickQuestion q) {
         case QuickQuestion::NOCH_LANGE:            return "NOCH LANGE?";
         case QuickQuestion::BRINGST_DU_WAS_MIT:    return "BRINGST DU WAS MIT?";
         case QuickQuestion::SEHEN_WIR_UNS_GLEICH:  return "SEHEN WIR UNS GLEICH?";
+        case QuickQuestion::BIN_ZURUECK:           return "BIN ZURUECK!";
         default:                                   return "?";
     }
 }

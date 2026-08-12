@@ -2,11 +2,12 @@
 
 > Nicht in der ursprünglichen Spezifikation.
 
-## Status: 🔧 UMGESETZT, KOMPILIERT (06.08.2026) — noch nicht auf Hardware
-getestet. Beide Firmwares nutzen `instance.sleepDisplay()`/`wakeupDisplay()`
-(LilyGoLib) für den eigentlichen Display-Ein/Aus-Schalter und LVGLs
-eingebaute Inaktivitäts-Uhr (`lv_display_get_inactive_time()`) für die
-30s-Erkennung — siehe Abschnitt 3 (aktualisiert) für Details und einen
+## Status: 🔧 UMGESETZT, auf S3-Hardware getestet (11.08.2026) — dabei einen
+Bug gefunden und gefixt, siehe Abschnitt 3a. Ultra-Seite weiterhin nicht auf
+Hardware verifiziert. Beide Firmwares nutzen `instance.sleepDisplay()`/
+`wakeupDisplay()` (LilyGoLib) für den eigentlichen Display-Ein/Aus-Schalter
+und LVGLs eingebaute Inaktivitäts-Uhr (`lv_display_get_inactive_time()`) für
+die 30s-Erkennung — siehe Abschnitt 3 (aktualisiert) für Details und einen
 Hardware-Unterschied zwischen den beiden Uhren, der die Umsetzung
 vereinfacht hat.
 
@@ -83,6 +84,35 @@ auf die ursprünglich offene Frage in Abschnitt 3, alter Text):
 `handleIncomingQuickMessageRequest()`-Funktionen ergänzt, unabhängig von
 Geste/Touch.
 
+## 3a. Bugfix 11.08.2026: `sleepDisplay()`/`wakeupDisplay()` sind auf der S3
+Leer-Stubs
+
+Beim Debugging eines Feld-Vorfalls (S3-Bildschirm schwarz/unbedienbar bei
+Roman) fiel auf: in der gepinnten LilyGoLib (`LilyGoWatchS3.cpp`, Klasse
+`LilyGoWatch2022`, die für die S3 als `instance` verwendet wird) sind
+`sleepDisplay()`/`wakeupDisplay()` **auskommentierte Leer-Funktionen**:
+
+```cpp
+void LilyGoWatch2022::sleepDisplay()  { /* LilyGoDispSPI::sleep(); */ }
+void LilyGoWatch2022::wakeupDisplay() { /* LilyGoDispSPI::wakeup(); */ }
+```
+
+Sie tun auf echter Hardware buchstäblich nichts — unser Standby-Code
+(`standbyTick()`/`wakeDisplay()` in `Segeluhr_TWatch_S3.ino`) loggte zwar
+korrekt "Display ausgeschaltet"/"aufgeweckt", das Backlight/Panel wurde davon
+aber nie wirklich beeinflusst. Fix: zusätzlich direkt per
+`instance.setBrightness(0)` (schlafen) / `instance.setBrightness(DEVICE_MAX_BRIGHTNESS_LEVEL)`
+(aufwecken) steuern — diese Funktion ruft auf der S3 tatsächlich
+`LilyGoDispSPI::setBrightness()` auf (verifiziert im LilyGoLib-Quellcode).
+Die Stub-Aufrufe bleiben zusätzlich im Code, falls eine künftige LilyGoLib-
+Version sie doch befüllt.
+
+**Nicht verifiziert, ob das den ursprünglich gemeldeten schweren Vorfall
+(Bildschirm dauerhaft schwarz, nur per Ladekabel aufgeweckt) erklärt** — bei
+dem war die Firmware selbst nachweislich nicht abgestürzt (LoRa-Empfang lief
+im Serial-Log unauffällig weiter). Für die weitere Ursachensuche siehe
+`Erweiterung_S3_Reset_Diagnose.md`.
+
 ## 4. Offene technische Punkte
 - [x] BHI260AP (Ultra): kein fertiges "Wrist Tilt to Wake"-Feature
   gefunden — Pitch-Schwellenwert-Fallback wiederverwendet (siehe oben)
@@ -94,12 +124,11 @@ Geste/Touch.
 - [ ] Zusammenspiel mit bestehendem Auto-Stop/Battery-Feature der Android-
   App prüfen (das ist ein separates Feature auf Handy-Seite, aber beide
   zielen auf Stromsparen ab — keine direkte Code-Abhängigkeit, nur beachten)
-- [ ] Noch nicht auf Hardware verifiziert: ob `sleepDisplay()` den Touch-
-  Controller mitschlafen legt (dann würde Touch-Aufwecken auf der S3 nicht
-  funktionieren) oder ob dieser unabhängig weiterläuft — LilyGoLib bietet
-  mit `wakeupTouch()` eine separate Funktion dafür, die aktuell NICHT
-  aufgerufen wird (Annahme: Touch-Controller bleibt aktiv, da physisch
-  getrennter Chip) — falls sich das als falsch erweist, muss
-  `wakeupTouch()` ergänzt werden, was aber "Touch weckt das Display auf"
-  zirkulär macht (Touch-Interrupt müsste dann unabhängig vom
-  LVGL-Indev-Pfad ausgewertet werden)
+- [x] Auf S3-Hardware verifiziert (11.08.2026): `sleepDisplay()` legt den
+  Touch-Controller NICHT mitschlafen — Touch-Aufwecken funktioniert im Test
+  zuverlässig. Der eigentliche Befund war ein anderer, siehe Abschnitt 3a:
+  `sleepDisplay()`/`wakeupDisplay()` sind auf der S3 komplett wirkungslose
+  Stubs, gefixt durch direkte `setBrightness()`-Aufrufe.
+- [ ] Ultra-Seite weiterhin nicht auf Hardware verifiziert (weder Wrist-
+  Tilt-Wake noch ob `sleepDisplay()`/`wakeupDisplay()` dort ebenfalls Stubs
+  sind — siehe `LilyGoWatchUltra.cpp`, noch nicht geprüft)

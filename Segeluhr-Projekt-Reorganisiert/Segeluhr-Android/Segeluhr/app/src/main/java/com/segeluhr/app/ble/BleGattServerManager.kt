@@ -42,6 +42,8 @@ class BleGattServerManager(private val context: Context) {
     private var windCharacteristic: BluetoothGattCharacteristic? = null
     private var raceStatusCharacteristic: BluetoothGattCharacteristic? = null
     private var timeSyncCharacteristic: BluetoothGattCharacteristic? = null
+    // NEU (12.08.2026, siehe BleProtocol.CHAR_WAYPOINTS_STATUS_UUID)
+    private var waypointsStatusCharacteristic: BluetoothGattCharacteristic? = null
 
     private val connectedDevices = mutableSetOf<BluetoothDevice>()
     private var lastSentBatteryPct: Int = -1
@@ -188,6 +190,20 @@ class BleGattServerManager(private val context: Context) {
         )
         service.addCharacteristic(timeSyncCharacteristic)
 
+        waypointsStatusCharacteristic = BluetoothGattCharacteristic(
+            BleProtocol.CHAR_WAYPOINTS_STATUS_UUID,
+            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_READ,
+        ).apply {
+            addDescriptor(
+                BluetoothGattDescriptor(
+                    BleProtocol.CCCD_UUID,
+                    BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE,
+                )
+            )
+        }
+        service.addCharacteristic(waypointsStatusCharacteristic)
+
         gattServer?.addService(service)
 
         startAdvertising(bt)
@@ -253,23 +269,23 @@ class BleGattServerManager(private val context: Context) {
      * nichts zum Senden hat.
      */
     @SuppressLint("MissingPermission")
-    fun notifyHomeStatus(active: Boolean, maneuverNeeded: Boolean, etaMinutes: Int?, distanceTraveledM: Int) {
+    fun notifyHomeStatus(active: Boolean, maneuverNeeded: Boolean, etaMinutes: Int?, distanceTraveledM: Int, vmcKn: Double? = null, arrived: Boolean = false) {
         val server = gattServer ?: return
         val characteristic = homeStatusCharacteristic ?: return
         if (connectedDevices.isEmpty()) return
-        characteristic.value = BleProtocol.encodeHomeStatus(active, maneuverNeeded, etaMinutes, distanceTraveledM)
+        characteristic.value = BleProtocol.encodeHomeStatus(active, maneuverNeeded, etaMinutes, distanceTraveledM, vmcKn, arrived)
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, characteristic, false)
         }
     }
 
-    /** 1x/s aufrufen: sendet den aktuellen Windstand (Richtung/Kalibrierung/Trend) an die Uhr. */
+    /** 1x/s aufrufen: sendet den aktuellen Windstand (Richtung/Kalibrierung/Trend/Lift-Header) an die Uhr. */
     @SuppressLint("MissingPermission")
-    fun notifyWindStatus(windDirDeg: Double?, calibrated: Boolean, trendDeg: Double?) {
+    fun notifyWindStatus(windDirDeg: Double?, calibrated: Boolean, trendDeg: Double?, isLift: Boolean? = null) {
         val server = gattServer ?: return
         val characteristic = windCharacteristic ?: return
         if (connectedDevices.isEmpty()) return
-        characteristic.value = BleProtocol.encodeWindStatus(windDirDeg, calibrated, trendDeg)
+        characteristic.value = BleProtocol.encodeWindStatus(windDirDeg, calibrated, trendDeg, isLift)
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, characteristic, false)
         }
@@ -284,13 +300,33 @@ class BleGattServerManager(private val context: Context) {
         isTack: Boolean,
         competitionLegOrdinal: Int?,
         roundingConfirmPending: Boolean = false,
+        vmcKn: Double? = null,
     ) {
         val server = gattServer ?: return
         val characteristic = raceStatusCharacteristic ?: return
         if (connectedDevices.isEmpty()) return
         characteristic.value = BleProtocol.encodeRaceStatus(
-            raceStateOrdinal, countdownSeconds, maneuverNeeded, isTack, competitionLegOrdinal, roundingConfirmPending,
+            raceStateOrdinal, countdownSeconds, maneuverNeeded, isTack, competitionLegOrdinal, roundingConfirmPending, vmcKn,
         )
+        for (device in connectedDevices) {
+            server.notifyCharacteristicChanged(device, characteristic, false)
+        }
+    }
+
+    /**
+     * 1x/s aufrufen: sendet, welche Wegpunkte GERADE eine Koordinate
+     * hinterlegt haben (siehe BleProtocol.CHAR_WAYPOINTS_STATUS_UUID) — die
+     * Uhr färbt ihre "X setzen"-Buttons im Menü-Tab danach ein.
+     */
+    @SuppressLint("MissingPermission")
+    fun notifyWaypointsStatus(
+        buoy1Set: Boolean, buoy2Set: Boolean, targetSet: Boolean,
+        homeSet: Boolean, mark1Set: Boolean, mark2Set: Boolean,
+    ) {
+        val server = gattServer ?: return
+        val characteristic = waypointsStatusCharacteristic ?: return
+        if (connectedDevices.isEmpty()) return
+        characteristic.value = BleProtocol.encodeWaypointsStatus(buoy1Set, buoy2Set, targetSet, homeSet, mark1Set, mark2Set)
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, characteristic, false)
         }

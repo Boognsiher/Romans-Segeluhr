@@ -97,6 +97,11 @@ enum class CompetitionLeg { UPWIND, REACH_TO_OFFSET, DOWNWIND }
 /**
  * Anzeige-Info fürs aktuelle Etappen-Ziel im Competition-Modus — echte
  * Bojen (mit Distanz) oder Windschätzung (ohne Distanz, da kein GPS-Punkt).
+ * [vmcKn] wie bei [HomeGuidance]: über ein Zeitfenster gemessene tatsächliche
+ * Annäherung an das aktuelle Etappenziel (siehe
+ * [com.segeluhr.app.core.HomeProgressTracker]), null auf DOWNWIND (kein
+ * Leetonnen-Wegpunkt vorgesehen, siehe CompetitionEngine-Klassendoku) oder
+ * solange noch nicht genug Zeitfenster-Historie vorliegt.
  */
 data class CompetitionGuidance(
     val leg: CompetitionLeg,
@@ -107,6 +112,7 @@ data class CompetitionGuidance(
     val maneuverNeeded: Boolean,
     val isEstimated: Boolean,
     val lapCount: Int,
+    val vmcKn: Double? = null,
 )
 
 /**

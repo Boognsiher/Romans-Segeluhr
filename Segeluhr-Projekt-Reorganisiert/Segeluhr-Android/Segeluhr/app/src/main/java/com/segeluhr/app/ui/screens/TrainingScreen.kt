@@ -33,6 +33,8 @@ fun TrainingScreen(
     onAutoDetectLake: () -> Unit,
     onRemoveLakeCircle: (Int) -> Unit,
     onStartLakeDrawing: () -> Unit,
+    // NEU (12.08.2026, siehe docs/Erweiterung_Boje_Kartenauswahl.md)
+    onSetWaypointFromMap: (String) -> Unit,
 ) {
     Column(
         Modifier
@@ -72,8 +74,8 @@ fun TrainingScreen(
         }
 
         SectionCard("Boje setzen (Racemode)") {
-            WaypointRow("Boje 1", fmt(state.buoy1), { onSetWaypoint("buoy1") }, { onClearWaypoint("buoy1") })
-            WaypointRow("Boje 2", fmt(state.buoy2), { onSetWaypoint("buoy2") }, { onClearWaypoint("buoy2") })
+            WaypointRow("Boje 1", fmt(state.buoy1), { onSetWaypoint("buoy1") }, { onClearWaypoint("buoy1") }, { onSetWaypointFromMap("buoy1") })
+            WaypointRow("Boje 2", fmt(state.buoy2), { onSetWaypoint("buoy2") }, { onClearWaypoint("buoy2") }, { onSetWaypointFromMap("buoy2") })
         }
 
         SectionCard("See-Geofence") {

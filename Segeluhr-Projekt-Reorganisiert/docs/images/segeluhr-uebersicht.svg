@@ -1,0 +1,156 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 860" width="1400" height="860" font-family="'Segoe UI', Arial, sans-serif">
+
+  <!-- Hintergrund -->
+  <rect x="0" y="0" width="1400" height="860" fill="#0A1420"/>
+
+  <!-- Titel -->
+  <text x="700" y="42" text-anchor="middle" font-size="30" font-weight="700" fill="#2DD4BF">Segeluhr &#8212; Anzeigen &amp; Bedienung</text>
+  <text x="700" y="68" text-anchor="middle" font-size="15" fill="#7D97A8">Handy-App &#183; T-Watch Ultra (Boot) &#183; T-Watch S3 (Land)</text>
+
+  <!-- ============ Panel A: Handy-App ============ -->
+  <rect x="40" y="95" width="380" height="665" rx="18" fill="#132638" stroke="#1E3A4F" stroke-width="1.5"/>
+  <text x="230" y="132" text-anchor="middle" font-size="20" font-weight="700" fill="#E8EEF2">&#128241; Handy-App</text>
+  <text x="230" y="153" text-anchor="middle" font-size="12" fill="#7D97A8">Segler-Rolle (Boot) oder Land-Rolle</text>
+
+  <!-- Telefon-Umriss -->
+  <rect x="150" y="175" width="160" height="380" rx="22" fill="#0A1420" stroke="#1E3A4F" stroke-width="2"/>
+  <rect x="162" y="195" width="136" height="330" rx="10" fill="#0F1F2E"/>
+
+  <!-- Status-Zeile im Screen -->
+  <circle cx="176" cy="213" r="4" fill="#34D399"/>
+  <text x="186" y="217" font-size="10" fill="#7D97A8">Fix &#183; Fahrt</text>
+  <text x="290" y="217" text-anchor="end" font-size="10" fill="#7D97A8">Bat 82%</text>
+  <line x1="162" y1="226" x2="298" y2="226" stroke="#1E3A4F" stroke-width="1"/>
+
+  <!-- Hauptinhalt (Normal-Tab Beispiel) -->
+  <text x="230" y="252" text-anchor="middle" font-size="11" fill="#7D97A8">Wettfahrt aktiv</text>
+  <text x="230" y="282" text-anchor="middle" font-size="23" font-weight="700" fill="#E8EEF2">4.8 kn</text>
+  <text x="230" y="299" text-anchor="middle" font-size="10" fill="#7D97A8">Speed zum Ziel (VMC)</text>
+  <text x="230" y="325" text-anchor="middle" font-size="13" fill="#F5A623">ETA 00:11:40</text>
+
+  <!-- Badge "Mit Uhr" -->
+  <rect x="180" y="350" width="100" height="24" rx="12" fill="#1A5F57" stroke="#2DD4BF" stroke-width="1"/>
+  <text x="230" y="366" text-anchor="middle" font-size="10.5" font-weight="700" fill="#2DD4BF">MODUS: MIT UHR</text>
+
+  <line x1="176" y1="392" x2="284" y2="392" stroke="#1E3A4F" stroke-width="1"/>
+
+  <!-- Tab-Leiste -->
+  <text x="230" y="498" text-anchor="middle" font-size="9.5">
+    <tspan fill="#2DD4BF" font-weight="700">Normal</tspan><tspan fill="#7D97A8"> &#183; Start &#183; Wind</tspan>
+  </text>
+  <text x="230" y="513" text-anchor="middle" font-size="9.5" fill="#7D97A8">Training &#183; Log &#183; Setup</text>
+
+  <!-- Bedienung-Box -->
+  <rect x="60" y="575" width="340" height="100" rx="10" fill="#0A1420" stroke="#1E3A4F" stroke-width="1"/>
+  <text x="80" y="598" font-size="12" font-weight="700" fill="#E8EEF2">Bedienung</text>
+  <text x="80" y="619" font-size="11" fill="#7D97A8">Touch (Tabs, Buttons)</text>
+  <text x="80" y="637" font-size="11" fill="#7D97A8">GPS + BLE laufen im Hintergrund</text>
+  <text x="80" y="655" font-size="11" fill="#7D97A8">GATT-Server (Peripheral) f&#252;r die Uhr</text>
+
+  <!-- ============ Pfeil A -> B: BLE ============ -->
+  <line x1="432" y1="350" x2="478" y2="350" stroke="#2DD4BF" stroke-width="3"/>
+  <polygon points="422,350 436,344 436,356" fill="#2DD4BF"/>
+  <polygon points="488,350 474,344 474,356" fill="#2DD4BF"/>
+  <text x="455" y="325" text-anchor="middle" font-size="13" font-weight="700" fill="#2DD4BF">BLE</text>
+
+  <!-- ============ Panel B: T-Watch Ultra ============ -->
+  <rect x="490" y="95" width="420" height="665" rx="18" fill="#132638" stroke="#1E3A4F" stroke-width="1.5"/>
+  <text x="700" y="132" text-anchor="middle" font-size="20" font-weight="700" fill="#E8EEF2">&#8987; T-Watch Ultra &#8212; am Boot</text>
+  <text x="700" y="153" text-anchor="middle" font-size="12" fill="#7D97A8">Sender/Zentrale: 6 Segeln-Tabs</text>
+
+  <!-- Uhr-Gehäuse: rechteckiges AMOLED (410x502px, hochkant) - NICHT rund, siehe https://wiki.lilygo.cc/products/t-watch-series/t-watch-ultra/ -->
+  <rect x="570" y="190" width="260" height="320" rx="34" fill="#0A1420" stroke="#1E3A4F" stroke-width="3"/>
+
+  <!-- 5s-Kommando-Overlay -->
+  <rect x="610" y="196" width="180" height="40" rx="8" fill="#F5A623"/>
+  <text x="700" y="221" text-anchor="middle" font-size="16" font-weight="800" fill="#132638">WENDE!</text>
+  <text x="700" y="249" text-anchor="middle" font-size="9" fill="#F5A623">5s-Kommando-Overlay, blendet sich von selbst aus</text>
+
+  <!-- Status-Zeile -->
+  <text x="700" y="270" text-anchor="middle" font-size="9.5">
+    <tspan fill="#34D399">BLE OK</tspan><tspan fill="#7D97A8">   Bat 82%   14:32</tspan>
+  </text>
+
+  <!-- Nav-Tab Inhalt -->
+  <text x="700" y="292" text-anchor="middle" font-size="11" fill="#7D97A8">Modus: Wettfahrt aktiv</text>
+  <text x="700" y="317" text-anchor="middle" font-size="17" font-weight="700" fill="#E8EEF2">Boot: 5.4 kn</text>
+  <text x="700" y="339" text-anchor="middle" font-size="17" font-weight="700" fill="#E8EEF2">Ziel: 4.8 kn</text>
+  <text x="700" y="360" text-anchor="middle" font-size="13" fill="#34D399">&#9650; Lift</text>
+
+  <rect x="650" y="373" width="100" height="28" rx="14" fill="#EF4444"/>
+  <text x="700" y="392" text-anchor="middle" font-size="13" font-weight="700" fill="#132638">WENDE!</text>
+  <text x="700" y="418" text-anchor="middle" font-size="9" fill="#7D97A8">Rot = Man&#246;ver empfohlen &#183; Gr&#252;n = guter Kurs</text>
+  <text x="700" y="432" text-anchor="middle" font-size="8.5" fill="#7D97A8">(live, unabh&#228;ngig vom Push-Cooldown)</text>
+
+  <!-- Tab-Leiste Ultra -->
+  <text x="700" y="530" text-anchor="middle" font-size="12">
+    <tspan fill="#2DD4BF" font-weight="700">Nav</tspan><tspan fill="#7D97A8"> &#183; Wind &#183; Heim &#183; </tspan><tspan fill="#34D399" font-weight="700">CD</tspan><tspan fill="#7D97A8"> &#183; Man &#183; Men&#252;</tspan>
+  </text>
+  <text x="700" y="548" text-anchor="middle" font-size="9" fill="#7D97A8">Gr&#252;ner Tab = dort l&#228;uft gerade etwas (Countdown/Heimweg/Man&#246;ver)</text>
+
+  <!-- Bedienung-Box Ultra -->
+  <rect x="510" y="575" width="380" height="110" rx="10" fill="#0A1420" stroke="#1E3A4F" stroke-width="1"/>
+  <text x="530" y="598" font-size="12" font-weight="700" fill="#E8EEF2">Bedienung</text>
+  <text x="530" y="619" font-size="10.5" fill="#7D97A8">Touch (Tabs frei w&#228;hlbar, Men&#252;-Buttons)</text>
+  <text x="530" y="637" font-size="10.5" fill="#7D97A8">Taster: kurz = Ja/weiter &#183; lang = Nein/senden</text>
+  <text x="530" y="655" font-size="10.5" fill="#7D97A8">Geste: Handgelenk heben = Ja &#183; Sch&#252;tteln = Nein</text>
+  <text x="530" y="673" font-size="10.5" fill="#7D97A8">(Fallback: physischer Taster bei nasser Hand)</text>
+
+  <!-- ============ Pfeil B -> C: LoRa ============ -->
+  <line x1="922" y1="350" x2="968" y2="350" stroke="#F5A623" stroke-width="3"/>
+  <polygon points="912,350 926,344 926,356" fill="#F5A623"/>
+  <polygon points="978,350 964,344 964,356" fill="#F5A623"/>
+  <text x="945" y="325" text-anchor="middle" font-size="13" font-weight="700" fill="#F5A623">LoRa</text>
+
+  <!-- ============ Panel C: T-Watch S3 ============ -->
+  <rect x="980" y="95" width="380" height="665" rx="18" fill="#132638" stroke="#1E3A4F" stroke-width="1.5"/>
+  <text x="1170" y="132" text-anchor="middle" font-size="20" font-weight="700" fill="#E8EEF2">&#8987; T-Watch S3 &#8212; an Land</text>
+  <text x="1170" y="153" text-anchor="middle" font-size="12" fill="#7D97A8">Empf&#228;nger: 3 Tabs</text>
+
+  <!-- Uhr-Gehäuse: quadratisches IPS-LCD (240x240px) - NICHT rund -->
+  <rect x="1050" y="210" width="240" height="240" rx="28" fill="#0A1420" stroke="#1E3A4F" stroke-width="3"/>
+
+  <!-- Eingehende Quick-Message -->
+  <rect x="1090" y="200" width="160" height="38" rx="8" fill="#2DD4BF"/>
+  <text x="1170" y="224" text-anchor="middle" font-size="14" font-weight="800" fill="#132638">BIN ZUR&#220;CK!</text>
+  <text x="1170" y="252" text-anchor="middle" font-size="9" fill="#2DD4BF">Eingehende Quick-Message vom Boot</text>
+
+  <!-- Status-Tab Inhalt -->
+  <text x="1170" y="290" text-anchor="middle" font-size="30" font-weight="800" fill="#E8EEF2">14:32</text>
+  <text x="1170" y="313" text-anchor="middle" font-size="11" fill="#7D97A8">Wettfahrt aktiv</text>
+  <text x="1170" y="333" text-anchor="middle" font-size="11" fill="#7D97A8">Akku Uhr: 78%</text>
+  <text x="1170" y="353" text-anchor="middle" font-size="11" fill="#34D399">&#9679; Empfang (3s)</text>
+  <text x="1170" y="373" text-anchor="middle" font-size="9.5" fill="#7D97A8">Paket #482 &#183; bisher 2.1 km</text>
+
+  <!-- Tab-Leiste S3 -->
+  <text x="1170" y="503" text-anchor="middle" font-size="12">
+    <tspan fill="#2DD4BF" font-weight="700">Status</tspan><tspan fill="#7D97A8"> &#183; Detail &#183; Men&#252;</tspan>
+  </text>
+  <text x="1170" y="521" text-anchor="middle" font-size="9" fill="#7D97A8">Status = Hauptbildschirm, erscheint immer beim Start</text>
+
+  <!-- Bedienung-Box S3 -->
+  <rect x="1000" y="555" width="340" height="90" rx="10" fill="#0A1420" stroke="#1E3A4F" stroke-width="1"/>
+  <text x="1020" y="578" font-size="12" font-weight="700" fill="#E8EEF2">Bedienung</text>
+  <text x="1020" y="599" font-size="10.5" fill="#7D97A8">Touch (Tabs, Men&#252;)</text>
+  <text x="1020" y="617" font-size="10.5" fill="#7D97A8">Taster kurz/lang = Ja/Nein auf Fragen</text>
+  <text x="1020" y="635" font-size="10.5" fill="#7D97A8">Aufwecken: Touch oder Handgelenk-Kipp-Geste</text>
+
+  <!-- ============ Legende / Fußzeile ============ -->
+  <line x1="40" y1="775" x2="1360" y2="775" stroke="#1E3A4F" stroke-width="1"/>
+
+  <circle cx="90" cy="798" r="6" fill="#34D399"/>
+  <text x="105" y="802" font-size="11" fill="#7D97A8">guter Kurs / aktiver Zustand</text>
+
+  <circle cx="380" cy="798" r="6" fill="#EF4444"/>
+  <text x="395" y="802" font-size="11" fill="#7D97A8">Man&#246;ver empfohlen</text>
+
+  <circle cx="620" cy="798" r="6" fill="#F5A623"/>
+  <text x="635" y="802" font-size="11" fill="#7D97A8">neues Kommando / LoRa-Link</text>
+
+  <circle cx="920" cy="798" r="6" fill="#2DD4BF"/>
+  <text x="935" y="802" font-size="11" fill="#7D97A8">UI-Akzent / BLE-Link</text>
+
+  <text x="700" y="822" text-anchor="middle" font-size="10.5" fill="#7D97A8"><tspan fill="#2DD4BF" font-weight="700">BLE</tspan> (Handy &#8596; Ultra): GPS &#183; Wind &#183; Renn-/Heimwegstatus &#183; Haptik &#183; Kommandos &#160;&#160;&#160;&#160;&#8226;&#160;&#160;&#160;&#160; <tspan fill="#F5A623" font-weight="700">LoRa 869.525 MHz</tspan> (Ultra &#8596; S3): Status &#183; Quick-Messages &#183; Position</text>
+  <text x="700" y="843" text-anchor="middle" font-size="10.5" font-style="italic" fill="#7D97A8">Schematische Illustration (kein Screenshot) &#8212; Stand 12.08.2026, UI-Details noch nicht final auf echter Hardware abgenommen.</text>
+
+</svg>

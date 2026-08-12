@@ -45,6 +45,7 @@
 #include <LV_Helper.h>
 #include <NimBLEDevice.h>      // nur fuer den optionalen BLE-Fragen-Editor, siehe docs/Erweiterung_S3_BLE_Fragen_Editor.md
 #include <Preferences.h>       // NVS-Persistenz eigener Fragen + Wecker-Einstellung
+#include <esp_system.h>        // esp_reset_reason(), siehe Reset-Diagnose weiter unten
 #include "../../shared/LoRaPacket.h"
 #include "../../shared/QuickMessages.h"
 #include "../../shared/Crypto.h"
@@ -61,6 +62,105 @@ static bool timeSyncedFromBoat = false; // siehe loraReceiveTick(): einmaliger A
 static bool isSignalLost() {
     if (!havePacketYet) return true;
     return (millis() - lastPacketReceivedMillis) > LORA_SIGNAL_LOST_THRESHOLD_MS;
+}
+
+// ============================================================================
+// Reset-/Crash-Diagnose (siehe docs/Erweiterung_S3_Reset_Diagnose.md): loggt
+// bei JEDEM Boot den ESP32-Reset-Grund (esp_reset_reason()) + Uhrzeit in
+// einen 8er-Ringpuffer im NVS. Die PCF8563-RTC laeuft unabhaengig vom
+// Neustart weiter (eigene Backup-Versorgung) und ist deshalb schon VOR dem
+// LoRa-Zeit-Sync gueltig (falls die Uhr vorher schonmal lief). Hintergrund:
+// nach einem Feld-Vorfall (Bildschirm schwarz/unbedienbar, 11.08.2026 von
+// Roman beobachtet) war bisher nur per LIVE angeschlossenem Serial Monitor
+// erkennbar, WARUM neu gestartet wurde - der genaue Moment laesst sich im
+// Feld aber praktisch nie live mitschneiden. Das NVS-Log ueberlebt den
+// Vorfall selbst und laesst sich danach in Ruhe auslesen (Menü > Diagnose),
+// auch ganz ohne PC in der Naehe.
+// ============================================================================
+
+static const int RESET_LOG_SIZE = 8;
+
+static const char *resetReasonText(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_POWERON:   return "Power-On (Strom neu)";
+        case ESP_RST_EXT:       return "Extern (Reset-Pin)";
+        case ESP_RST_SW:        return "Software-Neustart";
+        case ESP_RST_PANIC:     return "CRASH (Panic/Exception)";
+        case ESP_RST_INT_WDT:   return "Watchdog (intern)";
+        case ESP_RST_TASK_WDT:  return "Watchdog (Task haengt)";
+        case ESP_RST_WDT:       return "Watchdog (sonstig)";
+        case ESP_RST_DEEPSLEEP: return "Aufgewacht (Deep-Sleep)";
+        case ESP_RST_BROWNOUT:  return "Unterspannung (Brownout)";
+        case ESP_RST_SDIO:      return "SDIO";
+        case ESP_RST_USB:       return "USB-Reset (z.B. Flashen/RTS)";
+        case ESP_RST_JTAG:      return "JTAG-Reset";
+        case ESP_RST_EFUSE:     return "eFuse-Fehler";
+        case ESP_RST_PWR_GLITCH: return "Spannungs-Glitch";
+        case ESP_RST_CPU_LOCKUP: return "CPU LOCKUP (Doppel-Exception)";
+        default:                return "Unbekannt";
+    }
+}
+
+// Direkt in setup() aufgerufen (VOR buildUi(), aber NACH instance.begin(),
+// damit die RTC schon lesbar ist) - schreibt den aktuellen Reset-Grund als
+// neuen Ringpuffer-Eintrag ins NVS.
+static void logResetReasonToNvs() {
+    esp_reset_reason_t reason = esp_reset_reason();
+    struct tm now;
+    instance.rtc.getDateTime(&now);
+
+    char entry[56]; // laengster Text ("CPU LOCKUP (Doppel-Exception)") + Datum/Zeit-Prefix, mit Marge
+    if (now.tm_year + 1900 >= 2020) {
+        snprintf(entry, sizeof(entry), "%02d.%02d. %02d:%02d - %s",
+                 now.tm_mday, now.tm_mon + 1, now.tm_hour, now.tm_min, resetReasonText(reason));
+    } else {
+        // RTC noch nie gestellt (frisch ab Werk/nach Vollreset) - kein Datum verfuegbar
+        snprintf(entry, sizeof(entry), "(Uhr ungestellt) %s", resetReasonText(reason));
+    }
+
+    Preferences prefs;
+    prefs.begin("diag", false);
+    int idx = prefs.getInt("idx", 0) % RESET_LOG_SIZE;
+    int count = prefs.getInt("count", 0);
+    char key[8];
+    snprintf(key, sizeof(key), "e%d", idx);
+    prefs.putString(key, entry);
+    prefs.putInt("idx", (idx + 1) % RESET_LOG_SIZE);
+    if (count < RESET_LOG_SIZE) prefs.putInt("count", count + 1);
+    prefs.end();
+
+    Serial.printf("[Diagnose] Reset-Grund geloggt: %s\n", entry);
+}
+
+// Liest den Ringpuffer aus dem NVS, neuester Eintrag zuerst - fuer die
+// Diagnose-Unteransicht im Menue (siehe buildMenuTab()).
+static String getResetLogText() {
+    Preferences prefs;
+    prefs.begin("diag", true);
+    int count = prefs.getInt("count", 0);
+    int idx = prefs.getInt("idx", 0);
+    if (count == 0) {
+        prefs.end();
+        return "Noch keine Eintraege.";
+    }
+    String out;
+    for (int i = 0; i < count; i++) {
+        int pos = ((idx - 1 - i) % RESET_LOG_SIZE + RESET_LOG_SIZE) % RESET_LOG_SIZE;
+        char key[8];
+        snprintf(key, sizeof(key), "e%d", pos);
+        out += prefs.getString(key, "");
+        out += "\n";
+    }
+    prefs.end();
+    return out;
+}
+
+static void clearResetLog() {
+    Preferences prefs;
+    prefs.begin("diag", false);
+    prefs.clear();
+    prefs.end();
+    Serial.println("[Diagnose] Reset-Log geloescht");
 }
 
 // ============================================================================
@@ -262,9 +362,22 @@ static void sendQuickAnswer(QuickAnswer answer) {
 static bool displayAsleep = false;
 static const unsigned long STANDBY_TIMEOUT_MS = 30000;
 
+// Bugfix 11.08.2026: instance.sleepDisplay()/wakeupDisplay() sind fuer die S3
+// in der gepinnten LilyGoLib (LilyGoWatchS3.cpp, Klasse LilyGoWatch2022)
+// AUSKOMMENTIERTE LEER-STUBS ("// LilyGoDispSPI::sleep();" - kein Aufruf,
+// tut nichts):
+//   void LilyGoWatch2022::sleepDisplay()   { /* LilyGoDispSPI::sleep(); */ }
+//   void LilyGoWatch2022::wakeupDisplay()  { /* LilyGoDispSPI::wakeup(); */ }
+// Unser Standby-Code rief bisher NUR diese beiden Funktionen auf - loggte
+// "Display aufgeweckt"/"ausgeschaltet", ohne dass am Backlight/Panel real
+// etwas passierte. Deshalb hier zusaetzlich direkt per instance.setBrightness()
+// steuern (LilyGoWatch2022::setBrightness() ruft echt LilyGoDispSPI::setBrightness()
+// auf, siehe LilyGoWatchS3.cpp) - die Stub-Aufrufe bleiben trotzdem drin,
+// falls eine kuenftige LilyGoLib-Version sie doch befuellt.
 static void wakeDisplay() {
     if (!displayAsleep) return;
     instance.wakeupDisplay();
+    instance.setBrightness(DEVICE_MAX_BRIGHTNESS_LEVEL);
     displayAsleep = false;
     Serial.println("[Standby] Display aufgeweckt");
 }
@@ -273,6 +386,7 @@ static void standbyTick() {
     uint32_t inactiveMs = lv_display_get_inactive_time(NULL);
     if (!displayAsleep && inactiveMs >= STANDBY_TIMEOUT_MS) {
         instance.sleepDisplay();
+        instance.setBrightness(0);
         displayAsleep = true;
         Serial.println("[Standby] Display nach 30s Inaktivitaet ausgeschaltet (LoRa-Empfang laeuft weiter)");
     } else if (displayAsleep && inactiveMs < STANDBY_TIMEOUT_MS) {
@@ -450,6 +564,11 @@ static lv_obj_t *tabMain, *tabDetail, *tabMenu;
 static lv_obj_t *lblStatusBig;
 static lv_obj_t *lblClockBig;
 static lv_obj_t *lblConnIndicator;
+// NEU (12.08.2026, Roman-Wunschliste "vor dem naechsten Test"): S3 zeigte
+// bisher nirgends die EIGENE Batterie (lblDetailBattery auf tabDetail ist
+// die des BOOTS, per LoRa empfangen) - gleiche PMU-API wie auf der Ultra
+// bereits genutzt (instance.pmu.getBatteryPercent(), siehe dort).
+static lv_obj_t *lblOwnBattery;
 
 // Detail-Tab
 static lv_obj_t *lblDetailDistance;
@@ -467,6 +586,8 @@ static lv_obj_t *lblDetailPacketInfo;
 // einfacher umsetzen als innerhalb der Tab-Struktur.
 static lv_obj_t *menuGridScreen, *menuFragenScreen, *menuAlltagScreen;
 static lv_obj_t *menuWeckerScreen, *menuStoppuhrScreen, *menuSchritteScreen;
+static lv_obj_t *menuDiagnoseScreen; // Reset-Log, siehe logResetReasonToNvs()/getResetLogText()
+static lv_obj_t *lblDiagnoseLog;
 static lv_obj_t *btnMuteTile, *lblMuteTileText;
 static lv_obj_t *lblQuickSelected;
 
@@ -547,6 +668,9 @@ static void mainScreenUpdate() {
     struct tm timeinfo;
     instance.rtc.getDateTime(&timeinfo);
     lv_label_set_text_fmt(lblClockBig, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+
+    int ownBatt = instance.pmu.getBatteryPercent();
+    lv_label_set_text_fmt(lblOwnBattery, "Akku Uhr: %d%%", ownBatt);
 
     alarmCheckTick(timeinfo);
     stepsAutoResetCheck(timeinfo);
@@ -777,6 +901,16 @@ static void cbOpenStoppuhr(lv_event_t *e) { showMenuScreen(menuStoppuhrScreen); 
 static void cbOpenSchritte(lv_event_t *e) { showMenuScreen(menuSchritteScreen); }
 static void cbAlltagBack(lv_event_t *e) { showMenuScreen(menuAlltagScreen); } // von Wecker/Stoppuhr/Schritte zurueck ins Alltag-Grid
 
+// Reset-Diagnose (siehe logResetReasonToNvs()/getResetLogText() weiter oben)
+static void cbOpenDiagnose(lv_event_t *e) {
+    lv_label_set_text(lblDiagnoseLog, getResetLogText().c_str());
+    showMenuScreen(menuDiagnoseScreen);
+}
+static void cbDiagnoseClear(lv_event_t *e) {
+    clearResetLog();
+    lv_label_set_text(lblDiagnoseLog, getResetLogText().c_str());
+}
+
 /**
  * Deep-Sleep. Aufwachen NUR per Touch, siehe Bugfix-Kommentar unten.
  */
@@ -913,6 +1047,7 @@ static void showMenuScreen(lv_obj_t *screen) {
     lv_obj_add_flag(menuWeckerScreen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(menuStoppuhrScreen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(menuSchritteScreen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(menuDiagnoseScreen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(screen, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -940,6 +1075,11 @@ static void buildMenuTab(lv_obj_t *parent) {
     addIconTile(row1, LV_SYMBOL_ENVELOPE, "Fragen", cbOpenFragen, 47);
 
     addIconTile(menuGridScreen, LV_SYMBOL_HOME, "Alltag", cbOpenAlltag, 94);
+
+    // Reset-Diagnose (siehe docs/Erweiterung_S3_Reset_Diagnose.md) - eigene
+    // Kachel statt im Alltag-Grid, ist kein Alltags-Feature sondern Debug/
+    // Fehlersuche.
+    addIconTile(menuGridScreen, LV_SYMBOL_SETTINGS, "Diagnose", cbOpenDiagnose, 94);
 
     lv_obj_t *btnShutdown = addMenuButton(menuGridScreen, "Ausschalten", cbShutdown);
     lv_obj_set_style_bg_color(btnShutdown, lv_color_hex(0x802020), 0);
@@ -1029,6 +1169,19 @@ static void buildMenuTab(lv_obj_t *parent) {
     addMenuButton(menuSchritteScreen, "Reset", cbStepsReset);
     addMenuButton(menuSchritteScreen, LV_SYMBOL_LEFT " Zurueck", cbAlltagBack);
 
+    // -- Diagnose-Unteransicht: Reset-Log (siehe logResetReasonToNvs()/
+    // getResetLogText() oben, docs/Erweiterung_S3_Reset_Diagnose.md) --
+    menuDiagnoseScreen = addMenuScreenContainer(parent);
+    addSubHeader(menuDiagnoseScreen, "-- Diagnose: Neustart-Log --");
+    lblDiagnoseLog = lv_label_create(menuDiagnoseScreen);
+    lv_obj_set_style_text_font(lblDiagnoseLog, &lv_font_montserrat_18, 0);
+    lv_obj_set_width(lblDiagnoseLog, LV_PCT(94));
+    lv_label_set_long_mode(lblDiagnoseLog, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lblDiagnoseLog, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(lblDiagnoseLog, "Noch keine Eintraege.");
+    addMenuButton(menuDiagnoseScreen, "Log loeschen", cbDiagnoseClear);
+    addMenuButton(menuDiagnoseScreen, LV_SYMBOL_LEFT " Zurueck", cbMenuBack);
+
     showMenuScreen(menuGridScreen);
 }
 
@@ -1081,6 +1234,13 @@ static void buildUi() {
     lv_label_set_long_mode(lblConnIndicator, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lblConnIndicator, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblConnIndicator, LV_ALIGN_BOTTOM_MID, 0, -10);
+
+    // Eigene Akku-Anzeige (12.08.2026, siehe lblOwnBattery-Deklaration) -
+    // zwischen Uhrzeit und Verbindungsindikator, aktualisiert in
+    // mainScreenUpdate().
+    lblOwnBattery = lv_label_create(tabMain);
+    lv_obj_set_style_text_font(lblOwnBattery, &lv_font_montserrat_20, 0);
+    lv_obj_align(lblOwnBattery, LV_ALIGN_CENTER, 0, 65);
 
     // -- Detail-Tab --
     // 10.08.2026: von fixen Pixel-Koordinaten (y=6/48/90/132, PacketInfo
@@ -1302,6 +1462,12 @@ void setup() {
     Serial.begin(115200);
 
     instance.begin();
+
+    // So frueh wie moeglich (RTC ist ab instance.begin() lesbar) - loggt den
+    // Grund fuer DIESEN Boot, bevor irgendwas anderes schiefgehen koennte.
+    // Siehe Erklaerung bei logResetReasonToNvs() oben.
+    logResetReasonToNvs();
+
     beginLvglHelper(instance);
     instance.setBrightness(DEVICE_MAX_BRIGHTNESS_LEVEL);
 

@@ -31,6 +31,19 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
 
     private var lastManeuverNeeded: Boolean? = null
 
+    // Manöver-Timing-Entschärfung (12.08.2026, Roman-Wunschliste "vor dem
+    // nächsten Test", siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md):
+    // im echten Rennen kamen Vorschläge zu schnell/zu oft hintereinander,
+    // v.a. wenn der Kurs genau am Anluv-Limit oszilliert. activatedAtMs wird
+    // beim ERSTEN tick() nach activate() lazy gesetzt (activate() hat noch
+    // keinen fix/Zeitstempel), nextAllowedSuggestionAtMs startet damit
+    // gleich auf "Start-Grace" und wird bei jedem tatsächlich ausgelösten
+    // Vorschlag um den Cooldown weiter nach vorne verschoben - siehe
+    // maybeVibrateManeuver() unten. Drosselt NUR den Push (Vibration), nicht
+    // die Anzeige - siehe dortige Klassendoku.
+    private var activatedAtMs: Long? = null
+    private var nextAllowedSuggestionAtMs: Long = 0L
+
     // Vereinheitlichte Rundungserkennung für UPWIND (Luvbake) und DOWNWIND
     // (immer "geschätzt", kein Leetonnen-Wegpunkt) — siehe
     // docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md. EIN geteilter
@@ -38,6 +51,16 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
     // schon beim bisherigen legTracker/lastSteady) — wird bei jedem
     // Leg-Wechsel zurückgesetzt.
     private val roundingDetector = MarkRoundingDetector()
+
+    // VMC zur aktuellen Etappen-Marke (Luvbake bzw. Entlastungsboje), gleiches
+    // Muster wie HomeEngine.progressTracker (siehe dortige Klassendoku) - eine
+    // träge, über ein Zeitfenster gemessene Annäherung statt einer
+    // Momentan-Berechnung aus dem Kurs. Eigene Instanz (siehe
+    // HomeProgressTracker-Klassendoku: "jede Nutzung braucht eine EIGENE,
+    // unabhängige Instanz"). Wird bei jedem Etappen-/Marken-Wechsel
+    // zurückgesetzt, weil die alte Distanz-Historie sich aufs vorherige Ziel
+    // bezieht. Auf DOWNWIND (kein Leetonnen-Wegpunkt) bleibt sie ungenutzt.
+    private val vmcTracker = HomeProgressTracker()
 
     data class PendingConfirmation(val waypointKey: String, val candidatePosition: GeoPoint)
 
@@ -50,8 +73,11 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         leg = CompetitionLeg.UPWIND
         lapCount = 0
         roundingDetector.reset()
+        vmcTracker.reset()
         pendingConfirmation = null
         lastManeuverNeeded = null
+        activatedAtMs = null
+        nextAllowedSuggestionAtMs = 0L
     }
 
     fun tick(
@@ -72,11 +98,12 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         if (leg == CompetitionLeg.REACH_TO_OFFSET && mark2 == null) {
             leg = CompetitionLeg.DOWNWIND
             roundingDetector.reset()
+            vmcTracker.reset()
         }
 
         return when (leg) {
             CompetitionLeg.UPWIND -> tickUpwind(fix, lat, lon, wd, mark1, mark2, closehauledAngleDeg)
-            CompetitionLeg.REACH_TO_OFFSET -> tickReach(lat, lon, mark2!!)
+            CompetitionLeg.REACH_TO_OFFSET -> tickReach(fix, lat, lon, mark2!!)
             CompetitionLeg.DOWNWIND -> tickDownwind(fix, lat, lon, wd, downwindAngleDeg)
         }
     }
@@ -99,12 +126,31 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         return recommended to (currentTackSign != recommendedTackSign)
     }
 
-    private fun maybeVibrateManeuver(maneuverNeeded: Boolean, label: String) {
-        if (maneuverNeeded && lastManeuverNeeded != true) {
+    /**
+     * Drosselt nur den PUSH (Vibration + Statusmeldung, künftig auch das
+     * Nav-Tab-5s-Overlay auf der Uhr) — NICHT die Anzeige. Roman-Wunsch
+     * 12.08.2026: das Nav-Tab soll immer live den aktuellen Kurs
+     * rot/grün zeigen (siehe [CompetitionGuidance.maneuverNeeded], bleibt
+     * dafür bewusst UNGEDROSSELT/roh), auch während eines gerade
+     * unterdrückten Pushs ("wenn ich das ablehne will ich trotzdem einen
+     * Indikator haben"). [activatedAtMs]/[nextAllowedSuggestionAtMs] werden
+     * beim ERSTEN Tick nach [activate] lazy gesetzt (activate() hat noch
+     * keinen Zeitstempel). Nur eine ECHTE Flanke (false→true von
+     * [rawNeeded], nicht vom gedrosselten Wert) löst überhaupt einen Push
+     * aus - bleibt der Kurs durchgehend "schlecht", wird nur einmal
+     * gepusht, nicht wiederholt (wie schon vor dieser Erweiterung).
+     */
+    private fun maybeVibrateManeuver(rawNeeded: Boolean, now: Long, label: String) {
+        if (activatedAtMs == null) {
+            activatedAtMs = now
+            nextAllowedSuggestionAtMs = now + Constants.COMPETITION_MANEUVER_START_GRACE_MS
+        }
+        if (rawNeeded && lastManeuverNeeded != true && now >= nextAllowedSuggestionAtMs) {
             vib.maneuverCmd()
             status.setStatus("Wende Richtung $label empfehlenswert!", StatusLevel.AMBER)
+            nextAllowedSuggestionAtMs = now + Constants.COMPETITION_MANEUVER_SUGGEST_COOLDOWN_MS
         }
-        lastManeuverNeeded = maneuverNeeded
+        lastManeuverNeeded = rawNeeded
     }
 
     private fun tickUpwind(
@@ -132,7 +178,13 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         }
 
         val (recommended, maneuverNeeded) = closehauledGuidance(fix, wd, bearing, closehauledAngleDeg)
-        maybeVibrateManeuver(maneuverNeeded, if (isEstimated) "Luvtonne (geschätzt)" else "Luvbake")
+        maybeVibrateManeuver(maneuverNeeded, fix.timestampMs, if (isEstimated) "Luvtonne (geschätzt)" else "Luvbake")
+
+        // Träge/geglättete VMC statt Momentan-Kurs (siehe vmcTracker-Doku).
+        // Ohne echte Luvbake (isEstimated) gibt es keinen festen GPS-Punkt,
+        // gegen den sich eine Annäherung messen liesse - distance ist dann
+        // ohnehin schon null, sample() wird also gar nicht erst aufgerufen.
+        if (distance != null) vmcTracker.sample(fix.timestampMs, distance)
 
         return CompetitionGuidance(
             leg = CompetitionLeg.UPWIND,
@@ -143,12 +195,14 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
             maneuverNeeded = maneuverNeeded,
             isEstimated = isEstimated,
             lapCount = lapCount,
+            vmcKn = if (distance != null) vmcTracker.averageVmcKn() else null,
         )
     }
 
     private fun advanceLegAfterUpwind(hasOffsetMark: Boolean) {
         vib.rounding6()
         roundingDetector.reset()
+        vmcTracker.reset() // neue Etappe -> neues Ziel, alte Annäherungs-Historie ungültig
         lastManeuverNeeded = null
         if (hasOffsetMark) {
             leg = CompetitionLeg.REACH_TO_OFFSET
@@ -179,13 +233,20 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         status.setStatus("Kurswechsel nicht als Luvbaken-Rundung gewertet.", StatusLevel.NORMAL)
     }
 
-    private fun tickReach(lat: Double, lon: Double, mark2: GeoPoint): CompetitionGuidance {
+    private fun tickReach(fix: Fix, lat: Double, lon: Double, mark2: GeoPoint): CompetitionGuidance {
         val bearing = GeoUtils.bearingDeg(lat, lon, mark2.lat, mark2.lon)
         val distance = GeoUtils.distanceMeters(lat, lon, mark2.lat, mark2.lon)
+
+        // Vor dem evtl. Reset unten sampeln, sonst geht der letzte Messpunkt
+        // direkt vor der Rundung verloren (marginal, aber konsistent mit
+        // tickUpwind()/tickDownwind()).
+        vmcTracker.sample(fix.timestampMs, distance)
+        val vmcKn = vmcTracker.averageVmcKn()
 
         if (distance <= Constants.ROUNDING_RADIUS_M) {
             vib.rounding6()
             roundingDetector.reset()
+            vmcTracker.reset() // neue Etappe (Vorwind) -> kein Marken-Ziel mehr
             leg = CompetitionLeg.DOWNWIND
             status.setStatus("Entlastungsboje gerundet — Vorwind-Schlag!", StatusLevel.GREEN)
         }
@@ -199,6 +260,7 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
             maneuverNeeded = false,
             isEstimated = false,
             lapCount = lapCount,
+            vmcKn = vmcKn,
         )
     }
 
@@ -223,6 +285,7 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
         if (result is MarkRoundingDetector.Result.AutoRounded) {
             vib.rounding6()
             roundingDetector.reset()
+            vmcTracker.reset() // neue Runde -> neue Luvbake als Ziel
             lastManeuverNeeded = null
             lapCount++
             leg = CompetitionLeg.UPWIND
@@ -238,6 +301,7 @@ class CompetitionEngine(private val vib: HapticFeedback, private val status: Sta
             maneuverNeeded = false,
             isEstimated = true,
             lapCount = lapCount,
+            vmcKn = null, // kein Leetonnen-Wegpunkt (siehe Klassendoku) -> keine Annäherung messbar
         )
     }
 

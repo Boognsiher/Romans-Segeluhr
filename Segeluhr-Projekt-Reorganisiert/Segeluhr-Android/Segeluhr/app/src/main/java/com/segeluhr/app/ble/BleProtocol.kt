@@ -64,10 +64,72 @@ object BleProtocol {
      */
     val CHAR_TIME_SYNC_UUID: UUID = UUID.fromString("6f6e0009-b5a3-f393-e0a9-e50e24dcca9e")
 
+    /**
+     * NEU (12.08.2026, Roman-Wunschliste "vor dem nächsten Test", siehe
+     * docs/Erweiterung_TWatch_Ultra_NavRedesign.md): 1-Byte NOTIFY-
+     * Characteristic, Handy -> Ultra-Watch. Bitmaske, welche der über den
+     * Menü-Tab setzbaren Wegpunkte GERADE eine Koordinate hinterlegt haben
+     * (siehe [WaypointSetFlag]) — lässt die Uhr die zugehörigen "X setzen"-
+     * Buttons grün einfärben, sobald der Punkt tatsächlich persistiert ist
+     * (Roman-Wunsch: "Feedback ob es passt", nachdem sich beim letzten Test
+     * ein stiller Fehlschlag bei "Home setzen" als kaputtes Write-ohne-
+     * Antwort herausstellte, siehe Firmware-Kommentar bei
+     * sendControlCommand()). Bewusst EIGENE Characteristic statt eines
+     * weiteren Felds in HomeStatusPacket/RaceStatusPacket — betrifft
+     * konzeptionell alle Wegpunkt-Typen, nicht nur Heimweg/Renn-Status.
+     */
+    val CHAR_WAYPOINTS_STATUS_UUID: UUID = UUID.fromString("6f6e000a-b5a3-f393-e0a9-e50e24dcca9e")
+
+    /**
+     * Bit-Zuordnung für [encodeWaypointsStatus] — bewusst EIGENE, kompakte
+     * Nummerierung (nicht 1:1 [WaypointId]: die geht bis 9 und passt mit
+     * Lücken (LAKE_CENTER wird hier nicht gebraucht, ist keine
+     * Setzen/Löschen-Aktion auf der Uhr) nicht in 1 Byte). Nur die 6
+     * Wegpunkte, die aktuell im Menü-Tab der Uhr Set/Clear-Buttons haben.
+     */
+    object WaypointSetFlag {
+        const val BUOY1: Int = 1 shl 0
+        const val BUOY2: Int = 1 shl 1
+        const val TARGET: Int = 1 shl 2
+        const val HOME: Int = 1 shl 3
+        const val COMPETITION_MARK1: Int = 1 shl 4
+        const val COMPETITION_MARK2: Int = 1 shl 5
+    }
+
+    /** 1-Byte WaypointsStatusPacket, siehe [CHAR_WAYPOINTS_STATUS_UUID]/[WaypointSetFlag]. */
+    fun encodeWaypointsStatus(
+        buoy1Set: Boolean, buoy2Set: Boolean, targetSet: Boolean,
+        homeSet: Boolean, mark1Set: Boolean, mark2Set: Boolean,
+    ): ByteArray {
+        var flags = 0
+        if (buoy1Set) flags = flags or WaypointSetFlag.BUOY1
+        if (buoy2Set) flags = flags or WaypointSetFlag.BUOY2
+        if (targetSet) flags = flags or WaypointSetFlag.TARGET
+        if (homeSet) flags = flags or WaypointSetFlag.HOME
+        if (mark1Set) flags = flags or WaypointSetFlag.COMPETITION_MARK1
+        if (mark2Set) flags = flags or WaypointSetFlag.COMPETITION_MARK2
+        return byteArrayOf(flags.toByte())
+    }
+
     private const val HOME_FLAG_ACTIVE: Int = 1 shl 0
     private const val HOME_FLAG_MANEUVER_NEEDED: Int = 1 shl 1
+    // NEU (12.08.2026, Roman-Wunschliste "vor dem naechsten Test"): einmaliger
+    // Puls (true fuer genau EIN notifyHomeStatus()-Notify), wenn der Heimweg-
+    // Modus gerade automatisch bei Ankunft gestoppt wurde (siehe
+    // SegeluhrViewModel-Ankunftserkennung). Die Ultra-Watch wertet dies als
+    // steigende Flanke aus und schickt automatisch eine "BIN ZURUECK!"
+    // Quick-Message per LoRa an die Land-Uhr, siehe QuickMessages.h.
+    private const val HOME_FLAG_ARRIVED: Int = 1 shl 2
 
     private const val WIND_FLAG_CALIBRATED: Int = 1 shl 0
+    // NEU (11.08.2026, Erweiterung Nav-Tab-Redesign Ultra-Uhr): true = der
+    // aktuelle Wind-Trend begünstigt den aktuell gefahrenen Bug ("Lift",
+    // Boot kann höher anluven), false = "Header" (Boot muss abfallen).
+    // Konvention (siehe ViewModel-Berechnung): Trend und aktuelles
+    // Tack-Vorzeichen (wie in CompetitionEngine/HomeEngine, "cog rechts vom
+    // Wind" = +1) haben entgegengesetztes Vorzeichen -> Lift. Reine
+    // Modellannahme, noch nicht gegen echtes Segelverhalten verifiziert.
+    private const val WIND_FLAG_LIFT: Int = 1 shl 1
 
     private const val MANEUVER_FLAG_NEEDED: Int = 1 shl 0
     private const val MANEUVER_FLAG_IS_TACK: Int = 1 shl 1
@@ -191,30 +253,46 @@ object BleProtocol {
      * (`onHomeStatusNotify` in Segeluhr_TWatch_Ultra.ino) muss beim
      * nächsten Flash entsprechend mit aktualisiert werden, sonst liest sie
      * die neuen 4 Byte nicht.
+     *
+     * Seit 11.08.2026 9 Byte: zusätzlich int16 vmcCkn (1/100 Knoten,
+     * VORZEICHENBEHAFTET, 0x7FFF = keine VMC verfügbar — siehe
+     * [com.segeluhr.app.core.HomeProgressTracker]) fürs Nav-Tab-Redesign
+     * (docs/Erweiterung_TWatch_Ultra_NavRedesign.md). Watch-Firmware muss
+     * wieder mit aktualisiert werden.
+     *
+     * Seit 12.08.2026 zusätzlich Flag-Bit [HOME_FLAG_ARRIVED] im bestehenden
+     * flags-Byte (Grösse unverändert 9 Byte) — siehe dortige Doku.
      */
-    fun encodeHomeStatus(active: Boolean, maneuverNeeded: Boolean, etaMinutes: Int?, distanceTraveledM: Int): ByteArray {
+    fun encodeHomeStatus(active: Boolean, maneuverNeeded: Boolean, etaMinutes: Int?, distanceTraveledM: Int, vmcKn: Double?, arrived: Boolean = false): ByteArray {
         var flags = 0
         if (active) flags = flags or HOME_FLAG_ACTIVE
         if (maneuverNeeded) flags = flags or HOME_FLAG_MANEUVER_NEEDED
+        if (arrived) flags = flags or HOME_FLAG_ARRIVED
         val eta = (etaMinutes ?: 0xFFFF).coerceIn(0, 0xFFFF)
-        val buf = ByteBuffer.allocate(7).order(ByteOrder.LITTLE_ENDIAN)
+        val vmcCkn = vmcKn?.let { (it * 100.0).toInt().coerceIn(-32767, 32767) } ?: 0x7FFF
+        val buf = ByteBuffer.allocate(9).order(ByteOrder.LITTLE_ENDIAN)
         buf.put(flags.toByte())
         buf.putShort(eta.toShort())
         buf.putInt(distanceTraveledM.coerceAtLeast(0))
+        buf.putShort(vmcCkn.toShort())
         return buf.array()
     }
 
     /**
      * 5-Byte WindStatusPacket: uint16 windDirDdeg (0-3599, 0xFFFF = nicht
-     * kalibriert), uint8 flags, int16 trendDdeg (signed, kumulierter
-     * Wind-Shift-Trend in 0.1°, Abschnitt 4.3). Little-Endian.
+     * kalibriert), uint8 flags (bit0=WIND_FLAG_CALIBRATED, seit 11.08.2026
+     * bit1=WIND_FLAG_LIFT, siehe dortige Doku), int16 trendDdeg (signed,
+     * kumulierter Wind-Shift-Trend in 0.1°, Abschnitt 4.3). Little-Endian.
+     * Grösse unverändert (Lift/Header passt als zusätzliches Flag-Bit rein,
+     * kein neues Feld nötig).
      */
-    fun encodeWindStatus(windDirDeg: Double?, calibrated: Boolean, trendDeg: Double?): ByteArray {
+    fun encodeWindStatus(windDirDeg: Double?, calibrated: Boolean, trendDeg: Double?, isLift: Boolean? = null): ByteArray {
         val dirDdeg: Int = if (calibrated && windDirDeg != null) {
             (windDirDeg * 10.0).toInt().let { ((it % 3600) + 3600) % 3600 }
         } else 0xFFFF
         var flags = 0
         if (calibrated) flags = flags or WIND_FLAG_CALIBRATED
+        if (isLift == true) flags = flags or WIND_FLAG_LIFT
         val trendDdeg: Int = ((trendDeg ?: 0.0) * 10.0).toInt().coerceIn(-32768, 32767)
 
         val buf = ByteBuffer.allocate(5).order(ByteOrder.LITTLE_ENDIAN)
@@ -232,6 +310,11 @@ object BleProtocol {
      * siehe docs/Erweiterung_Vereinheitlichte_Bojenerkennung.md), uint8
      * competitionLeg (Ordinal von CompetitionLeg, 0xFF = kein Competition
      * aktiv). Little-Endian.
+     *
+     * Seit 11.08.2026 7 Byte: zusätzlich int16 vmcCkn (1/100 Knoten,
+     * VORZEICHENBEHAFTET, 0x7FFF = keine VMC verfügbar — siehe
+     * [com.segeluhr.app.data.model.CompetitionGuidance.vmcKn]) fürs
+     * Nav-Tab-Redesign. Watch-Firmware muss wieder mit aktualisiert werden.
      */
     fun encodeRaceStatus(
         raceStateOrdinal: Int,
@@ -240,6 +323,7 @@ object BleProtocol {
         isTack: Boolean,
         competitionLegOrdinal: Int?,
         roundingConfirmPending: Boolean = false,
+        vmcKn: Double? = null,
     ): ByteArray {
         val cd = (countdownSeconds ?: 0xFFFF).coerceIn(0, 0xFFFF)
         var maneuverFlags = 0
@@ -247,12 +331,14 @@ object BleProtocol {
         if (isTack) maneuverFlags = maneuverFlags or MANEUVER_FLAG_IS_TACK
         if (roundingConfirmPending) maneuverFlags = maneuverFlags or MANEUVER_FLAG_ROUNDING_CONFIRM_PENDING
         val leg = competitionLegOrdinal ?: 0xFF
+        val vmcCkn = vmcKn?.let { (it * 100.0).toInt().coerceIn(-32767, 32767) } ?: 0x7FFF
 
-        val buf = ByteBuffer.allocate(5).order(ByteOrder.LITTLE_ENDIAN)
+        val buf = ByteBuffer.allocate(7).order(ByteOrder.LITTLE_ENDIAN)
         buf.put(raceStateOrdinal.toByte())
         buf.putShort(cd.toShort())
         buf.put(maneuverFlags.toByte())
         buf.put(leg.toByte())
+        buf.putShort(vmcCkn.toShort())
         return buf.array()
     }
 

@@ -387,6 +387,23 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             )
         } else null
 
+        // Heimweg-Ankunft (12.08.2026, Roman-Wunschliste "vor dem nächsten
+        // Test", siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md): war
+        // schon als TODO in setHomeModeActive() vorgesehen. Gleicher
+        // 20m-Radius wie bei Bojen (Constants.ROUNDING_RADIUS_M, dieselbe
+        // Bedeutung "Ziel erreicht"). Löst setHomeModeActive(false) aus
+        // (Modus stoppt automatisch) und markiert EINEN einmaligen "arrived"-
+        // Puls für den gleich folgenden notifyHomeStatus()-Aufruf — die
+        // Ultra-Watch erkennt daraus die steigende Flanke und schickt
+        // automatisch eine "BIN ZURÜCK!"-Quick-Message per LoRa an die
+        // Land-Uhr (siehe QuickMessages.h/Ultra-Firmware).
+        var homeArrivedPulse = false
+        if (_uiState.value.homeModeActive && homeGuidance != null && homeGuidance.distanceM <= Constants.ROUNDING_RADIUS_M) {
+            homeArrivedPulse = true
+            setHomeModeActive(false)
+            statusSink.setStatus("Heimweg-Ziel erreicht — Modus gestoppt.", StatusLevel.GREEN)
+        }
+
         // Sendet an die Ultra-Watch, egal ob gerade "Mit Uhr" aktiv ist —
         // ist keine Watch verbunden, ist notifyHomeStatus ein No-Op (siehe
         // BleGattServerManager). Die Watch entscheidet selbst, ob sie
@@ -396,11 +413,24 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             maneuverNeeded = homeGuidance?.maneuverNeeded ?: false,
             etaMinutes = homeGuidance?.etaSeconds?.let { (it / 60.0).roundToInt() },
             distanceTraveledM = distanceTracker.totalM.roundToInt(),
+            vmcKn = homeGuidance?.vmcKn,
+            arrived = homeArrivedPulse,
         )
+
+        // Lift/Header fürs Nav-Tab-Redesign der Ultra-Uhr (siehe
+        // docs/Erweiterung_TWatch_Ultra_NavRedesign.md): Trend und aktuelles
+        // Tack-Vorzeichen (identische Konvention wie in
+        // CompetitionEngine.closehauledGuidance()/HomeEngine.tick(): COG
+        // rechts vom Wind = +1) haben bei einem Lift entgegengesetztes
+        // Vorzeichen. Nur bewertbar mit kalibriertem Wind + echtem COG.
+        val isLift: Boolean? = if (calibrated && windDir != null && fix.cogDeg != null && trend?.first != null) {
+            val tackSign = if (GeoUtils.angleDiff(fix.cogDeg, windDir) > 0) 1 else -1
+            (trend.first * tackSign) < 0
+        } else null
 
         // Erweiterung: Wind- und Race-Status 1x/s an die Uhr (siehe
         // docs/Erweiterung_BLE_Wind_RaceStatus.md). No-Op ohne verbundene Uhr.
-        bleManager.notifyWindStatus(windDir, calibrated, trend?.first)
+        bleManager.notifyWindStatus(windDir, calibrated, trend?.first, isLift)
 
         val maneuverNeededForWatch = when {
             trainingEngine.trainState == com.segeluhr.app.data.model.TrainState.COMMANDED -> true
@@ -408,6 +438,17 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             _uiState.value.homeModeActive && (homeGuidance?.maneuverNeeded == true) -> true
             else -> false
         }
+        // Wegpunkt-Status fürs Menü-Tab-Button-Feedback auf der Uhr (12.08.2026,
+        // siehe BleProtocol.CHAR_WAYPOINTS_STATUS_UUID) — No-Op ohne verbundene Watch.
+        bleManager.notifyWaypointsStatus(
+            buoy1Set = currentWaypoints.buoy1 != null,
+            buoy2Set = currentWaypoints.buoy2 != null,
+            targetSet = currentWaypoints.target != null,
+            homeSet = currentWaypoints.home != null,
+            mark1Set = currentWaypoints.competitionMark1 != null,
+            mark2Set = currentWaypoints.competitionMark2 != null,
+        )
+
         bleManager.notifyRaceStatus(
             raceStateOrdinal = countdownEngine.raceState.ordinal,
             countdownSeconds = countdownS,
@@ -420,6 +461,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             // updatePendingBuoyConfirmation() dort schon Competition-
             // Vorrang + Auto-Timeout aufgelöst hat.
             roundingConfirmPending = _uiState.value.pendingBuoyConfirmation != null,
+            vmcKn = competitionGuidance?.vmcKn,
         )
 
         _uiState.update {
@@ -623,6 +665,33 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(lakeDrawModeActive = false) }
     }
 
+    /**
+     * Kartenauswahl für Bojen/Marken (12.08.2026, siehe
+     * docs/Erweiterung_Boje_Kartenauswahl.md) — Alternative zu
+     * [captureWaypoint] (setzt immer die aktuelle GPS-Position) für
+     * Wegpunkte, die man auch unabhängig von der eigenen Position antippen
+     * will. Gleiches An/Aus-Screen-Muster wie [startLakeDrawing]/
+     * [cancelLakeDrawing] oben, nur pro Wegpunkt-Key statt fest fürs
+     * See-Zeichnen.
+     */
+    fun startWaypointMapPick(key: String) {
+        _uiState.update { it.copy(waypointMapPickKey = key) }
+    }
+
+    fun cancelWaypointMapPick() {
+        _uiState.update { it.copy(waypointMapPickKey = null) }
+    }
+
+    /** Wird von WaypointMapPickScreen mit dem angetippten/bestätigten Punkt aufgerufen. */
+    fun finishWaypointMapPick(point: GeoPoint) {
+        val key = _uiState.value.waypointMapPickKey ?: return
+        viewModelScope.launch {
+            settingsRepo.setWaypoint(key, point)
+            statusSink.setStatus("Wegpunkt gesetzt: $key", StatusLevel.GREEN)
+        }
+        _uiState.update { it.copy(waypointMapPickKey = null) }
+    }
+
     /** Wird von LakeDrawScreen mit dem fertig eingezeichneten Polygon aufgerufen — ersetzt die komplette bestehende Kreis-Kette, genau wie [autoDetectLake]. */
     fun finishLakeDrawing(polygon: List<GeoPoint>) {
         viewModelScope.launch {
@@ -742,8 +811,25 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         // z.B. shoreStatusSender.sendModeChanged(active, currentWaypoints.home) aufrufen.
     }
 
-    /** Beendet den Competition-Modus manuell (z.B. nach dem Zieleinlauf) */
+    /**
+     * Beendet den Competition-Modus manuell (z.B. nach dem Zieleinlauf, oder
+     * über den neuen "Wettfahrt stoppen"-Button mit Rückfrage auf der Ultra-
+     * Uhr, siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md Abschnitt 6.1).
+     *
+     * Bugfix 12.08.2026 (beim internen Testlauf durch den neuen Uhr-Button
+     * gefunden): fehlte bisher `countdownEngine.reset()` — `raceState` blieb
+     * dadurch auf RACE stehen, `RaceStatusPacket.raceState` ging also
+     * weiterhin als 2 (RACE) raus. Auf der Uhr fällt `updateBoatState()`
+     * ohne aktives `competitionLeg` (wird hier ja auch null) dann auf den
+     * NÄCHSTEN Fall zurück: `raceState == 2` → zeigt fälschlich
+     * `BoatState::TRAINING` statt Idle, UND der CD-Tab zählt über
+     * `countdownEngine.tick()` als "+m:ss" munter als laufende Wettfahrtzeit
+     * weiter, obwohl gestoppt. `reset()` bringt `raceState` zurück auf MENU
+     * und leert `countdownEndsAt` — CD-Tab zeigt danach wieder "--:--",
+     * Boot-Zustand auf der Uhr korrekt IDLE.
+     */
     fun stopCompetition() {
+        countdownEngine.reset()
         _uiState.update { it.copy(competitionActive = false, competitionGuidance = null) }
     }
 

@@ -47,6 +47,8 @@ fun SetupScreen(
     onGetDiagnosticsShareUri: () -> android.net.Uri?,
     onStopApp: () -> Unit,
     onStartApp: () -> Unit,
+    // NEU (12.08.2026, siehe docs/Erweiterung_Boje_Kartenauswahl.md)
+    onSetWaypointFromMap: (String) -> Unit,
 ) {
     Column(
         Modifier
@@ -81,8 +83,8 @@ fun SetupScreen(
         }
 
         SectionCard("Wettfahrt-Bojen (Luv, optional)") {
-            WaypointRow("Luvbake (Hauptbake)", fmt(state.competitionMark1), { onSetWaypoint("competitionMark1") }, { onClearWaypoint("competitionMark1") })
-            WaypointRow("Entlastungsboje (Halbwind)", fmt(state.competitionMark2), { onSetWaypoint("competitionMark2") }, { onClearWaypoint("competitionMark2") })
+            WaypointRow("Luvbake (Hauptbake)", fmt(state.competitionMark1), { onSetWaypoint("competitionMark1") }, { onClearWaypoint("competitionMark1") }, { onSetWaypointFromMap("competitionMark1") })
+            WaypointRow("Entlastungsboje (Halbwind)", fmt(state.competitionMark2), { onSetWaypoint("competitionMark2") }, { onClearWaypoint("competitionMark2") }, { onSetWaypointFromMap("competitionMark2") })
             Text(
                 "Für den Competition-Modus (startet automatisch beim Startsignal). Ohne gesetzte Luvbake wird sie genau gegen den Wind geschätzt. Die Entlastungsboje ist optional — falls gesetzt, wird nach der Luvbake ein kurzer Halbwind-Schlag dorthin eingeplant.",
                 fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),

@@ -185,6 +185,64 @@ Doppel-Trigger) - kein globaler Umschalter, jede Geste einzeln.
   Recognition-Events unabhängig von `haveIncomingQuestion` fürs
   Fehlalarm-Testen aus Abschnitt 3)
 
+## 5a. Ergänzung 12.08.2026: On-Watch-Training (kein USB/Laptop mehr nötig)
+
+Roman-Entscheidung: das Klio-Training soll durchgeführt werden — dabei
+aufgefallen, dass der bisherige Weg (Serial-Kommandos am seriellen
+Monitor) auf einem Einhand-Trapez-Skiff kaum praktikabel ist, ein Laptop
+lässt sich beim aktiven Segeln/Trapezieren nicht sinnvoll USB-verbunden
+halten. Die Serial-Kommandos (Abschnitt 2/4) bleiben als Desktop-Fallback
+bestehen, zusätzlich jetzt im Menü-Tab der Uhr:
+
+- **Neue Sektion "Gesten-Training (Klio)"**: Status-Zeile ("Ja: trainiert/
+  nicht trainiert · Nein: ...") + vier Buttons ("Ja trainieren", "Nein
+  trainieren", "Ja zurücksetzen", "Nein zurücksetzen") — rufen dieselben
+  internen Funktionen wie die Serial-Kommandos auf
+  (`startGestureTraining()`/`resetGesturePattern()`).
+- **Fortschritt läuft jetzt auch auf dem Bildschirm mit**: `lv_msgbox`
+  (gleiches Muster wie die Wettfahrt-Stopp-Rückfrage) zeigt Titel
+  ("Training: JA"/"Training: NEIN"), einen live aktualisierten
+  Fortschrittstext (0–100 %, bzw. Hinweise wie "Bewegung nicht
+  gleichmässig genug" / "zu wenig Bewegung" aus `onKlioLearningEvent()`)
+  und einen "Abbrechen"-Button. Schliesst sich automatisch bei Erfolg
+  (kurzes Overlay "JA trainiert!"/"NEIN trainiert!") oder Fehlschlag.
+- Läuft komplett synchron im `loop()`-Task (wie `gestureTick()` selbst
+  schon direkte LVGL-Aufrufe macht) — kein Flag-Umweg wie bei den
+  NimBLE-Callbacks nötig.
+- **Ergänzt (Roman-Nachfrage "zeigt die Uhr die Tätigkeiten an?" — bisher
+  nein):** die Dialogbox zeigt jetzt zusätzlich, GROSS über dem
+  Klio-Fortschrittstext, die aktuelle Haltung aus dem Kalibrierungs-
+  Protokoll (Abschnitt 3, Tabelle 1:1 übernommen, z.B. "3/6: Im Boot
+  sitzend, steuernd — Backbord, 2x wiederholen"). Neuer Footer-Button
+  "Nächste Haltung" blättert manuell weiter (Wraparound nach 6/6) — **kein**
+  Start/Stop pro Haltung, wechselt nur den Anzeigetext, das Klio-Training
+  selbst läuft laut Befund unten als eine durchgehende Session weiter.
+  Die Fehlalarm-Tests (Wende/Halse/Trapez-Hook) sind bewusst NICHT als
+  Schritte hier drin — die passieren erst NACH abgeschlossenem Training,
+  während normalem Segeln mit aktiver Erkennung, nicht während der
+  Trainings-Box selbst.
+
+**Wichtiger, beim Umsetzen gefundener Punkt zur Kalibrierungs-Protokoll-
+Tauglichkeit (Abschnitt 3):** laut Bosch-Beispielsketch
+(`SensorLib/examples/BHI260AP_Klio_Selflearning`) ist ein
+`klio.learning()`-Aufruf **eine einzige durchgehende Session**, die endet,
+sobald Klio selbst "genug gelernt" meldet — jeder erneute
+`startGestureTraining()`-Aufruf setzt `learning_reset=true` und
+**überschreibt** das vorher gespeicherte Muster beim Abschluss komplett
+(`finalizeGestureTraining()`). Es gibt in der SensorLib-API keinen
+erkennbaren Weg, mehrere spätere Trainingsläufe zu einem gemeinsamen
+Muster zusammenzuführen. Das in Abschnitt 3 geplante Protokoll (6 Haltungen
+× 2–3 Wiederholungen) müsste demnach als **eine einzige, durchgehende
+Session** gefahren werden — Haltung wechseln, während "Ja trainieren"
+aktiv bleibt, nicht 6 separate Button-Drücke. Deshalb `TRAINING_TIMEOUT_MS`
+von 60s auf 5 Minuten angehoben (der neue "Abbrechen"-Button auf der Uhr
+deckt das gewollte vorzeitige Beenden ab, der Timeout ist nur noch
+Sicherheitsnetz). **Nicht auf Hardware verifiziert**, ob Klio einen langen
+Multi-Haltungs-Lauf tatsächlich sauber durchhält (Speicherlimit, interne
+Session-Dauer-Grenzen o.ä. sind aus der API nicht ersichtlich) — beim
+nächsten Training genau beobachten, ob die Fortschrittsanzeige während der
+Haltungswechsel weiterläuft.
+
 ## 5. Warum nicht einfach "mehr Schwellenwerte austesten"
 Das war der gestrige Ansatz und genau daran ist die Kalibrierung
 hängengeblieben (nur eine Schreibtisch-Messung, Schütteln/Nein nie

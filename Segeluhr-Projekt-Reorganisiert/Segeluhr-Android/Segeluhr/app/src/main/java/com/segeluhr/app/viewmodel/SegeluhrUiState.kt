@@ -75,6 +75,11 @@ data class SegeluhrUiState(
     // Karten-Zeichnen-Modus (Erweiterung, siehe docs/Erweiterung_Seegrenze_Zeichnen.md)
     // — true blendet LakeDrawScreen statt der normalen Segel-Tabs ein.
     val lakeDrawModeActive: Boolean = false,
+    // Karten-Auswahl fuer einzelne Wegpunkte (12.08.2026, siehe
+    // docs/Erweiterung_Boje_Kartenauswahl.md) — null = inaktiv, sonst der
+    // WaypointRow-Key ("buoy1" usw.), fuer den gerade WaypointMapPickScreen
+    // statt der normalen Segel-Tabs eingeblendet ist.
+    val waypointMapPickKey: String? = null,
     val home: GeoPoint? = null,
     val competitionMark1: GeoPoint? = null,
     val competitionMark2: GeoPoint? = null,
