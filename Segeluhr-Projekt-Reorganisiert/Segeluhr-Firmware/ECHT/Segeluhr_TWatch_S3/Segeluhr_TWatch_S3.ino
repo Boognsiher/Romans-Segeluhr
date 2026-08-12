@@ -568,6 +568,10 @@ static lv_obj_t *lblConnIndicator;
 // bisher nirgends die EIGENE Batterie (lblDetailBattery auf tabDetail ist
 // die des BOOTS, per LoRa empfangen) - gleiche PMU-API wie auf der Ultra
 // bereits genutzt (instance.pmu.getBatteryPercent(), siehe dort).
+// Hardware-Test-Feedback 12.08. Abend: auf tabMain sass sie genau unter
+// lblConnIndicator und ueberlappte dessen (teils zweizeiligen) Text -
+// deshalb jetzt auf tabDetail verschoben (unten deklariert, letztes Label
+// in dessen Flex-Column, siehe buildUi()).
 static lv_obj_t *lblOwnBattery;
 
 // Detail-Tab
@@ -1235,13 +1239,6 @@ static void buildUi() {
     lv_obj_set_style_text_align(lblConnIndicator, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(lblConnIndicator, LV_ALIGN_BOTTOM_MID, 0, -10);
 
-    // Eigene Akku-Anzeige (12.08.2026, siehe lblOwnBattery-Deklaration) -
-    // zwischen Uhrzeit und Verbindungsindikator, aktualisiert in
-    // mainScreenUpdate().
-    lblOwnBattery = lv_label_create(tabMain);
-    lv_obj_set_style_text_font(lblOwnBattery, &lv_font_montserrat_20, 0);
-    lv_obj_align(lblOwnBattery, LV_ALIGN_CENTER, 0, 65);
-
     // -- Detail-Tab --
     // 10.08.2026: von fixen Pixel-Koordinaten (y=6/48/90/132, PacketInfo
     // per lv_obj_align_to relativ zu lblDetailWind) auf LVGL-Flex-Column
@@ -1288,6 +1285,17 @@ static void buildUi() {
     lv_obj_set_width(lblDetailPacketInfo, LV_PCT(94));
     lv_label_set_long_mode(lblDetailPacketInfo, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lblDetailPacketInfo, LV_TEXT_ALIGN_CENTER, 0);
+
+    // Eigene Akku-Anzeige (12.08.2026, siehe lblOwnBattery-Deklaration) -
+    // bewusst als letztes Label in dieser Flex-Column, damit sie unten
+    // erscheint, unabhaengig von der (teils mehrzeiligen) Laenge der
+    // Labels darueber. tabDetail bleibt scrollbar, falls es doch nicht
+    // passt.
+    lblOwnBattery = lv_label_create(tabDetail);
+    lv_obj_set_style_text_font(lblOwnBattery, &lv_font_montserrat_20, 0);
+    lv_obj_set_width(lblOwnBattery, LV_PCT(94));
+    lv_label_set_long_mode(lblOwnBattery, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lblOwnBattery, LV_TEXT_ALIGN_CENTER, 0);
 
     // -- Menü-Tab --
     buildMenuTab(tabMenu);

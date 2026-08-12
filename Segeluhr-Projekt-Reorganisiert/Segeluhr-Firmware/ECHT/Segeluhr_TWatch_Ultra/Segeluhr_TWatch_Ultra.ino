@@ -1807,6 +1807,10 @@ static void resetGesturePattern(uint8_t) {}
 
 lv_obj_t *tabview; // nicht static: siehe extern-Vorwärtsdeklaration weiter oben
 static lv_obj_t *tabNav, *tabWind, *tabHome, *tabCountdown, *tabManeuver, *tabMenu;
+// Alltag-Screen hat ein eigenes lv_tabview (siehe buildAlltagScreen) - fuer
+// die BLE/Akku-Sichtbarkeit in statusBarUpdate() (12.08.2026, Roman-Wunsch)
+// brauchen wir dessen aktiven Tab-Index genauso wie bei "tabview" (Segeln).
+static lv_obj_t *alltagTabview = nullptr;
 
 // Statusleiste (oben, immer sichtbar)
 static lv_obj_t *lblBleStatus;
@@ -1865,6 +1869,27 @@ static void statusBarUpdate() {
     struct tm timeinfo;
     instance.rtc.getDateTime(&timeinfo);
     lv_label_set_text_fmt(lblStatusClock, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
+
+    // Roman-Wunsch 12.08.2026 Abend: BLE/Akku ueberladen die uebrigen Tabs
+    // (Wind/Heim/CD/Man/Menu bzw. Timer/Akku/Setup) unnoetig - nur dort
+    // sichtbar, wo sie tatsaechlich gebraucht werden: Nav-Tab (Segeln) und
+    // Uhr-Tab (Alltag). Uhrzeit selbst bleibt bewusst ueberall sichtbar,
+    // war nicht Teil des Wunsches. lv_layer_top() liegt ueber JEDEM Screen,
+    // deshalb hier ueber den aktiven Tab-Index statt ueber Screen-Wechsel
+    // gesteuert.
+    bool showBleAkku = false;
+    if (appMode == MODE_SEGELN && tabview != nullptr) {
+        showBleAkku = ((int)lv_tabview_get_tab_act(tabview) == 0); // tabNav
+    } else if (appMode == MODE_ALLTAG && alltagTabview != nullptr) {
+        showBleAkku = ((int)lv_tabview_get_tab_act(alltagTabview) == 0); // tabClock ("Uhr")
+    }
+    if (showBleAkku) {
+        lv_obj_clear_flag(lblBleStatus, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lblPhoneBattery, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(lblBleStatus, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(lblPhoneBattery, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void navScreenUpdate() {
@@ -2404,10 +2429,10 @@ static void buildSegelnScreen() {
     lv_obj_set_flex_flow(tabNav, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(tabNav, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(tabNav, 8, 0);
-    // War 14 - Statusleiste sitzt jetzt bei y=34 statt y=10 (siehe dortiger
-    // Kommentar), pad_top entsprechend nachgezogen, damit lblNavMode nicht
-    // unter der Statusleiste verschwindet.
-    lv_obj_set_style_pad_top(tabNav, 46, 0);
+    // War 14 - Statusleiste sitzt jetzt bei y=68 statt y=10/34 (siehe
+    // dortiger Kommentar), pad_top entsprechend nachgezogen, damit
+    // lblNavMode nicht unter der Statusleiste verschwindet.
+    lv_obj_set_style_pad_top(tabNav, 80, 0);
     lv_obj_clear_flag(tabNav, LV_OBJ_FLAG_SCROLLABLE); // soll komplett ohne Scrollen passen
 
     // Feedback nach Hardware-Test: text_font vererbt sich in dieser
@@ -2580,6 +2605,7 @@ static void buildAlltagScreen() {
     lv_obj_set_style_text_font(screenAlltag, &lv_font_montserrat_28, 0); // siehe Kommentar in buildSegelnScreen()
 
     lv_obj_t *tv = lv_tabview_create(screenAlltag);
+    alltagTabview = tv; // siehe alltagTabview-Deklaration/statusBarUpdate()
     lv_tabview_set_tab_bar_position(tv, LV_DIR_BOTTOM);
     lv_tabview_set_tab_bar_size(tv, 94); // siehe Kommentar in buildSegelnScreen() - Clipping der gedrehten Eck-Tabs
     lv_obj_t *alltagTabBar = lv_tabview_get_tab_bar(tv);
@@ -2683,6 +2709,15 @@ void switchToMode(AppMode mode) {
 static void alltagScreenTick() {
     if (appMode != MODE_ALLTAG) return;
 
+    // statusBarUpdate() sonst nur ueber screenNeedsRefresh (BLE-Notify-
+    // Events) getriggert - im Alltag-Modus i.d.R. NICHT verbunden, also
+    // wuerde die BLE/Akku-Sichtbarkeit (siehe dortiger Kommentar) beim
+    // Wechsel zwischen den Alltag-Tabs (Uhr/Timer/Akku/Setup) sonst stecken
+    // bleiben. alltagScreenTick() laeuft ohnehin jede loop()-Iteration,
+    // solange der Alltag-Screen aktiv ist - dieselbe Reaktionsschnelligkeit
+    // wie Uhrzeit/Akku auf dieser Seite.
+    statusBarUpdate();
+
     struct tm timeinfo;
     instance.rtc.getDateTime(&timeinfo);
     char buf[16];
@@ -2714,20 +2749,19 @@ static void buildUi() {
     // Ursache wie das frueher dokumentierte Tab-Bar-Clipping (94px-Fix,
     // siehe dortiger Kommentar; das rechteckige Display selbst hat KEINE
     // runden Ecken - das Gehaeuse ueberdeckt nur einen Randstreifen).
-    // y=34 ist ein erster Schaetzwert in derselben
-    // Groessenordnung; tabNav's pad_top wurde entsprechend mit angehoben,
-    // damit sich Nav-Inhalt und Statusleiste nicht ueberlappen - ob 34px
-    // reichen, muss wie bei der Tab-Bar-Hoehe erst auf echter Hardware
-    // bestaetigt werden (siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md).
+    // y=34 (erster Schaetzwert) reichte laut Hardware-Test 12.08. immer
+    // noch nicht ("deutlich mehr als die Haelfte der Zeile weg") - jetzt
+    // y=68; tabNav's pad_top wurde entsprechend mit angehoben, damit sich
+    // Nav-Inhalt und Statusleiste nicht ueberlappen.
     lblBleStatus = lv_label_create(lv_layer_top());
     lv_obj_set_style_text_font(lblBleStatus, &lv_font_montserrat_20, 0);
-    lv_obj_align(lblBleStatus, LV_ALIGN_TOP_LEFT, 14, 34);
+    lv_obj_align(lblBleStatus, LV_ALIGN_TOP_LEFT, 14, 68);
     lblPhoneBattery = lv_label_create(lv_layer_top());
     lv_obj_set_style_text_font(lblPhoneBattery, &lv_font_montserrat_20, 0);
-    lv_obj_align(lblPhoneBattery, LV_ALIGN_TOP_RIGHT, -14, 34);
+    lv_obj_align(lblPhoneBattery, LV_ALIGN_TOP_RIGHT, -14, 68);
     lblStatusClock = lv_label_create(lv_layer_top());
     lv_obj_set_style_text_font(lblStatusClock, &lv_font_montserrat_20, 0);
-    lv_obj_align(lblStatusClock, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_align(lblStatusClock, LV_ALIGN_TOP_MID, 0, 68);
 
     // Quick-Message-Overlay, ebenfalls auf layer_top - standardmässig
     // versteckt, wird nur bei eingehender Frage/frischer Antwort eingeblendet
@@ -2788,6 +2822,26 @@ static void buildUi() {
 // ============================================================================
 // Setup / Loop
 // ============================================================================
+
+// Bugfix 12.08.2026 Abend (Roman-Hardware-Test: Absturz beim Druecken von
+// "Home setzen"): Guru Meditation Error, "Stack canary watchpoint triggered
+// (loopTask)". Ursache: sendControlCommand() ruft seit dem heutigen
+// writeValue()-Bugfix (siehe dortiger Kommentar) MIT Antwort auf, also
+// blockierend bis zum ATT-Ack - direkt aus dem LVGL-Button-Klick-Handler
+// heraus, also verschachtelt in lv_timer_handler() im loopTask. Der
+// zusaetzliche Stack-Bedarf von NimBLEs synchronem Write-Pfad oben auf die
+// LVGL-Verschachtelung riss den Standard-Stack (8 KB) des loopTask. Dieser
+// esp32-Core (3.3.11) hat kein setLoopTaskStackSize() zur Laufzeit - der
+// Loop-Task-Stack wird stattdessen ueber diese schwach (weak) definierte
+// Funktion aus cores/esp32/main.cpp bestimmt, hier ueberschrieben. Bewusst
+// direkt vor setup() platziert (nicht ganz oben nach den #includes) - dort
+// hat es Arduinos automatische Funktionsprototyp-Generierung durcheinander
+// gebracht (Compile-Fehler bei der #ifdef-USING_BHI260_SENSOR-Klio-Callback
+// weiter unten, deren Typ zum Zeitpunkt der eingefuegten Prototypen noch
+// nicht sichtbar war).
+size_t getArduinoLoopTaskStackSize(void) {
+    return 16384;
+}
 
 void setup() {
     Serial.begin(115200);

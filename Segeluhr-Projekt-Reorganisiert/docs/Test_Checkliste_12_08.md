@@ -25,20 +25,25 @@ kopieren, nicht selbst rumdebuggen.
 
 ## 1. Kompilieren + flashen
 
-- [ ] Android: **Build → Make Project** — grün? App startet ohne Absturz
-- [ ] Ultra: Compile — grün? Flash (COM-Port Ultra)
-- [ ] S3 (Land): Compile — grün? Flash (COM-Port S3/Land)
-- [ ] Beide Uhren booten sauber, BLE-Verbindung Ultra↔Handy klappt
+- [x] Android: **Build → Make Project** — grün? App startet ohne Absturz
+      (12.08. Abend: `assembleDebug` UP-TO-DATE + `adb install -r`, startet
+      ohne `AndroidRuntime`-Fatal-Exception)
+- [x] Ultra: Compile — grün? Flash (COM-Port Ultra) (COM17, 12.08. Abend,
+      inkl. Nachbesserungen — siehe unten)
+- [x] S3 (Land): Compile — grün? Flash (COM-Port S3/Land) (COM16, 12.08.
+      Abend, inkl. Nachbesserung — siehe unten)
+- [x] Beide Uhren booten sauber, BLE-Verbindung Ultra↔Handy klappt
 
 ---
 
 ## 2. AN LAND testbar (kein Segeln nötig)
 
 ### 2a. Der eigentliche Auslöser: "Home setzen" funktioniert jetzt?
-- [ ] Uhr-Menü-Tab → "Home setzen" drücken → Button zeigt kurz Overlay
-      "Wegpunkt gesendet" + Vibration
-- [ ] **Wichtigster Check**: Handy Setup-Tab → "Heimatpunkt" zeigt jetzt
+- [x] **Wichtigster Check**: Handy Setup-Tab → "Heimatpunkt" zeigt jetzt
       tatsächlich Koordinaten (vorher: blieb leer trotz gültigem GPS-Fix)
+      — 12.08. Abend bestätigt, End-to-End verifiziert
+- [ ] Uhr-Menü-Tab → "Home setzen" drücken → Button zeigt kurz Overlay
+      "Wegpunkt gesendet" + Vibration (noch nicht gezielt beobachtet)
 - [ ] Uhr-Menü zeigt den "Home setzen"-Button jetzt **grün** eingefärbt
       (innerhalb ~1s nach dem Setzen)
 - [ ] Gleicher Test für "Boje 1/2 setzen", "Ziel setzen",
@@ -47,6 +52,14 @@ kopieren, nicht selbst rumdebuggen.
       löschen → wird auf dem Handy leer, Button wird wieder grau
       (**Bugfix-Check**: früher löschte der einzige "Alle Bojen
       löschen"-Button immer nur Boje 1, egal was eigentlich gemeint war)
+
+**Dabei 12.08. Abend gefunden+gefixt (nicht Teil der ursprünglichen
+Checkliste):** Absturz beim ersten Drücken von "Home setzen" (Stack-
+Overflow im `loopTask` der Ultra, siehe PROJEKT_STATUS.md Ultra-Zeile) —
+behoben, seither mehrfach ohne Absturz reproduziert. Ausserdem zwei
+Hardware-Feedback-Nachbesserungen: Ultra-Statusleiste y=34→68 + BLE/Akku
+nur noch auf Nav-/Uhr-Tab sichtbar, S3-Akku-Anzeige vom Haupt- in den
+Detail-Tab verschoben (kollidierte dort mit dem Empfangs-Indikator).
 
 ### 2b. CD-/Wind-Tab-Aktionen direkt auf der Uhr
 - [ ] CD-Tab: "Start" → Countdown läuft (auch am Handy sichtbar)
