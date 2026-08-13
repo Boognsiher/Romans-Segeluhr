@@ -346,6 +346,22 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             fix.sogKn * cos(GeoUtils.toRad(fix.cogDeg - windDir))
         } else null
 
+        // Startlinie-Bias (Teil der Ur-Spezifikation, pin/boat-Wegpunkte gibt
+        // es schon seit Projektbeginn) — bis 13.08.2026 stand hier eine
+        // NICHT verifizierte Vorzeichen-Konvention (siehe Git-Historie: "Vorzeichen
+        // von Line-Bias hängt von Pin/Boot-Zuordnung ab — einmal mit bekanntem
+        // Wind gegenprüfen"). 13.08.2026 analytisch aufgelöst (Roman: "Das
+        // Startboot ist immer in Windrichtung rechts" — gegen den Wind
+        // geschaut). squareBearing = windDir+90 ist die Peilung Pin->Boot bei
+        // einer exakt quadratischen Linie (Boot rechts von Pin, wenn man nach
+        // Luv schaut). Ist die tatsächliche Peilung Pin->Boot GRÖSSER als das
+        // (bias>0, im Uhrzeigersinn verdreht), rückt das Boot-Ende relativ
+        // gesehen Richtung Lee, das Pin-Ende ist dann luvwärtiger =
+        // bevorzugt. Gegenprobe per Projektion auf die Windachse
+        // (Luv-Vorsprung Boot ggü. Pin = -sin(bias)) bestätigt dasselbe
+        // Vorzeichen. Trotzdem: EINMAL mit echtem, bekanntem Wind auf dem
+        // Wasser gegenchecken, sobald sich die Gelegenheit ergibt — reine
+        // Kopfrechnung, noch nie an echten Segelbedingungen verifiziert.
         var lineBiasDeg: Double? = null
         var lineBiasFavors: String? = null
         val pin = currentWaypoints.pin
@@ -355,7 +371,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             val squareBearing = GeoUtils.normalize360(windDir + 90)
             val bias = GeoUtils.angleDiff(lineBearing, squareBearing)
             lineBiasDeg = bias
-            lineBiasFavors = if (bias > 0) "Boot" else if (bias < 0) "Pin" else "neutral"
+            lineBiasFavors = if (bias > 0) "Pin" else if (bias < 0) "Boot" else "neutral"
         }
 
         var targetBearing: Double? = null
@@ -447,6 +463,8 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             homeSet = currentWaypoints.home != null,
             mark1Set = currentWaypoints.competitionMark1 != null,
             mark2Set = currentWaypoints.competitionMark2 != null,
+            pinSet = currentWaypoints.pin != null,
+            boatSet = currentWaypoints.boat != null,
         )
 
         bleManager.notifyRaceStatus(
@@ -462,6 +480,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             // Vorrang + Auto-Timeout aufgelöst hat.
             roundingConfirmPending = _uiState.value.pendingBuoyConfirmation != null,
             vmcKn = competitionGuidance?.vmcKn,
+            lineBiasDeg = lineBiasDeg,
         )
 
         _uiState.update {

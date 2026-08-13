@@ -84,8 +84,10 @@ object BleProtocol {
      * Bit-Zuordnung für [encodeWaypointsStatus] — bewusst EIGENE, kompakte
      * Nummerierung (nicht 1:1 [WaypointId]: die geht bis 9 und passt mit
      * Lücken (LAKE_CENTER wird hier nicht gebraucht, ist keine
-     * Setzen/Löschen-Aktion auf der Uhr) nicht in 1 Byte). Nur die 6
-     * Wegpunkte, die aktuell im Menü-Tab der Uhr Set/Clear-Buttons haben.
+     * Setzen/Löschen-Aktion auf der Uhr) nicht in 1 Byte). Die 6
+     * ursprünglichen Wegpunkte plus PIN/BOAT (13.08.2026, siehe
+     * docs/Erweiterung_Startlinie_Bias.md — jetzt auch von der Uhr aus
+     * setzbar, gleiches Grün-Feedback-Muster wie die anderen).
      */
     object WaypointSetFlag {
         const val BUOY1: Int = 1 shl 0
@@ -94,12 +96,15 @@ object BleProtocol {
         const val HOME: Int = 1 shl 3
         const val COMPETITION_MARK1: Int = 1 shl 4
         const val COMPETITION_MARK2: Int = 1 shl 5
+        const val PIN: Int = 1 shl 6
+        const val BOAT: Int = 1 shl 7
     }
 
     /** 1-Byte WaypointsStatusPacket, siehe [CHAR_WAYPOINTS_STATUS_UUID]/[WaypointSetFlag]. */
     fun encodeWaypointsStatus(
         buoy1Set: Boolean, buoy2Set: Boolean, targetSet: Boolean,
         homeSet: Boolean, mark1Set: Boolean, mark2Set: Boolean,
+        pinSet: Boolean, boatSet: Boolean,
     ): ByteArray {
         var flags = 0
         if (buoy1Set) flags = flags or WaypointSetFlag.BUOY1
@@ -108,6 +113,8 @@ object BleProtocol {
         if (homeSet) flags = flags or WaypointSetFlag.HOME
         if (mark1Set) flags = flags or WaypointSetFlag.COMPETITION_MARK1
         if (mark2Set) flags = flags or WaypointSetFlag.COMPETITION_MARK2
+        if (pinSet) flags = flags or WaypointSetFlag.PIN
+        if (boatSet) flags = flags or WaypointSetFlag.BOAT
         return byteArrayOf(flags.toByte())
     }
 
@@ -315,6 +322,14 @@ object BleProtocol {
      * VORZEICHENBEHAFTET, 0x7FFF = keine VMC verfügbar — siehe
      * [com.segeluhr.app.data.model.CompetitionGuidance.vmcKn]) fürs
      * Nav-Tab-Redesign. Watch-Firmware muss wieder mit aktualisiert werden.
+     *
+     * Seit 13.08.2026 9 Byte: zusätzlich int16 lineBiasDdeg (1/10 Grad,
+     * VORZEICHENBEHAFTET, 0x7FFF = keine Startlinie gesetzt — siehe
+     * SegeluhrViewModel.renderTelemetry() für die Berechnung/Vorzeichen-
+     * Herleitung). "Boot"/"Pin" wird bewusst NICHT mitgeschickt — die Uhr
+     * kann das Vorzeichen selbst auswerten (>0 = Pin bevorzugt, <0 = Boot
+     * bevorzugt, 0 = neutral), analog zur App-Logik. Watch-Firmware muss
+     * wieder mit aktualisiert werden.
      */
     fun encodeRaceStatus(
         raceStateOrdinal: Int,
@@ -324,6 +339,7 @@ object BleProtocol {
         competitionLegOrdinal: Int?,
         roundingConfirmPending: Boolean = false,
         vmcKn: Double? = null,
+        lineBiasDeg: Double? = null,
     ): ByteArray {
         val cd = (countdownSeconds ?: 0xFFFF).coerceIn(0, 0xFFFF)
         var maneuverFlags = 0
@@ -332,13 +348,15 @@ object BleProtocol {
         if (roundingConfirmPending) maneuverFlags = maneuverFlags or MANEUVER_FLAG_ROUNDING_CONFIRM_PENDING
         val leg = competitionLegOrdinal ?: 0xFF
         val vmcCkn = vmcKn?.let { (it * 100.0).toInt().coerceIn(-32767, 32767) } ?: 0x7FFF
+        val lineBiasDdeg = lineBiasDeg?.let { (it * 10.0).toInt().coerceIn(-32767, 32767) } ?: 0x7FFF
 
-        val buf = ByteBuffer.allocate(7).order(ByteOrder.LITTLE_ENDIAN)
+        val buf = ByteBuffer.allocate(9).order(ByteOrder.LITTLE_ENDIAN)
         buf.put(raceStateOrdinal.toByte())
         buf.putShort(cd.toShort())
         buf.put(maneuverFlags.toByte())
         buf.put(leg.toByte())
         buf.putShort(vmcCkn.toShort())
+        buf.putShort(lineBiasDdeg.toShort())
         return buf.array()
     }
 

@@ -45,6 +45,7 @@
 #include <Arduino.h>
 #include <math.h>
 #include <Preferences.h> // NVS-Persistenz fuer trainierte Klio-Gesten-Muster
+#include <FFat.h> // internes FAT-Flash (9.9MB Partition, siehe PartitionScheme) fuer das Akku-Verbrauchs-Log
 #include <LilyGoLib.h>
 #include <LV_Helper.h>
 #include <NimBLEDevice.h>
@@ -114,6 +115,10 @@ static const char *CHAR_WAYPOINTS_STATUS_UUID = "6f6e000a-b5a3-f393-e0a9-e50e24d
 #define WPSET_HOME              (1 << 3)
 #define WPSET_COMPETITION_MARK1 (1 << 4)
 #define WPSET_COMPETITION_MARK2 (1 << 5)
+// NEU (13.08.2026, siehe docs/Erweiterung_Startlinie_Bias.md) - Pin-/Boot-Ende
+// jetzt auch von der Uhr aus setzbar, gleiches Gruen-Feedback wie die anderen.
+#define WPSET_PIN               (1 << 6)
+#define WPSET_BOAT              (1 << 7)
 
 // Haptik-Codes (Abschnitt 7 der Spezifikation)
 enum HapticCode {
@@ -227,6 +232,12 @@ struct RaceData {
     // Nav-Tab-Redesign: "Speed zum Ziel" zur aktuellen Competition-Marke.
     double vmcKn = 0;
     bool haveVmc = false;
+    // Startlinie-Bias (13.08.2026, siehe docs/Erweiterung_Startlinie_Bias.md):
+    // positiv = Pin-Ende bevorzugt, negativ = Boot-Ende bevorzugt, 0 = neutral.
+    // Noch keine eigene Anzeige auf dieser Uhr - nur geparst/gespeichert,
+    // Konsument ist vorerst die geplante Mastuhr (Segeluhr_Mastuhr).
+    double lineBiasDeg = 0;
+    bool haveLineBias = false;
     bool haveData = false;
 } raceData;
 
@@ -444,13 +455,15 @@ static void onWindNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t le
 
 static void onRaceStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, size_t len, bool isNotify) {
     // Seit 11.08.2026 7 Byte statt 5 (zusaetzlich int16 vmcCkn, siehe
-    // BleProtocol.kt-Kommentar).
-    if (len < 7) return;
+    // BleProtocol.kt-Kommentar). Seit 13.08.2026 9 Byte (zusaetzlich int16
+    // lineBiasDdeg, siehe docs/Erweiterung_Startlinie_Bias.md).
+    if (len < 9) return;
     raceData.raceState = data[0];
     uint16_t cd = rdU16(data + 1);
     uint8_t maneuverFlags = data[3];
     uint8_t leg = data[4];
     int16_t vmcCkn = rdI16(data + 5);
+    int16_t lineBiasDdeg = rdI16(data + 7);
     raceData.countdownSeconds = (cd == 0xFFFF) ? -1 : (int)cd;
     raceData.maneuverNeeded = (maneuverFlags & MANEUVER_FLAG_NEEDED) != 0;
     raceData.isTack = (maneuverFlags & MANEUVER_FLAG_IS_TACK) != 0;
@@ -460,6 +473,8 @@ static void onRaceStatusNotify(NimBLERemoteCharacteristic *c, uint8_t *data, siz
     raceData.roundingConfirmPending = (maneuverFlags & MANEUVER_FLAG_ROUNDING_CONFIRM_PENDING) != 0;
     raceData.haveVmc = (vmcCkn != 0x7FFF);
     raceData.vmcKn = raceData.haveVmc ? (vmcCkn / 100.0) : 0;
+    raceData.haveLineBias = (lineBiasDdeg != 0x7FFF);
+    raceData.lineBiasDeg = raceData.haveLineBias ? (lineBiasDdeg / 10.0) : 0;
     raceData.haveData = true;
     screenNeedsRefresh = true;
 }
@@ -1221,6 +1236,16 @@ static void wakeDisplay() {
 }
 
 static void standbyTick() {
+    // Roman-Wunsch 13.08.2026: im Segeln-Modus ist der Bildschirm das
+    // eigentliche Navigationsinstrument (Nav-/Wind-/Heimweg-Werte auf einen
+    // Blick, ohne extra Taster/Geste) - ein 30s-Blackout ergibt hier keinen
+    // Sinn, anders als im Alltags-Modus (Smartwatch-Nutzung, Standby dort
+    // weiterhin sinnvoll). Standby deshalb nur noch ausserhalb von
+    // MODE_SEGELN aktiv; falls der Bildschirm beim Wechsel IN den
+    // Segeln-Modus gerade schlief, weckt switchToMode() ihn explizit auf
+    // (siehe dort).
+    if (appMode == MODE_SEGELN) return;
+
     uint32_t inactiveMs = lv_display_get_inactive_time(NULL);
     if (!displayAsleep && inactiveMs >= STANDBY_TIMEOUT_MS) {
         instance.sleepDisplay();
@@ -1232,6 +1257,120 @@ static void standbyTick() {
     }
 }
 
+// ---- Akku-Verbrauchs-Log (13.08.2026, Roman-Wunsch: nach der Standby-Aenderung
+// oben tracken, wieviel der dauerhaft eingeschaltete Bildschirm im Segeln-Modus
+// wirklich kostet) ----
+//
+// Es gibt keinen direkten Strom-/mA-Sensor auf dem AXP2101-PMU-Chip, der
+// ueber XPowersLib exponiert waere (nur getBatteryPercent()/isCharging()/
+// Spannung) - Tracking laeuft deshalb ueber Akku-Prozent-Verlauf pro Minute,
+// nicht ueber Momentanverbrauch. Landet auf dem internen FAT-Flash (FFat,
+// 9.9MB-Partition aus dem PartitionScheme, bisher ungenutzt) statt nur per
+// Serial, damit auch ein ganzer Segeltag OHNE angeschlossenen Laptop
+// mitgeschrieben wird - Auslesen danach per neuem Serial-Kommando (siehe
+// handleBatteryLogCommand() weiter unten).
+static const unsigned long BATTERY_LOG_INTERVAL_MS = 60000; // 1x/Minute - reicht fuer eine Drain-Rate-Kurve, kein Log-Flut-Risiko
+static const char *BATTERY_LOG_PATH = "/battery_log.csv";
+static unsigned long lastBatteryLogMs = 0;
+static bool batteryLogFsOk = false;
+
+static void writeBatteryLogHeaderIfMissing() {
+    if (FFat.exists(BATTERY_LOG_PATH)) return;
+    File f = FFat.open(BATTERY_LOG_PATH, FILE_WRITE);
+    if (!f) {
+        Serial.println("[Akku-Log] Header-Datei konnte nicht angelegt werden.");
+        return;
+    }
+    f.println("datum,zeit,modus,display,ble,laden,akku_pct");
+    f.close();
+}
+
+static void setupBatteryLog() {
+    // true = bei fehlgeschlagenem Mount automatisch formatieren (erster
+    // Gebrauch dieser Partition ueberhaupt - bisher nirgends sonst genutzt).
+    batteryLogFsOk = FFat.begin(true);
+    if (!batteryLogFsOk) {
+        Serial.println("[Akku-Log] FFat-Mount fehlgeschlagen - Logging deaktiviert, Rest der Firmware laeuft normal weiter.");
+        return;
+    }
+    writeBatteryLogHeaderIfMissing();
+    Serial.printf("[Akku-Log] Bereit (%s, %llu/%llu Bytes Flash belegt). 'BATLOG DUMP'/'BATLOG STATUS'/'BATLOG CLEAR' verfuegbar.\n",
+                  BATTERY_LOG_PATH, (unsigned long long)FFat.usedBytes(), (unsigned long long)FFat.totalBytes());
+    // Erste Zeile bald nach dem Boot statt erst nach voller Minute - sofortige
+    // Bestaetigung, dass das Log tatsaechlich laeuft.
+    lastBatteryLogMs = millis() - BATTERY_LOG_INTERVAL_MS + 2000;
+}
+
+static void batteryLogTick() {
+    if (!batteryLogFsOk) return;
+    if (millis() - lastBatteryLogMs < BATTERY_LOG_INTERVAL_MS) return;
+    lastBatteryLogMs = millis();
+
+    struct tm timeinfo;
+    instance.rtc.getDateTime(&timeinfo);
+    File f = FFat.open(BATTERY_LOG_PATH, FILE_APPEND);
+    if (!f) {
+        Serial.println("[Akku-Log] Datei konnte nicht zum Anhaengen geoeffnet werden - Zeile ausgelassen.");
+        return;
+    }
+    f.printf("%02d.%02d.%04d,%02d:%02d:%02d,%s,%s,%s,%s,%d\n",
+             timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900,
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
+             appMode == MODE_SEGELN ? "SEGELN" : "ALLTAG",
+             displayAsleep ? "AUS" : "AN",
+             bleConnected ? "VERBUNDEN" : "GETRENNT",
+             instance.pmu.isCharging() ? "JA" : "NEIN",
+             instance.pmu.getBatteryPercent());
+    f.close();
+}
+
+// Eigene, von USING_BHI260_SENSOR unabhaengige Serial-Kommandos (BATLOG ...)
+// - anders als die TRAIN-Kommandos (siehe serialCommandTick() weiter unten)
+// soll das Akku-Log auch ohne Gestensensor funktionieren. Gibt true zurueck,
+// wenn die Zeile erkannt+behandelt wurde (der Aufrufer bricht dann ab, statt
+// noch TRAIN-Kommandos zu pruefen).
+static bool handleBatteryLogCommand(const String &line) {
+    if (line == "BATLOG DUMP") {
+        if (!batteryLogFsOk) {
+            Serial.println("[Akku-Log] Kein Dateisystem verfuegbar.");
+            return true;
+        }
+        File f = FFat.open(BATTERY_LOG_PATH, FILE_READ);
+        if (!f) {
+            Serial.println("[Akku-Log] Datei existiert noch nicht (noch keine volle Minute seit Boot?).");
+            return true;
+        }
+        Serial.println("[Akku-Log] --- Beginn Dump ---");
+        while (f.available()) Serial.write(f.read());
+        Serial.println("[Akku-Log] --- Ende Dump ---");
+        f.close();
+        return true;
+    }
+    if (line == "BATLOG CLEAR") {
+        if (batteryLogFsOk) {
+            FFat.remove(BATTERY_LOG_PATH);
+            writeBatteryLogHeaderIfMissing();
+            Serial.println("[Akku-Log] Log geloescht, neue Datei mit Header angelegt.");
+        } else {
+            Serial.println("[Akku-Log] Kein Dateisystem verfuegbar.");
+        }
+        return true;
+    }
+    if (line == "BATLOG STATUS") {
+        if (!batteryLogFsOk) {
+            Serial.println("[Akku-Log] Dateisystem nicht bereit.");
+            return true;
+        }
+        File f = FFat.open(BATTERY_LOG_PATH, FILE_READ);
+        size_t sz = f ? f.size() : 0;
+        if (f) f.close();
+        Serial.printf("[Akku-Log] Dateigroesse: %u Bytes, Flash gesamt belegt: %llu/%llu Bytes.\n",
+                      (unsigned)sz, (unsigned long long)FFat.usedBytes(), (unsigned long long)FFat.totalBytes());
+        return true;
+    }
+    return false;
+}
+
 // ---- Gesten-Erkennung: Klio (trainiert) mit Schwellenwert-Fallback ----
 // (siehe docs/Erweiterung_Gesten_Training_Klio.md)
 //
@@ -1239,7 +1378,7 @@ static void standbyTick() {
 //   1. Klio (SensorBHI260AP_Klio) - bevorzugt, SOBALD ein Muster trainiert
 //      + in der NVS gespeichert ist (Pattern-ID 1=JA, 2=NEIN, siehe
 //      GestureTarget). Trainiert wird NUR per Serial-Kommando (TRAIN JA /
-//      TRAIN NEIN), siehe gestureTrainingSerialTick() unten - kein UI auf
+//      TRAIN NEIN), siehe serialCommandTick() unten - kein UI auf
 //      der Uhr nötig (Doku Abschnitt 2).
 //   2. Schwellenwert-Fallback (Pitch/Shake, wie bisher) - bleibt für eine
 //      Geste aktiv, SOLANGE für genau diese noch kein Klio-Muster trainiert
@@ -1268,6 +1407,11 @@ static bool klioOnline = false;
 static const uint8_t GESTURE_ID_JA = 1;
 static const uint8_t GESTURE_ID_NEIN = 2;
 static const uint16_t KLIO_PATTERN_BUF_SIZE = 252; // wie im SensorLib-Klio-Beispiel
+// NEU (13.08.2026) - vorher lokale Variablen nur in setupGestureSensor(),
+// jetzt file-scope, weil startGestureTraining() sie fuer einen erneuten
+// klio.enable()-Aufruf braucht (siehe dortiger Kommentar/Debug-Fund).
+static const float KLIO_SAMPLE_RATE_HZ = 50.0;       // reicht für Handgelenk-Gesten, spart Strom ggü. 100Hz
+static const uint32_t KLIO_REPORT_LATENCY_MS = 0;
 
 // Ob für JA/NEIN bereits ein Klio-Muster trainiert+geladen ist. Index 0=JA,
 // 1=NEIN. Solange false: Schwellenwert-Fallback bleibt für genau diese
@@ -1280,10 +1424,14 @@ static uint8_t trainingTarget = GESTURE_ID_JA; // GESTURE_ID_JA oder GESTURE_ID_
 static unsigned long trainingStartedMs = 0;
 // War 60000 (60s) - laut Bosch-Beispielsketch (BHI260AP_Klio_Selflearning)
 // ist EIN klio.learning()-Aufruf EINE durchgehende Session, die erst endet,
-// wenn Klio selbst "genug gelernt" meldet; es gibt keine erkennbare API, um
-// mehrere spaetere Sessions zu einem Muster zusammenzufuehren (jeder
-// erneute Trainingsaufruf ueberschreibt das vorherige Muster komplett,
-// siehe finalizeGestureTraining()). Das in
+// wenn Klio selbst "genug gelernt" meldet. Ob mehrere GETRENNTE spaetere
+// Sessions sich zu einem Muster kombinieren lassen, ist seit 13.08.2026
+// ein laufendes Experiment ueber den learning_reset-Parameter (siehe
+// startGestureTraining()) - unverifiziert, ob das tatsaechlich so
+// funktioniert wie erhofft. Sicher ist weiterhin: EIN einzelner
+// Trainingsaufruf ohne reset ueberschreibt beim naechsten Aufruf MIT
+// reset=true das vorherige Muster komplett (siehe finalizeGestureTraining()).
+// Das in
 // docs/Erweiterung_Gesten_Training_Klio.md Abschnitt 3 geplante Protokoll
 // (6 Haltungen x 2-3 Wiederholungen) muesste demnach als EINE durchgehende
 // Session gefahren werden, mit Haltungswechseln WAEHREND des Trainings -
@@ -1302,7 +1450,7 @@ static Preferences gesturePrefs; // NVS-Namespace "klio" (Muster überleben Neus
 // On-Watch-Trainings-UI (12.08.2026, Roman-Wunsch: Klio-Training MUSS ohne
 // USB/Laptop moeglich sein - auf einem Einhand-Trapez-Skiff ist ein staendig
 // angesteckter Laptop unrealistisch). Ersetzt/ergaenzt den bisher rein
-// seriellen Weg (TRAIN JA/NEIN, siehe gestureTrainingSerialTick() weiter
+// seriellen Weg (TRAIN JA/NEIN, siehe serialCommandTick() weiter
 // unten - bleibt als Desktop-Fallback bestehen) um Buttons + Fortschritts-
 // Anzeige im Menue-Tab. lv_msgbox statt eigenem Overlay - gleiches Muster
 // wie cbCompetitionStopRequest() weiter unten (modal, Titel+Text+Footer-
@@ -1574,15 +1722,62 @@ static void startGestureTraining(uint8_t target) {
     trainingActive = true;
     trainingTarget = target;
     trainingStartedMs = millis();
-    Serial.printf("\n[Klio] === Training '%s' gestartet ===\n", target == GESTURE_ID_JA ? "JA" : "NEIN");
+
+    // Roman-Wunsch 13.08.2026: mehrere getrennte Trainings-Durchlaeufe
+    // (z.B. erst einfaches Geste-Training an Land, spaeter ergaenzend echte
+    // Segel-Situationen auf dem Wasser) zu EINEM Muster kombinieren statt
+    // dass der zweite Lauf den ersten komplett verwirft. Bosch dokumentiert
+    // `learning_reset` nur sehr knapp ("0 - nop, 1 - reset learning", siehe
+    // bhy2_klio_defs.h) - OB reset=false wirklich an ein bereits per
+    // finalizeGestureTraining()/writePattern() abgeschlossenes Muster
+    // anknuepft, oder nur eine unterbrochene EINZELNE Session fortsetzt,
+    // ist daraus nicht ersichtlich und NICHT auf Hardware verifiziert.
+    // Deshalb hier bewusst simpel: reset nur beim allerersten Training
+    // fuer dieses Ziel (noch kein gespeichertes Muster) - jeder weitere
+    // Trainingslauf (bis explizit ueber "X zuruecksetzen" geloescht) laeuft
+    // mit reset=false. Verifikationsplan siehe
+    // docs/Erweiterung_Gesten_Training_Klio.md Abschnitt 5b.
+    bool alreadyTrained = klioPatternTrained[target - 1];
+    Serial.printf("\n[Klio] === Training '%s' gestartet (%s) ===\n",
+                  target == GESTURE_ID_JA ? "JA" : "NEIN",
+                  alreadyTrained ? "ERWEITERT bestehendes Muster, reset=false" : "NEUES Muster, reset=true");
     Serial.println("[Klio] Geste jetzt mehrfach gleichmaessig wiederholen (Kalibrierungs-Protokoll siehe");
     Serial.println("[Klio] docs/Erweiterung_Gesten_Training_Klio.md Abschnitt 3). Fortschritt erscheint hier.");
     Serial.println("[Klio] 'TRAIN CANCEL' bricht ab.");
-    // learning_reset=true: fruehere, unvollstaendige Lernversuche verwerfen.
     // recognition_enable=false: waehrend des Trainings keine alten Muster
     // erkennen (vermeidet Ja/Nein-Antworten mitten im Training).
-    klio.setState(/*learning_enable=*/true, /*learning_reset=*/true,
+    klio.setState(/*learning_enable=*/true, /*learning_reset=*/!alreadyTrained,
                   /*recognition_enable=*/false, /*recognition_reset=*/false);
+    // BUGFIX (13.08.2026, Root Cause per Serial-Log gefunden: Training startet
+    // sichtbar, Fortschrittstext im Dialog aendert sich aber NIE, obwohl echte
+    // Bewegung ankommt - siehe SensorBHI260AP_Klio.cpp: klio_call_local() ruft
+    // learning_callback NUR auf, wenn das interne (private) Member k_state.
+    // learning_enabled true ist. Die oben genutzte 4-Parameter-setState()-
+    // Ueberladung konfiguriert zwar den SENSOR korrekt (Klio lernt tatsaechlich
+    // auf dem Chip), aktualisiert aber NICHT dieses lokale k_state-Cache-Feld
+    // - nur die Komfort-Methode learning() tut das (k_state = getState();
+    // k_state.learning_enabled = true; setState(k_state);). Ohne diesen
+    // zusaetzlichen Aufruf bleibt der Callback fuer immer stumm geschaltet,
+    // obwohl das Training auf dem Sensor selbst laeuft. Redundanter zweiter
+    // setState()-Aufruf an den Chip (harmlos, kein erneutes reset - getState()
+    // liest den bereits gesetzten Zustand zurueck), einzig relevanter Effekt
+    // hier ist die Synchronisierung von k_state.
+    bool learningOk = klio.learning();
+    // TODO(Test-Debug, 13.08.2026): Ruecklese-Diagnose - Callback feuerte nach
+    // obigem Fix immer noch nicht (Serial-Test mit echter Bewegung, 16s, keine
+    // einzige [Klio]-Lernzeile), OBWOHL die Ruecklese hier learning_enabled=1
+    // bestaetigt (echter Chip-Read, siehe bhy2_klio_get_state() -> geht ueber
+    // bhy2_get_parameter(), kein reiner Software-Cache). Naechster Verdacht:
+    // Vergleich mit dem offiziellen Bosch-Beispiel (BHI260AP_Klio_Selflearning)
+    // zeigt eine Reihenfolge-Abweichung - dort wird klio.enable() NACH dem
+    // ERSTEN learning()-Aufruf gemacht, hier bisher nur einmal beim Boot,
+    // BEVOR je trainiert wurde. Test: enable() hier erneut aufrufen, falls das
+    // KLIO-Virtual-Sensor-FIFO-Reporting den Lern-Zustand nur beim
+    // configure()-Aufruf selbst "einfriert" statt live nachzuziehen.
+    klio.enable(KLIO_SAMPLE_RATE_HZ, KLIO_REPORT_LATENCY_MS);
+    SensorBHI260AP_Klio::KlioState readBack = klio.getState();
+    Serial.printf("[Klio] DEBUG: learning() ok=%d, Ruecklese learning_enabled=%d recognition_enabled=%d, error=%s\n",
+                  learningOk, readBack.learning_enabled, readBack.recognition_enabled, klio.errorToString());
 }
 
 static void cancelGestureTraining() {
@@ -1614,13 +1809,21 @@ static void resetGesturePattern(uint8_t target) {
     restoreRecognitionAfterTraining();
 }
 
-// ---- Serial-Kommandos fuer den Kalibrierungslauf (siehe Doku Abschnitt 2) ----
-// Bewusst simpler Zeilen-Parser, kein UI auf der Uhr noetig. Kommandos:
+// ---- Serial-Kommandos: Kalibrierungslauf (Doku Abschnitt 2) + Akku-Log ----
+// Bewusst simpler Zeilen-Parser, kein UI auf der Uhr noetig fuer diese
+// Desktop-Fallback-Wege. NUR EIN Leser fuer Serial.available()/
+// readStringUntil() im ganzen Sketch (hier) - ein zweiter, unabhaengiger
+// Reader wuerde sich Zeilen streitig machen (wer zuerst im loop() drankommt,
+// verschluckt sie fuer den anderen). BATLOG-Kommandos deshalb hier mit
+// hinein statt in einem eigenen Tick, siehe handleBatteryLogCommand() weiter
+// oben (bewusst ausserhalb von USING_BHI260_SENSOR, damit es auch im
+// #else-Zweig unten funktioniert).
 //   TRAIN JA / TRAIN NEIN   - Trainingslauf fuer diese Geste starten
 //   TRAIN CANCEL            - laufendes Training abbrechen
 //   TRAIN STATUS            - aktuellen Trainingsstand ausgeben
 //   TRAIN RESET JA / NEIN   - gespeichertes Muster loeschen (neu trainieren)
-static void gestureTrainingSerialTick() {
+//   BATLOG DUMP/STATUS/CLEAR - siehe handleBatteryLogCommand()
+static void serialCommandTick() {
     if (trainingActive && (millis() - trainingStartedMs) > TRAINING_TIMEOUT_MS) {
         Serial.println("[Klio] Training-Timeout (60s ohne Ergebnis) - abgebrochen. 'TRAIN JA'/'TRAIN NEIN' erneut eintippen.");
         cancelGestureTraining();
@@ -1631,6 +1834,8 @@ static void gestureTrainingSerialTick() {
     line.trim();
     line.toUpperCase();
     if (line.length() == 0) return;
+
+    if (handleBatteryLogCommand(line)) return;
 
     if (line == "TRAIN JA") {
         startGestureTraining(GESTURE_ID_JA);
@@ -1646,6 +1851,8 @@ static void gestureTrainingSerialTick() {
         resetGesturePattern(GESTURE_ID_NEIN);
     } else if (line.startsWith("TRAIN")) {
         Serial.println("[Klio] Unbekanntes Kommando. Verfuegbar: TRAIN JA, TRAIN NEIN, TRAIN CANCEL, TRAIN STATUS, TRAIN RESET JA, TRAIN RESET NEIN");
+    } else if (line.startsWith("BATLOG")) {
+        Serial.println("[Akku-Log] Unbekanntes Kommando. Verfuegbar: BATLOG DUMP, BATLOG STATUS, BATLOG CLEAR");
     }
 }
 
@@ -1661,17 +1868,36 @@ static void setupGestureSensor() {
     // bereits hochgeladene GPIO-Firmware, siehe Kommentar beim
     // BOSCH_BHI260_KLIO-Define oben) - erst DANACH virtuelle Sensoren
     // aktivieren, sonst würde enable() noch gegen die alte Firmware laufen.
-    bool klioFirmwareOk = instance.sensor.uploadFirmware(bosch_firmware_image, bosch_firmware_size, false);
+    //
+    // BUGFIX (13.08.2026, Root Cause per Serial-Log gefunden: "TRAIN JA" auf
+    // der Uhr ergab immer "Klio nicht verfuegbar" -> Serial zeigte "Bootloader
+    // reports: Firmware Upload Failed: Bad Header CRC"): ein direkter
+    // uploadFirmware()-Aufruf HIER schlaegt fehl, weil der BHI260-Chip zu
+    // diesem Zeitpunkt schon die GPIO-Firmware geladen hat UND AUSFUEHRT -
+    // der ROM-Bootloader nimmt nur direkt nach einem bhy2_soft_reset() neue
+    // Firmware-Bytes an, sonst interpretiert die laufende App die Upload-
+    // Bytes als Muell (daher der CRC-Fehler). SensorBHI260AP::initImpl()
+    // (SensorLib) macht genau diesen bhy2_soft_reset() VOR dem allerersten
+    // Firmware-Upload automatisch - beim nachtraeglichen Firmware-WECHSEL
+    // hier fehlte dieser Schritt. Fix: denselben Weg wie beim ersten Laden
+    // nutzen (setFirmware() + erneutes begin() statt direktem
+    // uploadFirmware()) - begin()/initImpl() ruft bhy2_soft_reset() intern
+    // auf, DANACH erst den Firmware-Upload. Ungefaehrlich, ein zweiter
+    // begin()-Aufruf auf demselben Wire/Sensor-Objekt ist laut SensorLib-Quelle
+    // sicher (comm/hal/_bhy2 sind unique_ptr, werden bei Neuzuweisung
+    // automatisch sauber ersetzt). NICHT auf Hardware verifiziert, ob danach
+    // ACCEL_PASSTHROUGH/Quaternion (Schwellenwert-Fallback) weiterhin
+    // funktionieren - naechster Test genau darauf achten.
+    instance.sensor.setFirmware(bosch_firmware_image, bosch_firmware_size, /*write_flash=*/false);
+    bool klioFirmwareOk = instance.sensor.begin(Wire);
     if (!klioFirmwareOk) {
         Serial.printf("[Klio] Firmware-Upload fehlgeschlagen (%s) - Klio bleibt deaktiviert, Schwellenwert-Fallback laeuft weiter.\n",
                       instance.sensor.getError());
     }
 
     Serial.println("[Gesten] BHI260AP online, Sensoren aktiviert"); // TODO(Test-Debug)
-    float sampleRate = 50.0;       // reicht für Handgelenk-Gesten, spart Strom ggü. 100Hz
-    uint32_t reportLatencyMs = 0;
-    gestureAccel.enable(sampleRate, reportLatencyMs);
-    gestureQuat.enable(sampleRate, reportLatencyMs);
+    gestureAccel.enable(KLIO_SAMPLE_RATE_HZ, KLIO_REPORT_LATENCY_MS);
+    gestureQuat.enable(KLIO_SAMPLE_RATE_HZ, KLIO_REPORT_LATENCY_MS);
 
     if (!klioFirmwareOk) {
         klioOnline = false;
@@ -1686,7 +1912,7 @@ static void setupGestureSensor() {
     Serial.printf("[Klio] Online, max. %u Muster gleichzeitig moeglich.\n", klio.getMaxPatterns());
     klio.setLearningCallback(onKlioLearningEvent, nullptr);
     klio.setRecognitionCallback(onKlioRecognitionEvent, nullptr);
-    klio.enable(sampleRate, reportLatencyMs);
+    klio.enable(KLIO_SAMPLE_RATE_HZ, KLIO_REPORT_LATENCY_MS);
     restoreKlioPatterns();
 }
 
@@ -1788,7 +2014,22 @@ static void setupGestureSensor() {
     Serial.println("[Gesten] USING_BHI260_SENSOR nicht definiert - Gestencode nicht mitkompiliert"); // TODO(Test-Debug)
 }
 static void gestureTick() {}
-static void gestureTrainingSerialTick() {}
+// Anders als die anderen Stubs hier NICHT leer: BATLOG-Kommandos (siehe
+// handleBatteryLogCommand(), ausserhalb von USING_BHI260_SENSOR definiert)
+// sollen auch ohne Gestensensor funktionieren - das Akku-Log haengt nicht
+// an der Klio-Hardware. Einziger Serial-Leser in diesem Zweig, wie im
+// echten Pendant weiter oben (siehe dortiger Kommentar zu "nur ein Leser").
+static void serialCommandTick() {
+    if (!Serial.available()) return;
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    line.toUpperCase();
+    if (line.length() == 0) return;
+    if (handleBatteryLogCommand(line)) return;
+    if (line.startsWith("TRAIN")) {
+        Serial.println("[Klio] USING_BHI260_SENSOR nicht gesetzt - TRAIN-Kommandos nicht verfuegbar.");
+    }
+}
 // Stubs fuer die On-Watch-Trainings-UI (12.08.2026, siehe Menu-Tab weiter
 // unten) - falls USING_BHI260_SENSOR mal fehlen sollte, sollen die
 // Trainings-Buttons nicht den Compile brechen, nur wirkungslos bleiben.
@@ -1814,6 +2055,10 @@ static lv_obj_t *alltagTabview = nullptr;
 
 // Statusleiste (oben, immer sichtbar)
 static lv_obj_t *lblBleStatus;
+// NEU (13.08.2026, Roman-Wunsch beim Schreibtisch-Test: "wollte eigentlich
+// den Akkustand der UHR haben, koennen wir beides anzeigen?") - zeigt jetzt
+// Handy- UND Uhr-Akku in einem Label (siehe statusBarUpdate()). Name
+// bewusst nicht umbenannt (viele Referenzen), Inhalt ist jetzt aber beides.
 static lv_obj_t *lblPhoneBattery;
 static lv_obj_t *lblStatusClock; // Bugfix 06.08.2026: RTC wird per BLE synchronisiert,
                                   // war aber im Segeln-Modus nirgends sichtbar (nur der
@@ -1861,10 +2106,17 @@ static lv_obj_t *lblGestureStatus = nullptr;
 static void statusBarUpdate() {
     lv_label_set_text(lblBleStatus, bleConnected ? "BLE OK" : "BLE ...");
     lv_obj_set_style_text_color(lblBleStatus, bleConnected ? lv_color_hex(0x30D060) : lv_color_hex(0xD03030), 0);
+    // Uhr-Akku (instance.pmu, lokal am I2C-PMU-Chip gelesen) ist IMMER
+    // verfuegbar, unabhaengig von BLE/GPS-Fix - anders als der Handy-Akku
+    // (phoneBatteryPct), der ueber CHAR_BATTERY_UUID kommt und erst nach dem
+    // ersten GPS-Fix des Handys gesendet wird (siehe notifyGpsFix() in
+    // BleGattServerManager.kt - Huckepack auf den GPS-Notify, kein
+    // eigenstaendiger Tick). "H" = Handy, "U" = Uhr.
+    int ownBattPct = instance.pmu.getBatteryPercent();
     if (phoneBatteryPct >= 0) {
-        lv_label_set_text_fmt(lblPhoneBattery, "Bat %d%%", phoneBatteryPct);
+        lv_label_set_text_fmt(lblPhoneBattery, "H %d%%  U %d%%", phoneBatteryPct, ownBattPct);
     } else {
-        lv_label_set_text(lblPhoneBattery, "Bat --");
+        lv_label_set_text_fmt(lblPhoneBattery, "H --  U %d%%", ownBattPct);
     }
     struct tm timeinfo;
     instance.rtc.getDateTime(&timeinfo);
@@ -2076,8 +2328,26 @@ void refreshActiveScreen() {
 static void cbCountdownStart(lv_event_t *e) { sendControlCommand(CMD_COUNTDOWN_START); }
 static void cbCountdownReset(lv_event_t *e) { sendControlCommand(CMD_COUNTDOWN_RESET); }
 static void cbCountdownSync(lv_event_t *e) { sendControlCommand(CMD_COUNTDOWN_SYNC_NEXT_MINUTE); }
-static void cbWindCalStart(lv_event_t *e) { sendControlCommand(CMD_WIND_CALIBRATE_START); }
-static void cbWindCalAbort(lv_event_t *e) { sendControlCommand(CMD_WIND_CALIBRATE_ABORT); }
+// NEU (13.08.2026, Roman-Feedback beim Schreibtisch-Test: "brauche Feedback
+// auf der Uhr dass die Kalibration gestartet hat") - bisher bewusst OHNE
+// Overlay/Haptik gelassen (siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md
+// Abschnitt 6.1: "Protokoll kennt keinen Kalibrierungs-Status"), aber genau
+// derselbe Bug-Typ wie das urspruengliche "Home setzen tut sichtbar nichts"
+// (siehe cbSetWaypoint()-Kommentar oben) - ein stiller Fehlschlag (z.B. kein
+// GPS-Fix, siehe WindEngine.startCalibration()) sah identisch aus zu "Button
+// tut nichts". Bestaetigt NUR den Sendevorgang, NICHT den fortlaufenden
+// Kalibrier-Fortschritt (WAIT_TACK1/WAIT_TACK_CHANGE etc. - das bleibt weiter
+// nur im Handy-Statusbanner sichtbar, siehe Doku-Kommentar dort).
+static void cbWindCalStart(lv_event_t *e) {
+    sendControlCommand(CMD_WIND_CALIBRATE_START);
+    triggerHaptic(HAPTIC_DONE2);
+    showCommandOverlay("Kalibrierung gestartet");
+}
+static void cbWindCalAbort(lv_event_t *e) {
+    sendControlCommand(CMD_WIND_CALIBRATE_ABORT);
+    triggerHaptic(HAPTIC_DONE2);
+    showCommandOverlay("Kalibrierung abgebrochen");
+}
 static void cbTrainOff(lv_event_t *e) { sendControlCommand(CMD_TRAIN_MODE_OFF); }
 static void cbTrainTack(lv_event_t *e) { sendControlCommand(CMD_TRAIN_MODE_TACK_ONLY); }
 static void cbTrainJibe(lv_event_t *e) { sendControlCommand(CMD_TRAIN_MODE_JIBE_ONLY); }
@@ -2210,6 +2480,8 @@ static lv_obj_t *addSubHeader(lv_obj_t *parent, const char *text) {
 // ist (Roman-Wunsch: "Feedback ob es passt", nach dem gefundenen
 // Home-setzen-Bug oben).
 static lv_obj_t *btnSetBuoy1, *btnSetBuoy2, *btnSetTarget, *btnSetHome, *btnSetMark1, *btnSetMark2;
+// NEU (13.08.2026, siehe WPSET_PIN/WPSET_BOAT oben) - Pin-/Boot-Ende der Startlinie.
+static lv_obj_t *btnSetPin, *btnSetBoat;
 
 // Baut eine Zeile: farbig einfärbbarer "X setzen"-Button (LINKS, breit) +
 // kleiner "X löschen"-Button (RECHTS) - ersetzt den frueheren einzelnen
@@ -2276,6 +2548,8 @@ static void menuScreenUpdate() {
     setWaypointButtonColor(btnSetHome, (waypointsSetFlags & WPSET_HOME) != 0);
     setWaypointButtonColor(btnSetMark1, (waypointsSetFlags & WPSET_COMPETITION_MARK1) != 0);
     setWaypointButtonColor(btnSetMark2, (waypointsSetFlags & WPSET_COMPETITION_MARK2) != 0);
+    setWaypointButtonColor(btnSetPin, (waypointsSetFlags & WPSET_PIN) != 0);
+    setWaypointButtonColor(btnSetBoat, (waypointsSetFlags & WPSET_BOAT) != 0);
 }
 
 static void buildMenuTab(lv_obj_t *parent) {
@@ -2313,6 +2587,15 @@ static void buildMenuTab(lv_obj_t *parent) {
     btnSetHome = addWaypointRow(parent, "Home setzen", WP_HOME);
     btnSetMark1 = addWaypointRow(parent, "Comp.-Marke 1 setzen", WP_COMPETITION_MARK1);
     btnSetMark2 = addWaypointRow(parent, "Comp.-Marke 2 setzen", WP_COMPETITION_MARK2);
+
+    // NEU (13.08.2026, Roman-Wunsch: auch von der Uhr aus setzbar, nicht nur
+    // im App-Setup-Tab - siehe docs/Erweiterung_Startlinie_Bias.md). Eigene
+    // Sektion statt in "-- Wegpunkte --" oben, weil Pin/Boot konzeptionell
+    // die Startlinie bilden, nicht Renn-Wegpunkte sind (gleiche Trennung wie
+    // im Setup-Tab der App).
+    addSubHeader(parent, "-- Startlinie (Pin/Boot, an akt. Position) --");
+    btnSetPin = addWaypointRow(parent, "Pin-Ende setzen", WP_PIN);
+    btnSetBoat = addWaypointRow(parent, "Boot-Ende setzen", WP_BOAT);
 
     // Gesten-Training (12.08.2026, Roman-Wunsch: Klio-Training MUSS ohne
     // USB/Laptop moeglich sein, siehe docs/Erweiterung_Gesten_Training_Klio.md
@@ -2473,9 +2756,11 @@ static void buildSegelnScreen() {
 
     // Fach-Tab-Aktion (12.08.2026, Roman-Wunschliste "vor dem naechsten
     // Test", siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md): Kalibrierung
-    // direkt hier statt nur im Menü-Tab. Kein Zustands-Feedback vom Handy
-    // vorgesehen (Protokoll kennt keinen Kalibrierungs-Status) - beide
-    // Buttons bleiben deshalb bewusst immer verfuegbar. tabWind ist (anders
+    // direkt hier statt nur im Menü-Tab. Sendevorgang bekommt seit 13.08.2026
+    // ein Overlay+Vibration (siehe cbWindCalStart()/cbWindCalAbort()) - einen
+    // laufenden Kalibrier-FORTSCHRITT (WAIT_TACK1/WAIT_TACK_CHANGE etc.)
+    // kennt das Protokoll weiterhin nicht, deshalb bleiben beide Buttons
+    // bewusst immer verfuegbar. tabWind ist (anders
     // als tabNav) nicht auf SCROLLABLE=false gestellt - passt der Container
     // nicht mehr in den sichtbaren Bereich, scrollt der Tab einfach.
     lv_obj_t *windActions = lv_obj_create(tabWind);
@@ -2702,6 +2987,13 @@ static void buildAlltagScreen() {
 void switchToMode(AppMode mode) {
     if (appMode == mode) return;
     appMode = mode;
+    // Falls das Display gerade wg. Alltags-Standby schlief (siehe
+    // standbyTick() - Standby ist seit 13.08.2026 im Segeln-Modus
+    // deaktiviert, weckt sich dort aber nicht von selbst auf, da
+    // standbyTick() fuer MODE_SEGELN komplett fruehzeitig zurueckkehrt):
+    // beim Wechsel IN den Segeln-Modus explizit aufwecken, sonst bliebe der
+    // Bildschirm bis zum naechsten Taster-/Geste-Ereignis schwarz.
+    if (mode == MODE_SEGELN) wakeDisplay();
     lv_screen_load(mode == MODE_SEGELN ? screenSegeln : screenAlltag);
     refreshActiveScreen();
 }
@@ -2864,6 +3156,7 @@ void setup() {
 
     setupLoRaTransceiver();
     setupGestureSensor();
+    setupBatteryLog();
 }
 
 void loop() {
@@ -2879,8 +3172,9 @@ void loop() {
     pendingAnswerTick();
     buttonTick();
     gestureTick();
-    gestureTrainingSerialTick();
+    serialCommandTick();
     standbyTick();
+    batteryLogTick();
     commandOverlayTick();
 
     lv_timer_handler();

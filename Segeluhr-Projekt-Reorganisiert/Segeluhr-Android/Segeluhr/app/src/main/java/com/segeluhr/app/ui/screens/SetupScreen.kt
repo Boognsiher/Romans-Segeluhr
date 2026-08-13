@@ -61,7 +61,9 @@ fun SetupScreen(
             WaypointRow("Pin-Ende", fmt(state.pin), { onSetWaypoint("pin") }, { onClearWaypoint("pin") })
             WaypointRow("Boot-Ende", fmt(state.boat), { onSetWaypoint("boat") }, { onClearWaypoint("boat") })
             Text(
-                "⚠️ Vorzeichen von Line-Bias hängt von Pin/Boot-Zuordnung ab — einmal mit bekanntem Wind gegenprüfen.",
+                "Positiver Wert = Pin-Ende bevorzugt, negativer Wert = Boot-Ende bevorzugt " +
+                    "(13.08.2026 analytisch hergeleitet, siehe docs/Erweiterung_Startlinie_Bias.md — " +
+                    "noch nicht mit echtem Wind auf dem Wasser gegengecheckt).",
                 fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
             )
         }

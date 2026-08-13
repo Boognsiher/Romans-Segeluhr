@@ -243,6 +243,101 @@ Session-Dauer-Grenzen o.ä. sind aus der API nicht ersichtlich) — beim
 nächsten Training genau beobachten, ob die Fortschrittsanzeige während der
 Haltungswechsel weiterläuft.
 
+## 5c. Bugfix 13.08.2026: Klio-Firmware-Upload schlug immer fehl ("Bad Header CRC")
+
+Beim Schreibtisch-Test (Checkliste 2g): "Ja trainieren" auf der Uhr ergab
+sofort "Klio nicht verfügbar". Per Serial-Log (`TRAIN JA` manuell
+gesendet) gefunden:
+
+```
+[Klio] Firmware-Upload fehlgeschlagen (API:[API Success]
+Sensor:[Sensor error] Bootloader reports: Firmware Upload Failed: Bad Header CRC)
+```
+
+**Ursache**: `setupGestureSensor()` läuft NACH `instance.begin()` (LilyGoLib
+hat da bereits die GPIO-Firmware erfolgreich hochgeladen und der BHI260-Chip
+führt sie schon aus) und rief bisher direkt
+`instance.sensor.uploadFirmware(klio_image, ...)` auf, um die Klio-Firmware
+nachzuladen. Der ROM-Bootloader des Chips nimmt aber nur **direkt nach
+einem `bhy2_soft_reset()`** neue Firmware-Bytes an — läuft schon eine App,
+interpretiert diese die Upload-Bytes stattdessen als Datenmüll, daher der
+CRC-Fehler. `SensorBHI260AP::initImpl()` (SensorLib, per Quellcode
+verifiziert) macht diesen `bhy2_soft_reset()` beim allerersten `begin()`
+automatisch VOR dem Firmware-Upload — genau dieser Schritt fehlte beim
+nachträglichen Firmware-Wechsel auf Klio.
+
+**Fix**: `setFirmware()` + erneutes `begin()` statt direktem
+`uploadFirmware()` — `begin()`/`initImpl()` ruft `bhy2_soft_reset()` intern
+auf, danach erst den Firmware-Upload. Ein zweiter `begin()`-Aufruf auf
+demselben Sensor-Objekt ist laut SensorLib-Quelle sicher (`comm`/`hal`/
+`_bhy2` sind `unique_ptr`, werden bei Neuzuweisung automatisch sauber
+ersetzt, kein Leak).
+
+**Verifiziert per Serial (13.08.2026 abends)**: Boot-Log zeigt jetzt
+`[Klio] Online, max. 25 Muster gleichzeitig moeglich.` statt des
+Fehlschlags, `TRAIN JA` startet ein Training sauber (`=== Training 'JA'
+gestartet ===`), `TRAIN CANCEL` bricht es sauber ab.
+
+**Update**: `ACCEL_PASSTHROUGH`/Quaternion laufen nach dem Firmware-Wechsel
+weiterhin sauber (`[Gesten] Pitch=...`-Debug-Zeilen bestätigt live plausibel,
+mehrfach beobachtet inkl. starker Bewegung).
+
+### Zweiter Bug in derselben Session: `k_state`-Software-Cache verhinderte den Learning-Callback komplett
+
+Nach obigem Fix startete das Training zwar ("Klio nicht verfügbar" war weg),
+aber der Fortschrittstext im On-Watch-Dialog änderte sich nie, auch nicht
+bei eindeutiger, kräftiger Bewegung (Serial-Test mit `TRAIN JA` + aktivem
+Handgelenk-Bewegen, 16s, keine einzige `[Klio]`-Lernzeile).
+
+**Ursache** (per Quellcode-Analyse `SensorBHI260AP_Klio.cpp` gefunden):
+`klio_call_local()` (der interne FIFO-Dispatch-Handler, der am Ende
+`learning_callback(...)` aufruft) prüft VOR dem Aufruf zusätzlich ein
+privates Member `k_state.learning_enabled` — ein reiner
+Software-Cache in der `SensorBHI260AP_Klio`-Objektinstanz, unabhängig vom
+tatsächlichen Sensor-Zustand. Die im Code bisher genutzte 4-Parameter-
+Überladung `klio.setState(learning_enable, learning_reset,
+recognition_enable, recognition_reset)` schreibt korrekt auf den Chip
+(`bhy2_klio_set_state()`), aktualisiert aber NICHT dieses lokale
+`k_state`-Feld — nur die Komfort-Methode `klio.learning()` tut das
+(`k_state = getState(); k_state.learning_enabled = true; setState(k_state);`).
+Ohne zusätzlichen `learning()`-Aufruf bleibt der Callback für immer
+unterdrückt, obwohl Klio auf dem Sensor selbst korrekt lernt.
+
+**Fix**: `klio.learning()` zusätzlich nach dem bestehenden `setState()`-Aufruf
+in `startGestureTraining()`. **Verifiziert per Live-Rücklese vom Chip**
+(nicht nur Software-Cache): `klio.getState()` direkt nach dem Fix zeigt
+`learning_enabled=1, error=""` — der Sensor bestätigt selbst, dass er lernt.
+
+### Dritter, noch NICHT gelöster Befund: Learning-Callback feuert trotzdem nie
+
+Trotz beider obiger Fixes (Firmware korrekt geladen, `k_state` korrekt
+synchronisiert, Chip bestätigt per Live-Readback `learning_enabled=1`) kam
+bei mehreren Bewegungstests (bis zu 16s, teils sehr kräftige Bewegung,
+Accel-Ausschläge >2g) **keine einzige** `[Klio]`-Lernzeile
+(`Trainingsfortschritt`/`nicht wiederholend genug`/`zu wenig Bewegung`) im
+Serial-Log an. Geprüft und ausgeschlossen:
+- Sensor-ID-Mapping (`KLIO=112`) stimmt exakt mit `BHY2_SENSOR_ID_KLIO`
+  überein.
+- `bhy2_is_sensor_available(112)` müsste laut Codepfad in `klio.begin()`
+  (das `true` zurückgab, siehe Boot-Log "Online, max. 25 Muster...") schon
+  bestanden haben.
+- Callback-Registrierung (`onResultEvent()` → `_callback_manager.add()`)
+  strukturell korrekt, kein offensichtlicher Overwrite-Bug gefunden.
+- Reihenfolge `enable()` vor/nach `learning()` getestet (beide Varianten,
+  kein Unterschied).
+
+**Nicht weiter verfolgt** (13.08.2026, bewusst zurückgestellt): Ursache
+könnte in einem separaten Wake-/Non-Wake-FIFO-Pfad liegen (Klio könnte auf
+eine FIFO schreiben, die der bestehende Interrupt-/`sensor.update()`-Pfad
+nicht mit ausliest) oder eine Bewegungs-Qualitätsanforderung sein, die auch
+kräftiges Bewegen nicht erfüllt (Klio braucht ggf. eine sehr gleichmäßig
+WIEDERHOLTE Bewegung, kein einmaliges Schütteln). Der Debug-Print in
+`startGestureTraining()` (`[Klio] DEBUG: learning() ok=...`) bleibt bewusst
+im Code, bis der eigentliche Callback-Fund gemacht ist. **Nächster Schritt
+beim Wassertest**: mit mehr Zeit eine saubere, langsam-gleichmäßige
+Wiederholbewegung testen (statt kräftigem Schütteln) und beobachten, ob
+sich das Verhalten ändert.
+
 ## 5. Warum nicht einfach "mehr Schwellenwerte austesten"
 Das war der gestrige Ansatz und genau daran ist die Kalibrierung
 hängengeblieben (nur eine Schreibtisch-Messung, Schütteln/Nein nie
@@ -250,3 +345,80 @@ verifiziert). Klio löst das grundsätzlich anders: es lernt aus echten
 Bewegungsmustern statt dass wir Zahlen raten — dafür muss aber das Training
 selbst unter echten Bedingungen (Wasser, nicht Schreibtisch) passieren,
 sonst reproduziert man denselben Fehler nur mit mehr Aufwand.
+
+## 5b. Ergänzung 13.08.2026: Hintergrundbetrieb, automatisches Training aus
+## Wind-/Manöver-Zustand, mehrere Trainings-Durchläufe kombinieren
+
+Drei Roman-Fragen vom Abend nach dem Hardware-Test, alle noch OHNE
+Wassertest — hier nur die Einordnung, kein neuer Hardware-Befund.
+
+### Läuft Klio schon im Hintergrund?
+**Ja, bereits heute.** `klio.recognition()` (siehe `restoreRecognitionAfterTraining()`)
+läuft nach dem Training dauerhaft auf dem BHI260AP-Sensor-Chip selbst — das
+ist ein eigener Co-Prozessor, getrennt von der ESP32-Haupt-CPU, genau für
+diesen Zweck gebaut (Always-on-Mustererkennung ohne Strom-/CPU-Last auf dem
+Hauptprozessor). `onKlioRecognitionEvent()` feuert laufend, wir **reagieren**
+darauf nur, wenn `haveIncomingQuestion`/`raceData.roundingConfirmPending`
+gesetzt ist — das ist ein reines App-Level-Gate, kein Sensor-Zustand. Keine
+Stromkosten-Frage, das läuft bereits.
+
+### Automatisches Training aus abgeleitetem Zustand (Wind/Manöver)?
+Geprüft und **bewusst nicht umgesetzt** für die Beispiele "Amwind/Vor dem
+Wind" und "Manöver läuft" — Klios Lern-API kennt kein "im Hintergrund gegen
+ein externes Label trainieren", nur einen expliziten Start/Stopp-Lernlauf
+mit fester Pattern-ID. Man KÖNNTE `startGestureTraining()` programmatisch
+aus `WindEngine`/`CompetitionEngine`-Zustandswechseln auslösen — bringt aber
+für genau diese beiden Beispiele nichts: Amwind/Vorwind und Manöver-Zustand
+werden schon zuverlässig und günstig aus GPS+Windwinkel berechnet, ein
+zweites (unzuverlässigeres, weil aus verrauschter Handgelenksbewegung
+gelerntes) Klio-Signal für dieselbe Information wäre bestenfalls redundant,
+schlimmstenfalls widersprüchlich. Zusätzliches Problem: die abgeleiteten
+Zustände sind selbst Schätzungen (kein Ground Truth) — automatisches
+Training dagegen würde deren Fehler nur reproduzieren, ohne die Korrektur,
+die ein Mensch bei einer bewussten Trainings-Session liefert.
+
+**Wo die Idee stattdessen Sinn ergäbe:** für Dinge, die aus GPS/Wind
+grundsätzlich NICHT ableitbar sind, weil sie reine Körperhaltung/Bewegung
+sind — "bin ich gerade am Trapez", "gerade mitten im Tiller-Extension-
+Handwechsel bei der Wende" (bevor der GPS-Kurs die Wende überhaupt zeigt).
+Das deckt sich mit der bereits in Abschnitt 3 als Fehlalarm-Risiko
+identifizierten Wende-/Halse-/Trapez-Bewegung — als eigene, bewusst
+trainierte Klio-Patterns (nicht automatisch aus Wind/GPS abgeleitet)
+künftig denkbar, siehe "Spätere Idee" unten. **Nicht jetzt gebaut** — erst
+das bestehende 2-Pattern-System (JA/NEIN) echt auf dem Wasser verifizieren.
+
+### Mehrere Trainings-Durchläufe kombinieren (z.B. erst an Land, später auf dem Wasser)?
+Bisher überschrieb jeder neue `startGestureTraining()`-Aufruf das
+gespeicherte Muster komplett (`learning_reset` war hart auf `true` gesetzt).
+**13.08.2026 geändert:** `learning_reset` ist jetzt `false`, sobald für die
+jeweilige Geste (JA/NEIN getrennt) bereits ein Muster existiert — nur beim
+allerersten Training bzw. nach explizitem "X zurücksetzen" bleibt es `true`.
+Damit liesse sich z.B. erst ein einfaches Training an Land fahren und
+später ein zweites, ergänzendes auf dem Wasser in echten Segel-Situationen,
+ohne das erste zu verwerfen.
+
+**Wichtig — das ist ein Experiment, kein bestätigtes Verhalten:** Boschs
+eigene Doku zu `learning_reset` ist auf einen einzigen Satz beschränkt
+("0 - nop, 1 - reset learning", `bhy2_klio_defs.h`). Daraus geht NICHT
+hervor, ob `reset=false` wirklich an ein bereits per `writePattern()`
+abgeschlossenes und zwischenzeitlich in den NVS-Flash geschriebenes Muster
+anknüpft, oder nur eine einzelne, ununterbrochene Session fortsetzen kann.
+**Verifikationsplan für den nächsten Test:** einmal ein kurzes Training an
+Land fahren (z.B. nur "im Stehen"-Wiederholungen), Muster testen
+(Erkennungstest laut Serial-Log), dann ein zweites Training für dieselbe
+Geste starten (jetzt mit `reset=false`, sichtbar am Serial-Log
+"ERWEITERT bestehendes Muster") mit anderen/neuen Wiederholungen, danach
+erneut beide Bewegungsarten testen. Erkennt Klio jetzt beide zuverlässig,
+funktioniert das Kombinieren wie erhofft — erkennt es nur noch die zweite
+Charge, verhält sich `reset=false` effektiv wie ein normaler Neustart und
+wir fallen zurück auf den in Abschnitt 5a beschriebenen Weg (eine einzige
+durchgehende Session über alle gewünschten Situationen hinweg).
+
+### Spätere Idee (nicht jetzt umsetzen)
+Eigene Klio-Patterns für Wende-Handwechsel, Halse-Handwechsel und
+Trapez-Ein-/Aushaken — würde die bestehende 20s-Gestensperre nach einem
+Manöver-Vorschlag (siehe `MANEUVER_GESTURE_SUPPRESS_MS`) um eine
+kontextabhängige Erkennung ergänzen, die auch bei spontanen Manövern ausserhalb
+eines aktiven Wettfahrt-Kontexts greifen würde. Erst sinnvoll zu bewerten,
+nachdem das bestehende JA/NEIN-Training auf dem Wasser gelaufen ist und wir
+wissen, wie gross das Fehlalarm-Problem in der Praxis tatsächlich ist.

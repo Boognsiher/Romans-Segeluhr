@@ -301,12 +301,13 @@ class BleGattServerManager(private val context: Context) {
         competitionLegOrdinal: Int?,
         roundingConfirmPending: Boolean = false,
         vmcKn: Double? = null,
+        lineBiasDeg: Double? = null,
     ) {
         val server = gattServer ?: return
         val characteristic = raceStatusCharacteristic ?: return
         if (connectedDevices.isEmpty()) return
         characteristic.value = BleProtocol.encodeRaceStatus(
-            raceStateOrdinal, countdownSeconds, maneuverNeeded, isTack, competitionLegOrdinal, roundingConfirmPending, vmcKn,
+            raceStateOrdinal, countdownSeconds, maneuverNeeded, isTack, competitionLegOrdinal, roundingConfirmPending, vmcKn, lineBiasDeg,
         )
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, characteristic, false)
@@ -322,11 +323,12 @@ class BleGattServerManager(private val context: Context) {
     fun notifyWaypointsStatus(
         buoy1Set: Boolean, buoy2Set: Boolean, targetSet: Boolean,
         homeSet: Boolean, mark1Set: Boolean, mark2Set: Boolean,
+        pinSet: Boolean, boatSet: Boolean,
     ) {
         val server = gattServer ?: return
         val characteristic = waypointsStatusCharacteristic ?: return
         if (connectedDevices.isEmpty()) return
-        characteristic.value = BleProtocol.encodeWaypointsStatus(buoy1Set, buoy2Set, targetSet, homeSet, mark1Set, mark2Set)
+        characteristic.value = BleProtocol.encodeWaypointsStatus(buoy1Set, buoy2Set, targetSet, homeSet, mark1Set, mark2Set, pinSet, boatSet)
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, characteristic, false)
         }

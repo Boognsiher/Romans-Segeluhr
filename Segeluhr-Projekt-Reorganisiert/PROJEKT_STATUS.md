@@ -19,6 +19,74 @@ gerade läuft, was Baustelle und was nur Test ist.
 | `Segeluhr_TWatch_S3` (Land) | T-Watch S3 | 🔧 | 10.08.2026 (Boot + End-to-End distanceTraveledM + Detail-Tab-Layout-Fix auf Hardware verifiziert, COM16), 12.08.2026 Abend (eigene Akku-Anzeige in Detail-Tab verschoben, auf Hardware verifiziert) | Land-Uhr (neue Rolle, ersetzt bisherige BLE-Central-Rolle), kompiliert + geflasht (COM16), bootet sauber. **LoRa-Empfang + Quick-Messages (beide Richtungen) Ende-zu-Ende verifiziert**, Buttons/Schrift nach Hardware-Test vergrössert. **Standby/Wecken 06.08. implementiert + kompiliert**: Display-Aus nach 30s, Aufwecken per Touch oder BMA423-Hardware-Tilt (LilyGoLib-Event, kein eigener Schwellenwert-Code nötig) — noch nicht auf Hardware getestet. **Menü-Redesign 06.08. implementiert + kompiliert** (docs/Erweiterung_Land_Boot_LoRa_Kommunikation.md Abschnitt 3): Icon-Grid [Stumm][Fragen]/[Alltag]/[Ausschalten] statt Liste. **Manuelles "Zeit stellen" entfernt**, Land-Uhr übernimmt Zeit jetzt automatisch aus dem ersten LoRa-Paket. **Alltagsfunktionen (docs/Erweiterung_S3_Alltagsfunktionen.md) 06.08. implementiert + kompiliert**: Wecker (Software-Vergleich statt Hardware-Alarm — reale S3 hat PCF8563 statt dokumentiertem PCF85063A, dessen Alarm-IRQ bei dieser LilyGoLib-Version im Wachzustand nicht verdrahtet ist, jetzt mit NVS-Persistenz), Stoppuhr, Schrittzähler (BMA423-Pedometer), Taschenlampe (90s-Overlay). Kein Ton beim Wecker. **BLE-Fragen-Editor (docs/Erweiterung_S3_BLE_Fragen_Editor.md) 06.08. implementiert + kompiliert**: BLE-Toggle im Fragen-Menü (NimBLE-Server, standardmäßig aus), eigene Fragen per Web-Bluetooth-Seite (`docs/fragen_editor_web/index.html`) erstellbar, max. 5 gespeichert (NVS, Ringpuffer). Alles noch nicht auf Hardware getestet. Ton bei Quick-Messages noch offen — siehe `docs/Offene_Punkte_Hardware_Test_05_08.md`. **09.08.: neue BLE-Characteristic für die Landuhr-Kartenansicht** (docs/Erweiterung_Landuhr_Kartenansicht.md) am selben Fragen-Editor-Server/Schalter — sendet die per LoRa empfangene Boot-Position ans Handy an Land. **Auf Hardware verifiziert** (mit vollem Flash-Erase gegen korrupte NVS-BT-Kalibrierungsdaten, siehe Doku), Ende-zu-Ende bis zum Karten-Marker auf dem Land-Handy bestätigt. Noch nicht mit zwei gleichzeitigen BLE-Clients getestet (Fragen-Editor-Webseite + Landuhr-App). **10.08.: Detail-Screen zeigt jetzt zusätzlich `distanceTraveledM`** ("bisher X km", in der bestehenden Paket-Info-Zeile mitgepackt statt neues Label) — Feld kommt aus dem erweiterten `LoRaStatusPacket`, siehe Ultra-Zeile oben. **10.08. Abend kompiliert + geflasht (COM16), End-to-End mit der Ultra verifiziert** — "Paket #N, Xs alt, bisher Y km" kommt korrekt an. Dabei UI-Bug gefunden+gefixt: die fünf Detail-Tab-Labels waren mit festen Pixel-Y-Koordinaten positioniert, nie für mehrzeiligen Text durchgerechnet; durch den jetzt oft mehrzeiligen Paket-Info-Text ("bisher X km") überlappten sie auf Hardware wild. Ein erster Fix (Paket-Info relativ unter dem Wind-Label per `lv_obj_align_to`) reichte nicht, weil die Ausrichtung nur einmal beim leeren Label berechnet wurde, bevor der echte Text gesetzt ist. Endgültiger Fix: Detail-Tab auf LVGL-Flex-Column umgestellt (`lv_obj_set_flex_flow`/`lv_obj_set_flex_align`) — Labels ordnen sich jetzt bei jeder Text-Änderung automatisch neu an, unabhängig von der Zeilenzahl. Auf Hardware verifiziert (COM16, dritter Reflash). **10.08. Abend: "Ausschalten" (Deep-Sleep, `cbShutdown()`) erstmals auf Hardware getestet, dabei Bug gefunden + gefixt** — mit den `instance.sleep()`-Standardquellen (Power-Taste + Touch) wachte die Uhr *jedes* Mal sofort wieder auf, auch ohne USB-Kabel und mit unbeschädigtem Taster. Per Diagnose-Build eingegrenzt: `esp_sleep_get_ext1_wakeup_status()` zeigte zuverlässig `PMU_INT=1`/`TP_INT=0` (Power-Taste-Aufwach-Pin bereits aktiv beim Sleep-Eintritt), `instance.pmu.getIrqStatus()` direkt bei Tastendruck zeigt aber `0x0` — der falsche `PKEY_SHORT_IRQ` entsteht also *während* der `sleep()`-Sequenz selbst (irgendwo im ~4s-Fenster zwischen deren `clearIrqStatus()` und `esp_deep_sleep_start()`), nicht durch alten Zustand. Genauere Eingrenzung bräuchte Debug-Ausgaben innerhalb der gepinnten LilyGoLib selbst — bewusst nicht gemacht (spät, betrifft Vendor-Code). **Fix: Aufwachen nur noch per Touch** (`instance.sleep(WAKEUP_SRC_TOUCH_PANEL)`, Power-Taste als Quelle entfernt), TP_INT ist nachweislich sauber. Zweimal auf Hardware verifiziert: bleibt dauerhaft aus bei Nichtberührung, wacht sauber per Antippen auf. Trade-off bewusst in Kauf genommen (Touch ist ohnehin die primäre Bedienung dieser Uhr). **11.08.: Bugfix `sleepDisplay()`/`wakeupDisplay()` sind auf der S3 wirkungslose Stubs** (siehe `docs/Erweiterung_Standby_Wecken.md` Abschnitt 3a) — Fix per direktem `setBrightness()`, auf Hardware verifiziert. **12.08.: eigene Akku-Anzeige auf dem Status-Tab** (`lblOwnBattery`, gleiche `instance.pmu.getBatteryPercent()`-API wie auf der Ultra) — kompiliert, nicht getestet. **12.08. Abend, Hardware-Feedback:** sass dort direkt unter `lblConnIndicator` und überlappte dessen (teils zweizeiligen) Text — verschoben nach `tabDetail` (letztes Label in dessen Flex-Column, erscheint dadurch automatisch ganz unten unter Distanz/SOG/Akku Boot/Wind/Paket-Info), auf Hardware verifiziert. |
 | `segeluhr_ble_tester` | ESP32-C3/XIAO | 🗄️ | — | nur lokal vorhanden, nicht in diesem Repo, siehe `Segeluhr-Firmware/TESTING/README.md` |
 | `Segeluhr_Basis_Solo` | (für Ultra gedacht) | 🗄️ | — | nur lokal vorhanden, nie auf echter Hardware getestet |
+| `Segeluhr_Mastuhr` (NEU) | Eigenbau: Waveshare ESP32-S3-Touch-LCD-3.49 (integriertes Display+RTC+18650-Akkuhalter+Audio), BLE-only | 📋 | — | **13.08.2026 Konzept-Phase**: fest am Mast montiertes Gerät, Gehäuse per 3D-Druck in Eigenregie. Ursprünglich als eigenständiges GPS+LoRa-Gerät geplant (~CHF 240–260), **13.08. Abend radikal vereinfacht** (Roman-Wunsch): kein GPS, kein LoRa mehr — reine BLE-Anzeige fürs Handy, architektonisch dieselbe Rolle wie die T-Watch S3 heute (kein eigenes GPS, alle Daten per BLE). **13.08. Abend Board-Wahl finalisiert**: Waveshare ESP32-S3-Touch-LCD-3.49 (Roman-Fund) als Standard-Empfehlung statt LilyGO T-Display-S3 — bringt RTC/18650-Akkuhalter/Audio-Codec+Lautsprecher/IMU bereits eingebaut mit, kein LilyGO-Bezug, löst nebenbei die offene Ton-Frage aus `Erweiterung_S3_Ton_QuickMessages.md`. Display ist ein schmaler 172×640-Streifen statt Breitformat — UI-Neuentwurf nötig, kein Copy-Paste der bestehenden LVGL-Tabs. Neue Kostenschätzung ~CHF 85–135. Kommerzielle Alternativen (Sailmon MAX €899, Velocitek ProStart $795, Raymarine Tacktick ~$400–500) geprüft und verworfen zugunsten der Eigenkonstruktion (Integration ins bestehende BLE/LoRa-System). Details: `docs/Erweiterung_Mastuhr.md`. Noch keine Zeile Code, kein Bauteil bestellt. |
+
+## 13.08.2026 Abend: Startlinie-Bias dokumentiert + Bugfix + BLE-Anbindung
+
+Beim Planen der Mastuhr (siehe unten) aufgefallen: das Startlinie-Bias-
+Konzept (Pin/Boot-Wegpunkte, Bias-Berechnung in `SegeluhrViewModel`,
+Anzeige in `NormalScreen`) existierte schon seit der Ur-Spezifikation,
+war aber nie dokumentiert und der Vorzeichen-Fehler im Code (welches
+Ende als bevorzugt gilt) stand seit Einführung unverifiziert im Code.
+Roman-Hinweis ("Startboot ist immer in Windrichtung rechts, gegen den
+Wind geschaut") erlaubte eine analytische Auflösung ohne Wassertest —
+Vorzeichen war tatsächlich vertauscht, jetzt korrigiert (zweifach
+gegengerechnet: Rotations- und Projektions-Methode, gleiches Ergebnis).
+`RaceStatusPacket` (BLE, Handy→Ultra) 7→9 Byte erweitert um
+`lineBiasDdeg`, Ultra-Firmware parst es (noch keine eigene Anzeige dort,
+Konsument ist die geplante Mastuhr). **Beide Seiten kompiliert** (Android
+`compileDebugKotlin` BUILD SUCCESSFUL, Ultra-Firmware `arduino-cli
+compile` fehlerfrei, 50%/12% Flash/RAM) — **noch nicht auf Hardware
+getestet.** Details: `docs/Erweiterung_Startlinie_Bias.md`. Weiterhin
+offen: Vorzeichen mit echtem Wind auf dem Wasser gegenchecken.
+
+## 13.08.2026 Abend (spät): Schreibtisch-Test-Runde vor dem Wassertest
+
+Beide Uhren + Handy neu geflasht/installiert, dann `docs/Test_Checkliste_12_08.md`
+Abschnitt 2 (An-Land-Tests) durchgegangen — Details/Einzelstatus siehe dort.
+Kurzfassung der dabei gefundenen+gefixten Bugs und neuen Kleinfeatures:
+
+- **Pin-/Boot-Ende (Startlinie) jetzt auch von der Ultra aus setzbar**
+  (vorher nur im App-Setup-Tab) — Protokoll (`WaypointId.PIN/BOAT`) war
+  bereits vollständig verdrahtet, nur die Uhr-UI fehlte. Getestet, klappt.
+- **Wind-Kalibrierung ohne Feedback auf der Uhr** — Roman-Feedback,
+  gefixt: Overlay+Vibration bei Start/Abbruch wie bei den Wegpunkt-
+  Buttons. Ein stehenbleibendes "läuft gerade"-Symbol ist bewusst
+  zurückgestellt (braucht neues Protokollfeld), siehe
+  `docs/Erweiterung_TWatch_Ultra_NavRedesign.md` Abschnitt 6.1.
+- **Handy-Akku-Anzeige zeigte dauerhaft "--" am Schreibtisch** — Ursache:
+  hängt am GPS-Fix (kommt huckepack auf `notifyGpsFix()`), ohne Fix nie
+  gesendet. Kein Fix nötig (funktioniert draussen normal), stattdessen
+  Roman-Wunsch umgesetzt: Statusleiste zeigt jetzt zusätzlich den
+  **Uhr-eigenen Akku** (`instance.pmu.getBatteryPercent()`, unabhängig
+  vom GPS-Fix immer verfügbar) — "H X% U Y%".
+- **Klio-Training: drei Bugs in Serie gefunden** (`docs/Erweiterung_Gesten_Training_Klio.md`
+  Abschnitt 5c für Details):
+  1. Firmware-Upload schlug fehl ("Bad Header CRC") — fehlender
+     `bhy2_soft_reset()` vor dem Nachladen der Klio-Firmware auf einen
+     bereits mit GPIO-Firmware laufenden Chip. **Gefixt+verifiziert.**
+  2. Trotzdem kein Fortschritts-Feedback im Dialog — `SensorBHI260AP_Klio`
+     führt einen privaten Software-Cache (`k_state`), der von der bisher
+     genutzten `setState()`-Überladung nicht mitgepflegt wurde, wodurch
+     der Callback lokal unterdrückt blieb. **Gefixt, per Live-Rücklese
+     vom Chip verifiziert** (`learning_enabled=1` direkt vom Sensor
+     bestätigt).
+  3. **Trotzdem feuert der Callback nicht** — Ursache trotz tiefer
+     Analyse (Sensor-ID-Mapping, Callback-Registrierung, Enable-
+     Reihenfolge alle geprüft und unauffällig) nicht gefunden. Bewusst
+     auf den Wassertest verschoben (mehr Zeit, andere Bewegungsqualität
+     testen) — Debug-Print bleibt im Code.
+- Kartenauswahl für Bojen/Comp.-Marken (12.08. gebaut) **erstmals auf
+  Hardware getestet, funktioniert.** Roman-Wunsch aufgenommen (auf später
+  verschoben): bereits gesetzte Wegpunkte sollen auf der Karte mit
+  angezeigt werden, siehe `docs/Erweiterung_Boje_Kartenauswahl.md`.
+- CD-Tab-Aktionen (Start/Reset/Sync/Stopp-mit-Rückfrage) alle auf
+  Hardware verifiziert.
+- Heimweg-Ankunfts-Simulation (2d) und S3-Akku-Anzeige (2f) heute
+  übersprungen, noch offen.
+
+**Alle Fixes sind geflasht/installiert**, Ultra läuft mit dem finalen
+Stand dieser Runde (inkl. Klio-Debug-Print).
 
 ## Bekannte offene Punkte
 
@@ -161,6 +229,7 @@ Segeluhr-Firmware/
     Segeluhr_TWatch_S3/        ✅ aktueller Stand
     Segeluhr_TWatch_Ultra/     📋 geplant
     Segeluhr_WatchS_LoRaEmpfaenger/  📋 geplant
+    Segeluhr_Mastuhr/          📋 NEU, Konzept: Eigenbau-Mast-Gerät (kein LilyGO)
   TESTING/                     Tester/Prototypen, nicht für echten Betrieb
 PROJEKT_STATUS.md              diese Datei
 ```

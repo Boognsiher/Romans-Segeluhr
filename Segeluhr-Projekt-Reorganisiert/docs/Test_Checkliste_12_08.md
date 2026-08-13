@@ -33,6 +33,10 @@ kopieren, nicht selbst rumdebuggen.
 - [x] S3 (Land): Compile — grün? Flash (COM-Port S3/Land) (COM16, 12.08.
       Abend, inkl. Nachbesserung — siehe unten)
 - [x] Beide Uhren booten sauber, BLE-Verbindung Ultra↔Handy klappt
+- [x] **Ultra erneut flashen (13.08.-Stand)** — 13.08. abends mehrfach
+      geflasht (Startlinie-Bias-Wegpunkte auf der Uhr, Wind-Kalibrier-
+      Feedback, Uhr-Akku in der Statusleiste, drei Klio-Bugfixes — siehe
+      2g unten)
 
 ---
 
@@ -42,15 +46,20 @@ kopieren, nicht selbst rumdebuggen.
 - [x] **Wichtigster Check**: Handy Setup-Tab → "Heimatpunkt" zeigt jetzt
       tatsächlich Koordinaten (vorher: blieb leer trotz gültigem GPS-Fix)
       — 12.08. Abend bestätigt, End-to-End verifiziert
-- [ ] Uhr-Menü-Tab → "Home setzen" drücken → Button zeigt kurz Overlay
-      "Wegpunkt gesendet" + Vibration (noch nicht gezielt beobachtet)
-- [ ] Uhr-Menü zeigt den "Home setzen"-Button jetzt **grün** eingefärbt
-      (innerhalb ~1s nach dem Setzen)
-- [ ] Gleicher Test für "Boje 1/2 setzen", "Ziel setzen",
-      "Comp.-Marke 1/2 setzen" — jeweils grün nach dem Setzen
-- [ ] Jeden der 6 Wegpunkte einzeln über den zugehörigen "X löschen"-Button
-      löschen → wird auf dem Handy leer, Button wird wieder grau
-      (**Bugfix-Check**: früher löschte der einzige "Alle Bojen
+- [x] Uhr-Menü-Tab → "Home setzen" drücken → Button zeigt kurz Overlay
+      "Wegpunkt gesendet" + Vibration (13.08. bestätigt: "das hat alles
+      geklapt")
+- [x] Uhr-Menü zeigt den "Home setzen"-Button jetzt **grün** eingefärbt
+      (innerhalb ~1s nach dem Setzen) — 13.08. bestätigt
+- [x] Gleicher Test für "Boje 1/2 setzen", "Ziel setzen",
+      "Comp.-Marke 1/2 setzen" — jeweils grün nach dem Setzen — 13.08.
+      bestätigt, dabei zusätzlich Pin-Ende/Boot-Ende NEU auf der Uhr
+      setzbar gemacht (Roman-Wunsch, siehe
+      docs/Erweiterung_Startlinie_Bias.md Abschnitt 5) und ebenfalls
+      getestet
+- [x] Jeden der 6 Wegpunkte einzeln über den zugehörigen "X löschen"-Button
+      löschen → wird auf dem Handy leer, Button wird wieder grau — 13.08.
+      bestätigt (**Bugfix-Check**: früher löschte der einzige "Alle Bojen
       löschen"-Button immer nur Boje 1, egal was eigentlich gemeint war)
 
 **Dabei 12.08. Abend gefunden+gefixt (nicht Teil der ursprünglichen
@@ -62,28 +71,40 @@ nur noch auf Nav-/Uhr-Tab sichtbar, S3-Akku-Anzeige vom Haupt- in den
 Detail-Tab verschoben (kollidierte dort mit dem Empfangs-Indikator).
 
 ### 2b. CD-/Wind-Tab-Aktionen direkt auf der Uhr
-- [ ] CD-Tab: "Start" → Countdown läuft (auch am Handy sichtbar)
-- [ ] CD-Tab: "Reset" → Countdown stoppt, "--:--"
-- [ ] CD-Tab: "Min." (Sync nächste Minute) während laufendem Countdown →
-      Restzeit springt auf die nächste volle Minute
-- [ ] CD-Tab: "Wettfahrt stoppen" während laufender Wettfahrt (Countdown
-      durchgelaufen) → Rückfrage-Dialog "Wettfahrt stoppen?" mit Ja/Nein
-- [ ] "Ja, stoppen" → CD-Tab zeigt wieder "--:--" (**Bugfix-Check**:
-      früher blieb die Restzeit als "+m:ss" munter weiterlaufen, weil
-      `countdownEngine.reset()` fehlte)
-- [ ] Wind-Tab: "Kalibrieren starten"/"Kalibrierung abbrechen" — Befehl
-      kommt am Handy an (Wind-Tab-Status wechselt), keine Fehlermeldung
+- [x] CD-Tab: "Start" → Countdown läuft (auch am Handy sichtbar) — 13.08.
+      bestätigt ("das hat alles geklapt")
+- [x] CD-Tab: "Reset" → Countdown stoppt, "--:--" — 13.08. bestätigt
+- [x] CD-Tab: "Min." (Sync nächste Minute) während laufendem Countdown →
+      Restzeit springt auf die nächste volle Minute — 13.08. bestätigt
+- [x] CD-Tab: "Wettfahrt stoppen" während laufender Wettfahrt (Countdown
+      durchgelaufen) → Rückfrage-Dialog "Wettfahrt stoppen?" mit Ja/Nein —
+      13.08. bestätigt
+- [x] "Ja, stoppen" → CD-Tab zeigt wieder "--:--" — 13.08. bestätigt
+      (**Bugfix-Check**: früher blieb die Restzeit als "+m:ss" munter
+      weiterlaufen, weil `countdownEngine.reset()` fehlte)
+- [x] Wind-Tab: "Kalibrieren starten"/"Kalibrierung abbrechen" — Befehl
+      kommt am Handy an, keine Fehlermeldung — 13.08. bestätigt. Dabei
+      Roman-Feedback aufgenommen: kein Feedback AUF DER UHR, dass die
+      Kalibrierung gestartet ist — behoben (Overlay+Vibration wie bei den
+      Wegpunkt-Buttons). Ein STEHENBLEIBENDES Laufend-Zeichen ist bewusst
+      zurückgestellt, siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md
+      Abschnitt 6.1.
 
 ### 2c. Statusleiste + Nav-Tab
-- [ ] Statusleiste (BLE/Akku/Uhrzeit) oben auf dem Nav-Tab — jetzt
-      lesbar/nicht mehr vom Gehäuserand verdeckt? (y=34 ist ein Schätzwert,
-      evtl. muss nachjustiert werden)
-- [ ] Nav-Tab-Manöver-Zeile: ohne aktive Wettfahrt grau ("kein Manöver")
+- [x] Statusleiste (BLE/Akku/Uhrzeit) oben auf dem Nav-Tab — jetzt lesbar,
+      Position (y=68) passt. Dabei Roman-Wunsch aufgenommen: Akku-Feld
+      zeigte nur Handy-Akku ("Bat --", weil der nur zusammen mit einem
+      GPS-Fix gesendet wird) — zeigt jetzt zusätzlich den Uhr-Akku
+      ("H X% U Y%"), unabhängig vom GPS-Fix.
+- [x] Nav-Tab-Manöver-Zeile: ohne aktive Wettfahrt grau ("kein Manöver") —
+      13.08. bestätigt
 - [ ] Training-Tab → Racemode aktivieren, ein paar Schritte in Richtung
       Boje/gegen den Wind gehen → Nav-Tab-Zeile wird **rot** ("WENDE!"/
-      "HALSE!"), bei direktem Kurs **grün** ("kein Manöver")
+      "HALSE!"), bei direktem Kurs **grün** ("kein Manöver") — 13.08. nicht
+      testbar ("kann ich nicht testen, mach ich sonst mal"), auf später
+      verschoben
 
-### 2d. Heimweg-Ankunft (mit Trick an Land simulierbar)
+### 2d. Heimweg-Ankunft (mit Trick an Land simulierbar) — 13.08. übersprungen, noch offen
 - [ ] Heimatpunkt auf die **aktuelle Position** setzen (siehe 2a), Heimweg-
       Modus aktivieren
 - [ ] **Sollte sofort automatisch wieder stoppen** (< 20m Radius bereits
@@ -94,26 +115,42 @@ Detail-Tab verschoben (kollidierte dort mit dem Empfangs-Indikator).
       Antwort inhaltlich egal ist)
 
 ### 2e. Bojen-Kartenauswahl (App)
-- [ ] Training-Tab → Boje 1/2 → neuer "Karte"-Button neben "Setzen"
-- [ ] Kartenansicht öffnet sich, antippen setzt/verschiebt einen Marker
-- [ ] "Übernehmen" → Boje-Koordinaten übernommen (Trainings-Tab zeigt sie)
-- [ ] Gleicher Test für Comp.-Marke 1/2 im Setup-Tab
-- [ ] "Abbrechen" verwirft die Auswahl, alte Koordinate bleibt unverändert
+- [x] Training-Tab → Boje 1/2 → neuer "Karte"-Button neben "Setzen" — 13.08.
+      bestätigt ("klappt")
+- [x] Kartenansicht öffnet sich, antippen setzt/verschiebt einen Marker
+- [x] "Übernehmen" → Boje-Koordinaten übernommen (Trainings-Tab zeigt sie)
+- [x] Gleicher Test für Comp.-Marke 1/2 im Setup-Tab
+- [x] "Abbrechen" verwirft die Auswahl, alte Koordinate bleibt unverändert
+- Roman-Wunsch aufgenommen (bewusst zurückgestellt bis zum nächsten Umbau):
+  Karte soll die bereits gesetzten Wegpunkte zusätzlich anzeigen, siehe
+  docs/Erweiterung_Boje_Kartenauswahl.md Abschnitt 4.
 
 ### 2f. S3 (Land) — eigene Akku-Anzeige
 - [ ] Status-Tab zeigt jetzt zusätzlich "Akku Uhr: X%" zwischen Uhrzeit und
       Verbindungsindikator
 
 ### 2g. Klio-Training — nur die Mechanik (nicht die Kalibrierqualität)
-- [ ] Uhr-Menü → Sektion "Gesten-Training (Klio)" sichtbar, Status-Zeile
-      zeigt "Ja: nicht trainiert · Nein: nicht trainiert"
-- [ ] "Ja trainieren" → Dialog öffnet sich, zeigt "1/6: Trapez, steuernd —
-      Backbord" gross + Klio-Fortschrittstext darunter
+- [x] Uhr-Menü → Sektion "Gesten-Training (Klio)" sichtbar, Status-Zeile
+      zeigt "Ja: nicht trainiert · Nein: nicht trainiert" — 13.08. bestätigt
+- [x] "Ja trainieren" → Dialog öffnet sich, zeigt "1/6: Trapez, steuernd —
+      Backbord" gross + Klio-Fortschrittstext darunter — **13.08. zuerst
+      "Klio nicht verfügbar"**, Root Cause gefunden+gefixt (Firmware-Upload-
+      Reihenfolge, siehe docs/Erweiterung_Gesten_Training_Klio.md
+      Abschnitt 5c) — Dialog öffnet sich seither korrekt
 - [ ] "Nächste Haltung" blättert durch alle 6 Einträge, dann zurück auf 1/6
+      — noch nicht gezielt durchgeklickt (Session ging in Fortschrittstext-
+      Debugging über)
 - [ ] Handgelenk ein paar Mal bewusst heben (auch ohne die volle
       Kalibrierhaltung) → Fortschrittstext ändert sich (Prozent oder
-      "Bewegung nicht wiederholend genug" o.ä.)
+      "Bewegung nicht wiederholend genug" o.ä.) — **13.08. NICHT
+      bestätigt**: Fortschrittstext bleibt trotz kräftiger Bewegung immer
+      auf dem Platzhalter stehen. Zweiter Bug gefunden+gefixt (`k_state`-
+      Software-Cache, per Chip-Rücklese verifiziert), Callback feuert aber
+      trotzdem nicht — dritter, ungelöster Punkt, siehe
+      docs/Erweiterung_Gesten_Training_Klio.md Abschnitt 5c. Bewusst auf
+      den Wassertest verschoben (mehr Zeit, andere Bewegungsqualität testen)
 - [ ] "Abbrechen" → Dialog schliesst sich, Status bleibt "nicht trainiert"
+      — noch nicht gezielt geprüft
 - [ ] **Das eigentliche, vollständige Training** (alle 6 Haltungen inkl.
       Trapez, siehe Abschnitt 4) erst auf dem Wasser — hier nur prüfen,
       dass die Uhr-Bedienung an sich funktioniert
@@ -135,6 +172,50 @@ dann auf der Ultra reagieren:
       Geste als Antwort ausgewertet, selbst wenn gerade eine Frage offen
       ist (im Serial-Log sichtbar: "Ja-Geste ignoriert (kurz nach
       Wende/Halse)")
+
+### 2i. Klio: mehrere Trainings-Durchläufe kombinieren (NEU 13.08., experimentell)
+Siehe `docs/Erweiterung_Gesten_Training_Klio.md` Abschnitt 5b — unverifiziert,
+ob `learning_reset=false` wirklich an ein bereits gespeichertes Muster
+anknüpft:
+- [ ] "Ja trainieren", kurz ein paar einfache Wiederholungen (z.B. im
+      Stehen), Training abschliessen lassen oder "Abbrechen" nach
+      genug Fortschritt
+- [ ] Erkennungstest: Handgelenk heben → wird JA erkannt?
+- [ ] Nochmal "Ja trainieren" drücken, jetzt MIT anderen/neuen
+      Wiederholungen (andere Haltung) — **im Serial-Log prüfen**: steht dort
+      "ERWEITERT bestehendes Muster, reset=false" (statt "NEUES Muster")?
+- [ ] Nach Abschluss beide Bewegungsarten testen (die ursprüngliche UND die
+      neue) — werden BEIDE erkannt? Dann funktioniert das Kombinieren wie
+      erhofft. Wird nur noch die neue erkannt, verhält sich `reset=false`
+      effektiv wie ein Neustart — dann bleibt's beim bekannten Weg (eine
+      einzige durchgehende Session über alle Situationen, siehe Abschnitt 4
+      unten)
+
+### 2j. Standby nur noch im Alltags-Modus (NEU 13.08.)
+Siehe `docs/Erweiterung_Standby_Wecken.md` — Ultra-Abschnitt:
+- [ ] Segeln-Modus aktiv (BLE verbunden), 30s ohne jede Interaktion warten
+      → Display bleibt **an**, volle Helligkeit (bisher ging's nach 30s aus)
+- [ ] Alltags-Modus (BLE trennen bzw. "Segelmodus beenden"), 30s ohne
+      Interaktion warten → Display geht wie gewohnt aus (unverändertes
+      Verhalten)
+- [ ] Aus dem Alltags-Standby (Display aus) heraus BLE verbinden/in
+      Segeln-Modus wechseln → Display wacht sofort automatisch auf, kein
+      Taster-/Geste-Ereignis nötig
+
+### 2k. Akku-Verbrauchs-Log (NEU 13.08.)
+Siehe `docs/Erweiterung_Akku_Tracking.md`. Serieller Monitor bei 115200 Baud:
+- [ ] Nach dem Boot im Serial-Log: "[Akku-Log] Bereit (...)" — FFat-Mount
+      erfolgreich? (Falls "FFat-Mount fehlgeschlagen": Bug, zurückmelden)
+- [ ] 1-2 Minuten warten, dann `BATLOG DUMP` eintippen → Header-Zeile +
+      mindestens 1-2 Datenzeilen mit plausiblen Werten (Datum/Zeit/Modus/
+      Display/BLE/Laden/Akku-%)
+- [ ] `BATLOG STATUS` → Dateigrösse + Flash-Nutzung plausibel (nicht 0,
+      nicht riesig)?
+- [ ] `BATLOG CLEAR` → danach `BATLOG DUMP` zeigt nur noch den Header
+- [ ] Bei Gelegenheit (auch über mehrere Tage/Sessions): Ultra länger im
+      Segeln-Modus laufen lassen, danach `BATLOG DUMP` sichern — erste
+      echte Drain-Rate-Daten für den Vergleich altes Standby-Verhalten vs.
+      neues Dauerhaft-an
 
 ---
 

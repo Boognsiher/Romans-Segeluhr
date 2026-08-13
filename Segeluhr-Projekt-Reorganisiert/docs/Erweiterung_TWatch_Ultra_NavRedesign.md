@@ -126,7 +126,16 @@ zusätzlich direkt auf dem jeweiligen Fach-Tab:
 - **Wind-Tab**: "Kalibrieren starten"/"Kalibrierung abbrechen" (dieselben
   Callbacks wie im Menü). Kein Zustands-Feedback vom Handy vorgesehen
   (Protokoll kennt keinen Kalibrierungs-Status) — beide Buttons bleiben
-  bewusst immer verfügbar.
+  bewusst immer verfügbar. **Update 13.08.2026**: Sendevorgang bekommt jetzt
+  immerhin ein kurzes Overlay+Vibration ("Kalibrierung gestartet"/
+  "-abgebrochen", siehe `cbWindCalStart()`/`cbWindCalAbort()`).
+  - [ ] **Offen (Roman-Wunsch 13.08., bewusst zurückgestellt)**: zusätzlich
+    ein STEHENBLEIBENDES Zeichen auf dem Wind-Tab, solange die Kalibrierung
+    tatsächlich läuft (nicht nur das 5s-Overlay beim Klick) — braucht ein
+    neues Kalibrierungs-Status-Feld im BLE-Protokoll (`WindEngine.calibState`
+    existiert app-seitig schon, wird aber aktuell nirgends an die Uhr
+    übertragen, siehe `CHAR_WIND_UUID`/`WIND_FLAG_CALIBRATED`). Nicht jetzt
+    umsetzen — erst wenn ohnehin wieder an dieser Firmware gearbeitet wird.
 - Home-/Manöver-Tab bekommen laut Wunsch keine neuen Aktionen ("ausser
   Bojen usw.").
 - `tabCountdown`/`tabWind` sind (anders als `tabNav`) nicht auf

@@ -49,7 +49,17 @@ eigene Position fixieren zu können.
   Zeile trivial, falls gewünscht.
 
 ## 4. Offene Punkte
-- [ ] Noch nicht kompiliert/getestet.
+- [x] Kompiliert/getestet (13.08.2026, Schreibtisch-Test: Boje 1/2 +
+  Comp.-Marke 1/2 per Karte setzen/übernehmen/abbrechen — funktioniert).
 - [ ] Kein Drag-Handle am Marker — Feinjustierung geht nur per erneutem
   Antippen (bewusst einfach gehalten, gleiche "Tippen statt Freihand"-
   Philosophie wie beim See-Zeichnen).
+- [ ] **Offen (Roman-Wunsch 13.08., bewusst zurückgestellt bis zum nächsten
+  Umbau)**: `WaypointMapPickScreen` soll die bereits gesetzten Wegpunkte
+  (Bojen, Comp.-Marken, ggf. auch Home/Pin/Boot) zusätzlich als Marker auf
+  derselben Karte anzeigen, nicht nur den einen gerade zu setzenden Punkt —
+  aktuell zeigt die Karte beim Öffnen nichts von den anderen bereits
+  hinterlegten Koordinaten, nur den einzelnen editierbaren Marker. Betrifft
+  vermutlich `WaypointMapPickScreen.kt` (zusätzliche read-only Marker aus
+  `SettingsRepository.Waypoints` rendern) + ggf. `startWaypointMapPick()`
+  (müsste die übrigen Punkte mit durchreichen).

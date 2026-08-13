@@ -20,7 +20,9 @@ zuverlässig wieder auf — per Geste, Touch oder automatisch bei Ereignis.
 ### Beide Uhren: gemeinsames Grundverhalten
 - Nach 30s ohne Interaktion (kein Touch, kein Knopfdruck, keine erkannte
   Geste): Display aus. Restliche Logik (LoRa-Empfang, Statuslogik) läuft
-  im Hintergrund normal weiter — nur das Display wird abgeschaltet
+  im Hintergrund normal weiter — nur das Display wird abgeschaltet.
+  **Ausnahme seit 13.08.2026: auf der Ultra NUR im Alltags-Modus, siehe
+  Ultra-Abschnitt unten** — im Segeln-Modus bleibt das Display dauerhaft an.
 - **Automatisches Aufwecken bei eingehender Quick-Message**, unabhängig von
   Geste/Touch — sonst wird die Frage verpasst, weil der Screen aus ist
   (siehe bestehende Benachrichtigungs-Logik, Vibration bleibt zusätzlich)
@@ -33,6 +35,16 @@ zuverlässig wieder auf — per Geste, Touch oder automatisch bei Ereignis.
   nicht trainierte "Wrist-Tilt"-Funktion (falls BHI260AP das als fertige
   Standard-Funktion mitbringt, nicht über Klio-Training) oder Knopfdruck
   als Fallback
+- **13.08.2026 geändert (Roman-Wunsch): Der 30s-Standby gilt auf der Ultra
+  nur noch im Alltags-Modus.** Im Segeln-Modus ist der Bildschirm das
+  eigentliche Navigationsinstrument (Nav-/Wind-/Heimweg-Werte auf einen
+  Blick, ohne extra Taster/Geste nötig) — ein Blackout nach 30s Inaktivität
+  ergibt dort keinen Sinn, anders als im Alltags-Modus (Smartwatch-Nutzung).
+  `standbyTick()` kehrt für `MODE_SEGELN` jetzt frühzeitig zurück, Display
+  bleibt dauerhaft mit voller Helligkeit an. `switchToMode()` weckt das
+  Display beim Wechsel IN den Segeln-Modus explizit auf, falls es gerade
+  wegen Alltags-Standby schlief. **Kompiliert, noch nicht auf Hardware
+  verifiziert.**
 
 ### T-Watch S3 (Land)
 - Aufwecken: **Handgelenk-Heben-Geste ODER Antippen des Bildschirms**

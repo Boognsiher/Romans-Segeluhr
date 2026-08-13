@@ -57,6 +57,11 @@ Segeluhr-Firmware/
                                   Sack am Handgelenk steckt)
     Segeluhr_TWatch_Ultra/       📋 geplant: Solo-GPS + LoRa-Sender
     Segeluhr_WatchS_LoRaEmpfaenger/  📋 geplant: reiner LoRa-Empfänger an Land
+    Segeluhr_Mastuhr/           📋 NEU (13.08.2026 Konzept): Eigenbau-Gerät
+                                  (ESP32-S3+GPS+LoRa+Sharp-Display+Solar),
+                                  fest am Mast montiert, NICHT auf LilyGO-
+                                  Hardware basierend, siehe
+                                  docs/Erweiterung_Mastuhr.md
   TESTING/                       Tester/Prototypen, NICHT für echten Betrieb
 ```
 
