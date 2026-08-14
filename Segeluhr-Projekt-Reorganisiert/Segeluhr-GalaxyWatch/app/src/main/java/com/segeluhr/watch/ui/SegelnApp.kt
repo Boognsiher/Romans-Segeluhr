@@ -1,5 +1,6 @@
 package com.segeluhr.watch.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,6 +37,7 @@ private val TAB_TITLES = listOf("Nav", "Wind", "Heim", "CD", "Man", "Menu")
  * Galaxy Watch hat dafür bereits ihr eigenes Ziffernblatt/System-Apps,
  * siehe docs/Erweiterung_GalaxyWatch_App.md.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SegelnApp(viewModel: SegeluhrWatchViewModel) {
     val state by viewModel.uiState.collectAsState()
