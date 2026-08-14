@@ -56,10 +56,10 @@ object BleProtocol {
     const val CMD_CLEAR_LOG: Int = 14
     const val CMD_CONFIRM_BUOY_ROUNDING: Int = 15
     const val CMD_REJECT_BUOY_ROUNDING: Int = 16
-    // NEU für die Galaxy-Watch-App (siehe docs/Erweiterung_GalaxyWatch_App.md,
-    // Gegenstück in BleProtocol.kt/SegeluhrViewModel.kt am Handy): Wegpunkt per
-    // Karten-Tap auf der Uhr statt an der aktuellen Boots-Position.
-    const val CMD_SET_WAYPOINT_AT_COORDS: Int = 17
+    // CMD 17 (CMD_SET_WAYPOINT_AT_COORDS) war für einen Wegpunkt-Kartenpicker
+    // auf der Uhr reserviert, 14.08. Abend wieder gestrichen (Display zu
+    // klein) — siehe docs/Erweiterung_GalaxyWatch_App.md. Die Handy-Seite
+    // kennt den Befehl weiterhin (schadet nicht, wird von hier nie gesendet).
 
     object WaypointId {
         const val PIN: Int = 1
@@ -99,15 +99,6 @@ object BleProtocol {
     // ---- Encode: Steuerbefehle (Uhr -> Handy) ----
     fun encodeControlCommand(cmd: Int, payloadByte: Int? = null): ByteArray =
         if (payloadByte != null) byteArrayOf(cmd.toByte(), payloadByte.toByte()) else byteArrayOf(cmd.toByte())
-
-    fun encodeSetWaypointAtCoords(waypointId: Int, lat: Double, lon: Double): ByteArray {
-        val buf = ByteBuffer.allocate(10).order(ByteOrder.LITTLE_ENDIAN)
-        buf.put(CMD_SET_WAYPOINT_AT_COORDS.toByte())
-        buf.put(waypointId.toByte())
-        buf.putInt((lat * 1e7).toInt())
-        buf.putInt((lon * 1e7).toInt())
-        return buf.array()
-    }
 
     // ---- Decode: Notify-Pakete (Handy -> Uhr) ----
 

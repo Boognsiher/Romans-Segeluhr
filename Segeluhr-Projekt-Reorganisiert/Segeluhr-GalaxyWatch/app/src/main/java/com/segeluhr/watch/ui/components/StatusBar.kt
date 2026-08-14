@@ -1,6 +1,7 @@
 package com.segeluhr.watch.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -9,7 +10,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,14 +50,20 @@ fun StatusBar(connectionState: ConnectionState, phoneBatteryPct: Int?, ownBatter
         ConnectionState.DISCONNECTED -> "BLE aus"
     }
     val bleColor = if (connectionState == ConnectionState.CONNECTED) Green else Red
+    // Rundes Display: der Kreis ist bei geringer Höhe schmaler als die volle
+    // Breite, ein an den Rand gepinntes SpaceBetween-Layout wird dort oben
+    // links/rechts abgeschnitten. Statt Rand-Padding zu erraten: das ganze
+    // Cluster als eine Gruppe zentrieren, dann bleibt es unabhängig von
+    // rund/eckig immer innerhalb der sichtbaren Fläche.
+    val isRound = LocalConfiguration.current.isScreenRound
+    val topPadding = if (isRound) 22.dp else 4.dp
 
-    Row(
-        Modifier.fillMaxWidth().padding(top = 4.dp, start = 20.dp, end = 20.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(bleText, color = bleColor, fontSize = 9.sp)
-        Text(timeText, color = TextDim, fontSize = 9.sp, textAlign = TextAlign.Center)
-        val battText = "H ${phoneBatteryPct?.let { "$it%" } ?: "--"} U ${ownBatteryPct?.let { "$it%" } ?: "--"}"
-        Text(battText, color = TextDim, fontSize = 9.sp)
+    Box(Modifier.fillMaxWidth().padding(top = topPadding), contentAlignment = Alignment.Center) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(bleText, color = bleColor, fontSize = 9.sp)
+            Text(timeText, color = TextDim, fontSize = 9.sp, textAlign = TextAlign.Center)
+            val battText = "H ${phoneBatteryPct?.let { "$it%" } ?: "--"} U ${ownBatteryPct?.let { "$it%" } ?: "--"}"
+            Text(battText, color = TextDim, fontSize = 9.sp)
+        }
     }
 }

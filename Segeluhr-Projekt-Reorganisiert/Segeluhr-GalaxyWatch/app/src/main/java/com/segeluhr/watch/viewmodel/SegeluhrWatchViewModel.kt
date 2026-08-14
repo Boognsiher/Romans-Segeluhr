@@ -126,10 +126,4 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
         bleClient.sendCommand(BleProtocol.CMD_CLEAR_WAYPOINT, id)
         showOverlay("Wegpunkt gelöscht")
     }
-
-    /** Setzt einen Wegpunkt per Karten-Tap auf der Uhr (neu, siehe docs/Erweiterung_GalaxyWatch_App.md). */
-    fun setWaypointAtCoords(id: Int, lat: Double, lon: Double) {
-        bleClient.sendWaypointAtCoords(id, lat, lon)
-        showOverlay("Wegpunkt auf Karte gesetzt")
-    }
 }

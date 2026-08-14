@@ -14,10 +14,6 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
 
-    <!-- OSM-Kartenkacheln für den Wegpunkt-Kartenpicker (siehe
-         ui/screens/WaypointMapPickScreen.kt) -->
-    <uses-permission android:name="android.permission.INTERNET" />
-
     <!-- Vibration für Signalmuster (core/HapticPlayer.kt, 1:1 zu
          VibrationPatterns.kt am Handy) -->
     <uses-permission android:name="android.permission.VIBRATE" />

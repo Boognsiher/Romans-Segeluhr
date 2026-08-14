@@ -61,11 +61,5 @@ dependencies {
     implementation("androidx.wear.compose:compose-foundation:1.3.1")
     implementation("androidx.wear:wear:1.3.0")
 
-    // Karte für den Wegpunkt-Kartenpicker (siehe docs/Erweiterung_GalaxyWatch_App.md)
-    // - dieselbe Bibliothek/Version wie am Handy (WaypointMapPickScreen.kt),
-    // kein API-Key nötig. osmdroid ist eine reine View-Bibliothek und läuft
-    // über Compose-Interop (AndroidView) unverändert auch unter Wear OS.
-    implementation("org.osmdroid:osmdroid-android:6.1.20")
-
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

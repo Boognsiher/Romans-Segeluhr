@@ -264,11 +264,6 @@ class WatchBleClient(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun sendWaypointAtCoords(waypointId: Int, lat: Double, lon: Double) {
-        writeControl(BleProtocol.encodeSetWaypointAtCoords(waypointId, lat, lon))
-    }
-
-    @SuppressLint("MissingPermission")
     private fun writeControl(bytes: ByteArray) {
         val g = gatt ?: return
         val service = g.getService(BleProtocol.SERVICE_UUID) ?: return

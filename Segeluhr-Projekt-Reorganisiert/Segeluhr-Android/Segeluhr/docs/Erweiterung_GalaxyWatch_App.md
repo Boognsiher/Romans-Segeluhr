@@ -127,37 +127,70 @@ Segeluhr-GalaxyWatch/
       WatchBleBridge.kt        Singleton (ViewModel + Foreground-Service teilen sich EINEN Client)
       WatchBleForegroundService.kt  Hält die BLE-Verbindung bei ausgeschaltetem Display am Leben
     core/
-      GeoPoint.kt
       HapticPlayer.kt          1:1 VibrationPatterns.kt vom Handy, nur als Empfänger statt Erzeuger
     data/WatchUiState.kt        Aggregierter UI-Zustand + BoatState-Ableitung (analog updateBoatState())
     viewmodel/SegeluhrWatchViewModel.kt
     ui/
-      SegelnApp.kt              Pager-Wurzel + Overlays
+      SegelnApp.kt              Pager-Wurzel + Overlay
       theme/                    1:1 Farbpalette vom Handy (Wear-Compose-MaterialTheme statt Material3)
-      screens/                  Nav/Wind/Home/Countdown/Maneuver/Menu/WaypointMapPick
+      screens/                  Nav/Wind/Home/Countdown/Maneuver/Menu
       components/               StatusBar, CommandOverlay, RoundingConfirmBanner, SailScreenScaffold
 ```
 
+## 14.08.2026 Abend: erster Hardware-Test (echte Galaxy Watch 5 Pro)
+
+Per ADB-over-WiFi (Pairing-Code-Flow, kein USB an der Uhr) auf Romans
+echter Watch 5 Pro installiert und getestet — erste echte Verifikation
+dieses ganzen Projekts. Ergebnisse:
+
+- **Kompiliert + installiert + startet ohne Absturz.** BLE-Verbindung zum
+  Handy (im "Mit Uhr"-Modus) funktioniert, Heim-Tab empfängt Live-Status.
+- **Bug gefunden+gefixt: Statusleiste auf rundem Display abgeschnitten** —
+  `StatusBar.kt` pinnte die drei Texte (BLE-Status/Uhrzeit/Akku) per
+  `Arrangement.SpaceBetween` an den vollen Breitenrand (nur 20dp Padding).
+  Auf einem RUNDEN Display (anders als beim rechteckigen Vorbild
+  `statusBarUpdate()` auf der Ultra) liegt die obere linke/rechte Ecke
+  ausserhalb des sichtbaren Kreises — abgeschnitten. Fix: das ganze
+  Text-Cluster zentriert (`Box`+`Arrangement.spacedBy` statt SpaceBetween)
+  plus grösseres Top-Padding via `LocalConfiguration.current.isScreenRound`.
+  Auf Hardware verifiziert.
+- **Wegpunkt-Kartenpicker auf der Uhr komplett gestrichen** (Roman-
+  Feedback: Display zu klein dafür) — `WaypointMapPickScreen.kt`+
+  `core/GeoPoint.kt` gelöscht, osmdroid-Abhängigkeit raus, `MenuScreen.kt`
+  hat pro Wegpunkt nur noch "Hier"/"Löschen" (wie die Ultra). `CMD_SET_WAYPOINT_AT_COORDS`
+  bleibt als reservierte Protokoll-Nummer dokumentiert (Handy-Seite kennt
+  den Befehl weiterhin, schadet nicht), Encode-Funktion+Client-Aufruf auf
+  der Uhr-Seite entfernt.
+- **Bug gefunden+gefixt: Scrollen im Menu-Tab ruckelte** — `MenuScreen.kt`
+  bekam bisher das komplette `WatchUiState` übergeben, obwohl es nur
+  `waypoints`+`home.active` braucht. Da GPS/Wind 1×/Sekunde vom Handy
+  reinkommen, baute Compose die komplette `ScalingLazyColumn` bei JEDEM
+  Tick neu auf — auch mitten in der Scroll-Geste. Fix: nur die zwei
+  tatsächlich gebrauchten Felder als Parameter statt des ganzen Zustands,
+  Compose überspringt die Neuzusammenstellung jetzt, wenn sich nur
+  GPS/Wind ändern. Auf Hardware als spürbar besser bestätigt.
+- **Neu: Start/Reset/Sync direkt auf dem CD-Tab** (Roman-Wunsch, analog
+  zur Ultra-Nachbesserung vom 12.08. "Fach-Tab-Aktionen") — vorher nur im
+  Menu-Tab erreichbar. Erster Versuch mit festbreiten 64dp-`Chip`s passte
+  nicht in die ca. 168dp verfügbare Breite (212dp Displaybreite bei 340dpi
+  Dichte, abzüglich 22dp Seiten-Padding je Seite) und schnitt "Sync"
+  rechts ab — gefixt mit `CompactChip` (Wear-Compose-Komponente extra für
+  schmale Sekundär-Aktionen). Auf Hardware verifiziert, alle drei Buttons
+  vollständig sichtbar.
+- Countdown-Dauer selbst ist NICHT einstellbar (weder hier noch am Handy)
+  — die 5-4-1-Startsequenz ist laut `StartCountdownEngine.kt`/
+  `Constants.COUNTDOWN_DURATION_MS` bewusst fest auf 5 Minuten verdrahtet
+  (Standard-Regatta-Startprotokoll), kein fehlendes Feature.
+
 ## Offene Punkte
 
-- **Noch nicht kompiliert/getestet** — diese Umgebung hat kein Android-SDK
-  (wie schon beim ursprünglichen Anlegen der Handy-App, siehe deren
-  README.md), ein erster echter Gradle-Sync/Build in Android Studio kann
-  noch kleinere Fehler zutage fördern.
-- **Kein Wear-Compose-Vorschau/Emulator-Test** — insbesondere Layout auf
-  dem runden 1.4"-Display (450×450) der Watch 5 Pro nur nach bestem
-  Ermessen dimensioniert, nicht am echten Gerät/Emulator geprüft.
+- **Kein Wear-Compose-Vorschau/Emulator-Test** — nur auf der echten Watch
+  5 Pro getestet, kein AVD/Emulator in dieser Umgebung vorhanden.
 - **BLE-Permission-Flow minimal**: `MainActivity` fragt Runtime-
   Permissions einmal beim Start an, es gibt aber (anders als am Handy)
   noch keine eigene UI für "Permission wurde abgelehnt, bitte in den
   Einstellungen nachtragen".
-- **osmdroid auf Wear OS ungetestet**: die Bibliothek ist reines
-  Standard-Android (View-basiert, kein Wear-spezifischer Code), sollte
-  über Compose-`AndroidView`-Interop funktionieren, war aber nie auf
-  einer Wear-OS-Uhr im Einsatz — beim ersten Hardware-Test besonders
-  beachten (Kachel-Rendering/Touch-Bedienung auf rundem Display).
-- **Score/Feedback bei fehlgeschlagenem Karten-Send**: `CMD_SET_WAYPOINT_AT_COORDS`
-  bekommt wie die bestehenden `CMD_SET_WAYPOINT`/`CMD_CLEAR_WAYPOINT` kein
-  BLE-Antwortpaket — Erfolg zeigt sich nur indirekt über
-  `CHAR_WAYPOINTS_STATUS_UUID` (nächster Tick). Gleiches Verhalten wie die
-  Ultra, kein neuer Schwachpunkt.
+- Weiteres Nutzungsverhalten (Akkulaufzeit über eine ganze Session,
+  Reconnect nach BLE-Abbruch, Verhalten bei ausgeschaltetem Display über
+  längere Zeit) noch nicht getestet — nur eine kurze Schreibtisch-Session
+  heute Abend.

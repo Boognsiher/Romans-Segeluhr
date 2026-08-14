@@ -25,7 +25,6 @@ import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.Text
 import com.segeluhr.watch.ble.BleProtocol
-import com.segeluhr.watch.data.WatchUiState
 import com.segeluhr.watch.ui.theme.Amber
 import com.segeluhr.watch.ui.theme.BgDark
 import com.segeluhr.watch.ui.theme.Green
@@ -49,12 +48,21 @@ private val WAYPOINT_ENTRIES = listOf(
 
 /**
  * Menu-Tab, analog zu buildMenuTab() auf der Ultra: alle CMD_*-Aktionen.
- * Wegpunkte lassen sich hier ZUSÄTZLICH per Kartentipp setzen (neu, siehe
- * [onOpenMapPicker]/docs/Erweiterung_GalaxyWatch_App.md) — auf der Ultra
- * gibt es nur "an der aktuellen Boots-Position setzen".
+ * Wegpunkte nur "an der aktuellen Boots-Position" setzbar, wie auf der
+ * Ultra — der ursprünglich geplante Kartenpicker direkt auf der Uhr wurde
+ * 14.08. Abend gestrichen (Roman-Feedback: Display zu klein dafür).
+ *
+ * Nimmt bewusst NICHT das komplette [WatchUiState] entgegen, sondern nur
+ * die zwei Felder, die diese Liste tatsächlich braucht (waypoints,
+ * homeActive) — 14.08. Abend, Roman-Feedback "Scrollen ruckelt": bei
+ * Übergabe des gesamten Zustands baute Compose die komplette
+ * ScalingLazyColumn bei JEDEM GPS/Wind-Tick vom Handy (1 Hz) neu auf, auch
+ * mitten im Scroll-Gesture. Mit den zwei einzelnen, strukturell
+ * vergleichbaren Werten überspringt Compose die Neuzusammenstellung, wenn
+ * sich nur GPS/Wind geändert haben.
  */
 @Composable
-fun MenuScreen(state: WatchUiState, viewModel: SegeluhrWatchViewModel, onOpenMapPicker: (Int, String) -> Unit) {
+fun MenuScreen(waypoints: BleProtocol.WaypointsStatus?, homeActive: Boolean, viewModel: SegeluhrWatchViewModel) {
     var confirmingStop by remember { mutableStateOf(false) }
 
     if (confirmingStop) {
@@ -93,7 +101,7 @@ fun MenuScreen(state: WatchUiState, viewModel: SegeluhrWatchViewModel, onOpenMap
         item { ActionChip("Race") { viewModel.setTrainModeRace() } }
 
         item { SectionHeader("Heimweg") }
-        item { ActionChip(if (state.home?.active == true) "Heimweg beenden" else "Heimweg starten") { viewModel.toggleHomeMode() } }
+        item { ActionChip(if (homeActive) "Heimweg beenden" else "Heimweg starten") { viewModel.toggleHomeMode() } }
 
         item { SectionHeader("Wettfahrt") }
         item { ActionChip("Beenden") { confirmingStop = true } }
@@ -102,9 +110,8 @@ fun MenuScreen(state: WatchUiState, viewModel: SegeluhrWatchViewModel, onOpenMap
         items(WAYPOINT_ENTRIES) { entry ->
             WaypointRow(
                 entry = entry,
-                isSet = state.waypoints?.let(entry.isSet) ?: false,
+                isSet = waypoints?.let(entry.isSet) ?: false,
                 onSetHere = { viewModel.setWaypointHere(entry.id) },
-                onMapPick = { onOpenMapPicker(entry.id, entry.label) },
                 onClear = { viewModel.clearWaypoint(entry.id) },
             )
         }
@@ -132,9 +139,9 @@ private fun ActionChip(label: String, onClick: () -> Unit) {
     )
 }
 
-/** Ein Wegpunkt: Name+Status-Punkt, plus drei kompakte Aktionen (Hier/Karte/Löschen). */
+/** Ein Wegpunkt: Name+Status-Punkt, plus zwei kompakte Aktionen (Hier/Löschen). */
 @Composable
-private fun WaypointRow(entry: WaypointEntry, isSet: Boolean, onSetHere: () -> Unit, onMapPick: () -> Unit, onClear: () -> Unit) {
+private fun WaypointRow(entry: WaypointEntry, isSet: Boolean, onSetHere: () -> Unit, onClear: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(
             "${entry.label}${if (isSet) " ●" else ""}",
@@ -142,7 +149,6 @@ private fun WaypointRow(entry: WaypointEntry, isSet: Boolean, onSetHere: () -> U
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             SmallChip("Hier", Modifier.weight(1f), onSetHere)
-            SmallChip("Karte", Modifier.weight(1f), onMapPick)
             SmallChip("Löschen", Modifier.weight(1f), onClear, danger = true)
         }
     }
