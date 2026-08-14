@@ -177,6 +177,29 @@ object BleProtocol {
     const val CMD_CONFIRM_BUOY_ROUNDING: Int = 15
     const val CMD_REJECT_BUOY_ROUNDING: Int = 16
 
+    /**
+     * NEU (14.08.2026, Galaxy-Watch-Begleit-App, siehe
+     * docs/Erweiterung_GalaxyWatch_App.md): Gegenstück zu [CMD_SET_WAYPOINT]
+     * für Wegpunkte, die NICHT an der aktuellen Boots-Position liegen,
+     * sondern auf einer Karte auf der Uhr angetippt wurden (analog zu
+     * WaypointMapPickScreen.kt am Handy). 9-Byte-Payload: uint8 Waypoint-ID
+     * (siehe [WaypointId], nur Ziele die auch [WaypointSetFlag] kennt — kein
+     * LAKE_CENTER, das läuft weiterhin nur über die aktuelle Position/
+     * See-Zeichnen), int32 lat_e7, int32 lon_e7 (Little-Endian, gleiche
+     * 1e7-Fixpunkt-Konvention wie [encodeGpsPacket]).
+     */
+    const val CMD_SET_WAYPOINT_AT_COORDS: Int = 17
+
+    /** Dekodiert den Payload von [CMD_SET_WAYPOINT_AT_COORDS], oder null bei falscher Länge. */
+    fun decodeWaypointCoordsPayload(payload: ByteArray): Triple<Int, Double, Double>? {
+        if (payload.size < 9) return null
+        val buf = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+        val id = buf.get().toInt() and 0xFF
+        val lat = buf.int / 1e7
+        val lon = buf.int / 1e7
+        return Triple(id, lat, lon)
+    }
+
     /** Waypoint-IDs für CMD_SET_WAYPOINT / CMD_CLEAR_WAYPOINT (2. Byte). */
     object WaypointId {
         const val PIN: Int = 1

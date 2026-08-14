@@ -65,6 +65,19 @@ Segeluhr-Firmware/
   TESTING/                       Tester/Prototypen, NICHT für echten Betrieb
 ```
 
+## Galaxy-Watch-App (NEU, 14.08.2026)
+
+`Segeluhr-GalaxyWatch/` — Begleit-App für Samsung Galaxy Watch 5 Pro
+(LTE), Package `com.segeluhr.watch`. **Kein Arduino/Firmware-Projekt** —
+die Galaxy Watch läuft Wear OS (Android), die App ist natives Kotlin/
+Jetpack Compose for Wear OS, eigenständiges Gradle-Projekt (analog zu
+`Segeluhr-Android/`, nicht Teil davon). Rollenteilung identisch zur
+T-Watch Ultra (Handy = GPS-Sensor + komplette Navigations-Logik, Uhr =
+BLE-Central, reine Anzeige/Haptik/Bedienung), aber OHNE LoRa/Land-Uhr-
+Anbindung und ohne Gestenerkennung (Klio) — siehe
+`Segeluhr-Android/Segeluhr/docs/Erweiterung_GalaxyWatch_App.md` für alle
+Details/Abgrenzungen ggü. der Ultra.
+
 ## KRITISCHE Begriffs-Unterscheidungen (nicht verwechseln!)
 
 - **"Race" (Training-Tab)** = manueller Übungsmodus, 2 Bojen Pflicht,

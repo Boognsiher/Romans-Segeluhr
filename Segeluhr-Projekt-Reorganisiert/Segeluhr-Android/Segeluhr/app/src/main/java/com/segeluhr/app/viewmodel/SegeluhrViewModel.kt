@@ -886,6 +886,19 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             // oder Taster-Fallback auf der Uhr.
             BleProtocol.CMD_CONFIRM_BUOY_ROUNDING -> confirmBuoyRounding()
             BleProtocol.CMD_REJECT_BUOY_ROUNDING -> rejectBuoyRounding()
+            // Galaxy-Watch-App: Wegpunkt per Karten-Tap auf der Uhr gesetzt
+            // (nicht an der aktuellen Boots-Position), siehe
+            // docs/Erweiterung_GalaxyWatch_App.md.
+            BleProtocol.CMD_SET_WAYPOINT_AT_COORDS -> setWaypointAtCoords(payload)
+        }
+    }
+
+    private fun setWaypointAtCoords(payload: ByteArray) {
+        val (id, lat, lon) = BleProtocol.decodeWaypointCoordsPayload(payload) ?: return
+        val key = waypointKeyFor(id) ?: return
+        viewModelScope.launch {
+            settingsRepo.setWaypoint(key, GeoPoint(lat, lon))
+            statusSink.setStatus("Wegpunkt von der Uhr gesetzt: $key", StatusLevel.GREEN)
         }
     }
 

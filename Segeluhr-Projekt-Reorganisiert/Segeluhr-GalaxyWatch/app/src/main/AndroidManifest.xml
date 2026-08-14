@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- BLE Central-Rolle (Uhr scannt/verbindet zum Handy-GATT-Server),
+         siehe docs/Erweiterung_GalaxyWatch_App.md - kein eigenes GPS, also
+         auch keine ACCESS_*_LOCATION-Permission nötig (anders als beim
+         Handy: dort braucht BLUETOOTH_SCAN vor Android 12 die Location-
+         Permission, hier per neverForLocation-Flag bewusst umgangen). -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+    <!-- OSM-Kartenkacheln für den Wegpunkt-Kartenpicker (siehe
+         ui/screens/WaypointMapPickScreen.kt) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Vibration für Signalmuster (core/HapticPlayer.kt, 1:1 zu
+         VibrationPatterns.kt am Handy) -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- BLE-Verbindung + Haptik sollen auch bei ausgeschaltetem Display
+         weiterlaufen (Uhr steckt beim Segeln am Handgelenk, Display schläft
+         nach kurzer Zeit) - siehe ble/WatchBleForegroundService.kt -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <uses-feature android:name="android.hardware.type.watch" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Segeluhr Watch"
+        android:theme="@android:style/Theme.DeviceDefault"
+        android:supportsRtl="true">
+
+        <!-- Eigenständige Wear-App: braucht KEINE gekoppelte Companion-App-
+             Beziehung über den Play Store, da die Verbindung zum Handy direkt
+             per BLE läuft (dieselbe Rolle wie die T-Watch Ultra) statt über
+             die Wearable Data Layer API. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="nosensor"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.DeviceDefault">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".ble.WatchBleForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+    </application>
+</manifest>
