@@ -201,6 +201,14 @@ class WindEngine(
     }
 
     fun abortCalibration() {
+        // Guard gegen den 15.08.-Diagnose-Log-Befund (erster Segeltörn):
+        // ohne dieses Guard überschreibt ein "Abbrechen"-Tap/BLE-Befehl, der
+        // eintrifft NACHDEM calibState schon (erfolgreich) auf IDLE gesprungen
+        // ist — z.B. durch eine kurze Compose-Recomposition-Verzögerung des
+        // "Abbrechen"-Buttons in WindScreen.kt —, minutenlang den korrekten
+        // Erfolgs-/Wind-Shift-Status mit einem irreführenden AMBER-"abgebrochen"-
+        // Banner, obwohl gar nichts lief und windCalibrated unverändert blieb.
+        if (calibState == WindCalibState.IDLE) return
         calibState = WindCalibState.IDLE
         status.setStatus("Kalibrierung abgebrochen.", StatusLevel.AMBER)
     }
