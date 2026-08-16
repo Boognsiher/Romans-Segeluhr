@@ -324,6 +324,15 @@ class WindEngine(
 
         val lastSteady = lastSteadyCOG ?: run { lastSteadyCOG = avg; return }
         val shift = GeoUtils.angleDiff(avg, lastSteady)
+        if (abs(shift) > Constants.WIND_SHIFT_MAX_PLAUSIBLE_DEG) {
+            // Plausibilitäts-Filter, siehe Constants.WIND_SHIFT_MAX_PLAUSIBLE_DEG-Doku:
+            // vermutlich eine verpasste Wende/Halse statt eines echten Shifts.
+            // Referenzkurs trotzdem übernehmen (sonst meldet sich derselbe
+            // Riesensprung jeden weiteren Tick erneut), aber ohne Status/Haptik
+            // und ohne windDir mit dem unplausiblen Wert zu verfälschen.
+            lastSteadyCOG = avg
+            return
+        }
         if (abs(shift) >= Constants.WIND_SHIFT_THRESHOLD_DEG) {
             val prevSteady = lastSteady
             val newWindDir = GeoUtils.normalize360(wd + shift)
