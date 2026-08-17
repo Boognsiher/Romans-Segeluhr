@@ -24,6 +24,18 @@ enum class AppRole { SAILOR, SHORE }
 
 enum class RaceState { MENU, COUNTDOWN, RACE }
 
+/**
+ * Art einer gespeicherten Session (Erweiterung, 17.08.2026, siehe
+ * docs/Erweiterung_Tages_Auswertung.md). DAY = der ganze Tag seit
+ * App-Start (ein Eintrag, wächst über Stopp/Start-Zyklen hinweg, siehe
+ * SessionSummaryEngine). RACE = eine einzelne Wettfahrt, ab Countdown-Start
+ * bis "Wettfahrt beenden" ODER bis zum nächsten Countdown-Start (dann
+ * still im Hintergrund abgeschlossen, siehe SegeluhrViewModel.startCountdown/
+ * stopCompetition) - Roman-Wunsch: Wettfahrten sollen einzeln auswertbar
+ * bleiben, nicht im Tages-Eintrag untergehen.
+ */
+enum class SessionKind { DAY, RACE }
+
 enum class TrainMode { OFF, TACK_ONLY, JIBE_ONLY, RACE }
 
 enum class TrainState { OFF, WAITING, COMMANDED, TURNING }

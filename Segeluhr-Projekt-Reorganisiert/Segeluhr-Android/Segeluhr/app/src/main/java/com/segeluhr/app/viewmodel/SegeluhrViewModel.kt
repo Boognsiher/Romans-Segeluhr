@@ -9,15 +9,19 @@ import com.segeluhr.app.ble.BleHapticSender
 import com.segeluhr.app.ble.BleProtocol
 import com.segeluhr.app.ble.SegeluhrForegroundService
 import com.segeluhr.app.core.*
+import com.segeluhr.app.data.diagnostics.DiagnosticsLogImporter
 import com.segeluhr.app.data.diagnostics.DiagnosticsLogger
 import com.segeluhr.app.data.db.AppDatabase
 import com.segeluhr.app.data.db.toEntity
 import com.segeluhr.app.data.db.toRecord
+import com.segeluhr.app.data.db.toReport
 import com.segeluhr.app.data.model.AppRole
 import com.segeluhr.app.data.model.BuoyConfirmSource
 import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.data.model.PendingBuoyConfirmation
 import com.segeluhr.app.data.model.RaceState
+import com.segeluhr.app.data.model.SessionKind
+import com.segeluhr.app.data.model.SessionReport
 import com.segeluhr.app.data.model.TrainMode
 import com.segeluhr.app.data.settings.SettingsRepository
 import com.segeluhr.app.geo.CirclePacking
@@ -85,6 +89,15 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private val distanceTracker = DistanceTracker()
     // Diagnose-Log für den ersten Segeltörn, siehe docs/Erweiterung_Diagnose_Log.md
     private val diagnosticsLogger = DiagnosticsLogger(application)
+    // Tages-/Wettfahrt-Auswertung (17.08.2026, siehe docs/Erweiterung_Tages_Auswertung.md)
+    private val sessionSummaryEngine = SessionSummaryEngine()
+    // id des laufenden Tages-Eintrags in der DB, sobald einmal gespeichert
+    // (siehe stopApp()/SessionDao.upsertDay) - null bis zum ersten Stopp.
+    private var dayEntityId: Long? = null
+    // Zeitpunkt des letzten Countdown-Starts, solange die zugehörige
+    // Wettfahrt noch nicht abgeschlossen ist (siehe startCountdown/
+    // stopCompetition/closeRaceSession) - null ausserhalb einer Wettfahrt.
+    private var raceStartedAtMs: Long? = null
 
     init {
         // Steuerbefehle von der Uhr (CMD_*, siehe BleProtocol.kt) auf die
@@ -521,6 +534,11 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             )
         }
 
+        // Tages-Auswertung (siehe docs/Erweiterung_Tages_Auswertung.md) -
+        // bewusst unabhängig vom Diagnose-Log-Schalter unten, läuft immer
+        // mit (keine Datei-I/O, nur In-Memory-Aggregation).
+        sessionSummaryEngine.onTick(fix, _uiState.value.watchConnected, _uiState.value.operationMode)
+
         // Diagnose-Log (siehe docs/Erweiterung_Diagnose_Log.md): NACH dem
         // obigen _uiState.update() - _uiState.value spiegelt an dieser
         // Stelle garantiert schon den neuen Zustand (StateFlow.update()
@@ -598,7 +616,23 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { settingsRepo.deleteBoatProfile(id) }
     }
 
-    fun startCountdown() = countdownEngine.start()
+    /**
+     * Öffnet zusätzlich zum ohnehin laufenden Tages-Track ein eigenes
+     * Wettfahrt-Zeitfenster für die Session-Historie (Roman-Wunsch,
+     * 17.08.2026, siehe docs/Erweiterung_Tages_Auswertung.md) — bewusst ab
+     * Countdown-Start, nicht erst ab Competition-Start bei 0:00, damit die
+     * Vorstart-Phase (Startlinien-Positionierung) mit ausgewertet wird. War
+     * seit dem letzten Countdown-Start noch keine Wettfahrt sauber über
+     * [stopCompetition] abgeschlossen (z.B. Fehlstart, Generalrückruf), wird
+     * sie hier still im Hintergrund abgeschlossen+gespeichert (kein Dialog —
+     * würde den gerade beginnenden neuen Start stören).
+     */
+    fun startCountdown() {
+        raceStartedAtMs?.let { closeRaceSession(showDialog = false) }
+        raceStartedAtMs = System.currentTimeMillis()
+        countdownEngine.start()
+    }
+
     fun resetCountdown() = countdownEngine.reset()
     fun syncCountdownToNextMinute() = countdownEngine.syncToNextMinute()
 
@@ -850,6 +884,26 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     fun stopCompetition() {
         countdownEngine.reset()
         _uiState.update { it.copy(competitionActive = false, competitionGuidance = null) }
+        // Session-Historie (siehe startCountdown/closeRaceSession): explizites
+        // Ende -> Bericht kommt sofort als Dialog, anders als beim stillen
+        // Abschluss durch einen neuen Countdown-Start.
+        closeRaceSession(showDialog = true)
+    }
+
+    /**
+     * Schliesst das laufende Wettfahrt-Zeitfenster (siehe [startCountdown])
+     * ab und speichert es als eigenen RACE-Eintrag in der Session-Historie —
+     * kein-op, falls gerade keine Wettfahrt offen ist (z.B. "Wettfahrt
+     * beenden" doppelt gedrückt). [showDialog] siehe [startCountdown]-Doku.
+     */
+    private fun closeRaceSession(showDialog: Boolean) {
+        val startedAt = raceStartedAtMs ?: return
+        raceStartedAtMs = null
+        val report = sessionSummaryEngine.buildReport(windEngine, SessionKind.RACE, fromMs = startedAt) ?: return
+        viewModelScope.launch { db.sessionDao().insert(report.toEntity()) }
+        if (showDialog) {
+            _uiState.update { it.copy(sessionReport = report) }
+        }
     }
 
     /**
@@ -980,11 +1034,66 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
      */
     fun stopApp() {
         pauseBackgroundWork()
-        _uiState.update { it.copy(appStopped = true, watchConnected = false) }
+        // Sicherheitsnetz: falls noch eine Wettfahrt offen war (nie über
+        // "Wettfahrt beenden" abgeschlossen), hier still mitsichern - sonst
+        // ginge sie beim nächsten App-Neustart verloren. Kein eigener Dialog,
+        // der Tages-Bericht unten poppt ohnehin gleich auf.
+        raceStartedAtMs?.let { closeRaceSession(showDialog = false) }
+
+        // Tages-Auswertung (siehe docs/Erweiterung_Tages_Auswertung.md):
+        // erscheint automatisch bei jedem Stopp, deckt aber immer den
+        // GESAMTEN bisherigen Tag ab (sessionSummaryEngine wird nicht
+        // zurückgesetzt) - bei Mittagspausen-Stopp/Start wächst der Bericht
+        // beim nächsten Stopp entsprechend weiter. upsertDay() aktualisiert
+        // denselben DB-Eintrag (dayEntityId), statt für jeden Stopp einen
+        // neuen anzulegen.
+        val report = sessionSummaryEngine.buildReport(windEngine, SessionKind.DAY)
+        if (report != null) {
+            viewModelScope.launch {
+                dayEntityId = db.sessionDao().upsertDay(report.copy(id = dayEntityId).toEntity())
+            }
+        }
+
+        _uiState.update {
+            it.copy(appStopped = true, watchConnected = false, sessionReport = report)
+        }
     }
 
     fun startApp() {
         resumeBackgroundWork()
         _uiState.update { it.copy(appStopped = false) }
+    }
+
+    /** SessionReportDialog "Schliessen" — Bericht bleibt in der SessionSummaryEngine erhalten, nur die Anzeige wird ausgeblendet. */
+    fun dismissSessionReport() {
+        _uiState.update { it.copy(sessionReport = null) }
+    }
+
+    // ---- Session-Historie (Verlauf-Tab, siehe docs/Erweiterung_Tages_Auswertung.md) ----
+
+    /** Alle gespeicherten Sessions (Tag + einzelne Wettfahrten), neueste zuerst. */
+    fun sessionHistory(): Flow<List<SessionReport>> =
+        db.sessionDao().observeAll().map { list -> list.map { it.toReport() } }
+
+    suspend fun getSessionReport(id: Long): SessionReport? = db.sessionDao().getById(id)?.toReport()
+
+    fun deleteSession(id: Long) {
+        viewModelScope.launch { db.sessionDao().delete(id) }
+    }
+
+    /**
+     * "Diagnose-Log importieren" (Roman-Wunsch, siehe
+     * docs/Erweiterung_Tages_Auswertung.md/DiagnosticsLogImporter.kt) —
+     * spielt eine zuvor geteilte CSV durch eine frische WindEngine/
+     * SessionSummaryEngine und speichert das Ergebnis als neuen DAY-Eintrag.
+     * [onResult] bekommt false bei kaputter/leerer Datei (z.B. falsches
+     * Dateiformat gewählt), für eine Fehlermeldung in der UI.
+     */
+    fun importDiagnosticsLog(uri: android.net.Uri, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val report = DiagnosticsLogImporter.import(getApplication(), uri)
+            if (report != null) db.sessionDao().insert(report.toEntity())
+            onResult(report != null)
+        }
     }
 }

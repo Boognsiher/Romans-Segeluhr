@@ -128,4 +128,10 @@ data class SegeluhrUiState(
     // appStopped ebenfalls nicht persistiert - jeder frische App-Start
     // beginnt aktiv, Stopp ist eine bewusste Aktion innerhalb der Session.
     val appStopped: Boolean = false,
+
+    // Tages-Auswertung (Erweiterung, 17.08.2026, siehe
+    // docs/Erweiterung_Tages_Auswertung.md) — von SessionSummaryEngine bei
+    // stopApp() gebaut, null solange kein Bericht ansteht. Zeigt der
+    // SessionReportDialog an; dismissSessionReport() setzt wieder auf null.
+    val sessionReport: SessionReport? = null,
 )

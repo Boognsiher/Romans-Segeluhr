@@ -4,4 +4,7 @@
      erreichbar, ohne WRITE_EXTERNAL_STORAGE-Berechtigung zu brauchen. -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <files-path name="diagnostics" path="diagnostics/" />
+    <!-- Für SessionPdfExporter (siehe docs/Erweiterung_Tages_Auswertung.md,
+         "Als PDF teilen") - gleiches Muster wie diagnostics/ oben. -->
+    <files-path name="reports" path="reports/" />
 </paths>

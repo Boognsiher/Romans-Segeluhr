@@ -38,9 +38,16 @@ interface ManeuverDao {
     suspend fun clearAll()
 }
 
-@Database(entities = [ManeuverEntity::class], version = 1, exportSchema = false)
+// Version 2 (17.08.2026, siehe docs/Erweiterung_Tages_Auswertung.md): neue
+// "sessions"-Tabelle für die Tages-/Wettfahrt-Auswertung. Keine echte
+// Migration geschrieben (fallbackToDestructiveMigration unten) - App ist
+// noch in der Hardware-Testphase, ein einmaliger Verlust des bisherigen
+// Manöver-Logs beim ersten Start nach diesem Update ist bewusst in Kauf
+// genommen statt einer für ein einzelnes Gerät unnötigen Migration.
+@Database(entities = [ManeuverEntity::class, SessionEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun maneuverDao(): ManeuverDao
+    abstract fun sessionDao(): SessionDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -51,7 +58,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "segeluhr.db",
-                ).build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
     }
 }

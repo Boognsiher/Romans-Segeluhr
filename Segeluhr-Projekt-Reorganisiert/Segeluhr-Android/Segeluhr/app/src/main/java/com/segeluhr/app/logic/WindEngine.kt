@@ -40,6 +40,26 @@ import kotlin.math.abs
  * Zeitpunkt nur das gerade AKTIVE Profil (`activeProfileId`). Beim
  * Profilwechsel ruft der ViewModel [restoreBoatProfile] erneut auf.
  */
+/**
+ * Eine erkannte Wende/Halse für die Tages-Auswertung (Erweiterung,
+ * 17.08.2026, siehe docs/Erweiterung_Tages_Auswertung.md) — entsteht bei
+ * jedem Bug-Wechsel, den [WindEngine.tickContinuous] ohnehin schon für die
+ * Header/Lift-Erkennung verfolgt (`tackSign`-Vorzeichenwechsel), kein
+ * separater Erkennungsweg.
+ */
+data class TackEvent(val timestampMs: Long, val angleDeg: Double, val isTack: Boolean)
+
+/**
+ * Ein erkannter Wind-Shift für die Tages-/Wettfahrt-Auswertung — [isHeader]
+ * ist null, wenn kein Ziel-Referenzpunkt vorlag (siehe [WindEngine.tickContinuous],
+ * dann konnte keine Header/Lift-Klassifizierung stattfinden, der Shift selbst
+ * hat aber trotzdem stattgefunden).
+ */
+data class WindShiftEvent(val timestampMs: Long, val isHeader: Boolean?)
+
+/** Ein erfolgreicher Windkalibrierlauf für die Tages-/Wettfahrt-Auswertung. */
+data class CalibrationEvent(val timestampMs: Long)
+
 class WindEngine(
     private val vib: HapticFeedback,
     private val status: StatusSink,
@@ -87,6 +107,21 @@ class WindEngine(
         private set
     private var lastPersistedCloseHauledAngle: Double = Constants.DEFAULT_CLOSEHAULED_ANGLE_DEG
     private var lastPersistedDownwindAngle: Double = Constants.DEFAULT_DOWNWIND_ANGLE_DEG
+
+    // ---- Tages-/Wettfahrt-Auswertung (17.08.2026, siehe
+    // docs/Erweiterung_Tages_Auswertung.md) ----
+    // Läuft die ganze ViewModel-Lebensdauer mit (wie DiagnosticsLogger), wird
+    // NICHT bei Stopp/Start zurückgesetzt. Bewusst zeitgestempelte Listen statt
+    // reiner Zähler - SessionSummaryEngine.buildReport() filtert sie nach
+    // einem beliebigen Zeitfenster (ganzer Tag ODER nur eine einzelne
+    // Wettfahrt zwischen Countdown-Start und "Wettfahrt beenden"), ohne einen
+    // zweiten, parallel laufenden Erkennungsweg zu brauchen.
+    private val _sessionManeuvers = mutableListOf<TackEvent>()
+    val sessionManeuvers: List<TackEvent> get() = _sessionManeuvers
+    private val _sessionWindShifts = mutableListOf<WindShiftEvent>()
+    val sessionWindShifts: List<WindShiftEvent> get() = _sessionWindShifts
+    private val _sessionCalibrations = mutableListOf<CalibrationEvent>()
+    val sessionCalibrations: List<CalibrationEvent> get() = _sessionCalibrations
 
     /** Beim App-Start aus der Persistenz laden */
     fun restore(windDir: Double?, calibrated: Boolean) {
@@ -265,6 +300,13 @@ class WindEngine(
                         continuousTracker.reset()
                         lastSteadyCOG = null
                         tackSign = null
+                        // Zeitstempel bewusst aus dem Fix (nicht System.currentTimeMillis()),
+                        // damit ein Import (siehe DiagnosticsLogImporter) die ORIGINALEN
+                        // Log-Zeiten trägt statt der Import-Ausführungszeit - sonst würde
+                        // SessionSummaryEngine.buildReport()s from..toMs-Fensterung (auf
+                        // Basis der GPS-Fix-Zeitstempel) diese Events beim Import
+                        // fälschlich rausfiltern.
+                        _sessionCalibrations.add(CalibrationEvent(fix.timestampMs))
                         vib.done2()
                         // Kalibrierungsmodus (Boots-Kalibrierung, siehe Klassen-Doku): der
                         // halbe Wendewinkel ist der tatsächlich gesegelte Am-Wind-Winkel -
@@ -317,6 +359,18 @@ class WindEngine(
 
         val curTackSign = tackSign
         if (curTackSign == null || newTackSign != curTackSign) {
+            // Tages-Auswertung (siehe Klassendoku, sessionManeuvers): nur werten,
+            // wenn vorher schon ein Bug bekannt war (curTackSign != null, sonst
+            // ist es nur der allererste Kurs dieser Session) und ein
+            // Referenzkurs vorliegt - derselbe Bug-Wechsel-Moment, den die
+            // Header/Lift-Erkennung unten ohnehin schon per tackSign verfolgt.
+            val previousSteady = lastSteadyCOG
+            if (curTackSign != null && previousSteady != null) {
+                val angle = abs(GeoUtils.angleDiff(avg, previousSteady))
+                val isTack = abs(awa) < Constants.TACK_VS_GYBE_AWA_THRESHOLD_DEG
+                // Zeitstempel aus dem Fix, siehe Kommentar bei _sessionCalibrations oben.
+                _sessionManeuvers.add(TackEvent(fix.timestampMs, angle, isTack))
+            }
             tackSign = newTackSign
             lastSteadyCOG = avg
             return
@@ -338,20 +392,26 @@ class WindEngine(
             val newWindDir = GeoUtils.normalize360(wd + shift)
             windDir = newWindDir
             lastSteadyCOG = avg
+            // Zeitstempel aus dem Fix, siehe Kommentar bei _sessionCalibrations oben.
+            val shiftAtMs = fix.timestampMs
 
+            var isHeader: Boolean? = null
             if (target != null && fix.lat != null && fix.lon != null) {
                 val targetBearing = GeoUtils.bearingDeg(fix.lat, fix.lon, target.lat, target.lon)
                 val angleBefore = abs(GeoUtils.angleDiff(prevSteady, targetBearing))
                 val angleAfter = abs(GeoUtils.angleDiff(avg, targetBearing))
                 if (angleAfter > angleBefore) {
+                    isHeader = true
                     vib.header3()
                     val sign = if (shift > 0) "+" else ""
                     status.setStatus("Wind-Shift: Header zum Ziel ($sign${"%.0f".format(shift)}°)", StatusLevel.AMBER)
                 } else {
+                    isHeader = false
                     val sign = if (shift > 0) "+" else ""
                     status.setStatus("Wind-Shift: Lift ($sign${"%.0f".format(shift)}°)", StatusLevel.NORMAL)
                 }
             }
+            _sessionWindShifts.add(WindShiftEvent(shiftAtMs, isHeader))
             onWindChanged(newWindDir, true)
         }
     }

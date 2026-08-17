@@ -26,9 +26,10 @@ import com.segeluhr.app.ui.screens.*
 import com.segeluhr.app.ui.theme.SegeluhrTheme
 import com.segeluhr.app.viewmodel.LandUhrViewModel
 import com.segeluhr.app.viewmodel.SegeluhrViewModel
+import kotlinx.coroutines.launch
 
 private enum class Tab(val label: String) {
-    NORMAL("Normal"), START("Start"), WIND("Wind"), TRAINING("Training"), LOG("Log"), SETUP("Setup"),
+    NORMAL("Normal"), START("Start"), WIND("Wind"), TRAINING("Training"), LOG("Log"), SESSIONS("Verlauf"), SETUP("Setup"),
 }
 
 /**
@@ -36,6 +37,45 @@ private enum class Tab(val label: String) {
  * docs/Erweiterung_Boje_Kartenauswahl.md) — dieselben Labels wie in den
  * jeweiligen WaypointRow-Aufrufen (TrainingScreen.kt/SetupScreen.kt).
  */
+/**
+ * "Als PDF teilen" (SessionReportDialog + SessionHistoryScreen, siehe
+ * docs/Erweiterung_Tages_Auswertung.md) — baut das PDF asynchron
+ * (SessionPdfExporter.export ist suspend, rendert dafür kurz eine
+ * Karten-Bitmap) und öffnet danach den System-Share-Dialog. Toast bei
+ * Fehlern (z.B. kein Internet für die Kartenkacheln) statt stillem
+ * Verschlucken.
+ */
+/**
+ * [onExportingChange] treibt den blockierenden Ladedialog in [SegeluhrApp]
+ * (Roman-Feedback 17.08.2026: Export dauert wegen der Kartenkacheln-
+ * Wartezeit mehrere Sekunden, ohne Rückmeldung wirkt der Button-Druck wie
+ * "tut nichts") — true beim Start, false in jedem Fall (Erfolg wie Fehler)
+ * am Ende.
+ */
+private fun sharePdf(
+    context: android.content.Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    report: com.segeluhr.app.data.model.SessionReport,
+    onExportingChange: (Boolean) -> Unit,
+) {
+    scope.launch {
+        onExportingChange(true)
+        try {
+            val uri = com.segeluhr.app.data.pdf.SessionPdfExporter.export(context, report)
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "application/pdf"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(android.content.Intent.createChooser(intent, "Auswertung als PDF teilen"))
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "PDF-Export fehlgeschlagen: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        } finally {
+            onExportingChange(false)
+        }
+    }
+}
+
 private fun waypointLabelFor(key: String): String = when (key) {
     "buoy1" -> "Boje 1"
     "buoy2" -> "Boje 2"
@@ -174,6 +214,49 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
         return
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    // PDF-Export läuft (siehe docs/Erweiterung_Tages_Auswertung.md,
+    // SessionPdfExporter) — braucht wegen der Kartenkacheln-Wartezeit
+    // (TILE_LOAD_WAIT_MS) mehrere Sekunden. Roman-Feedback: ohne sichtbare
+    // Rückmeldung wirkt der Button-Druck wie "tut nichts". Ladedialog blockt
+    // bewusst (kein Zurück/Aussen-Tap) statt eines Spinners im Button, weil
+    // "Als PDF teilen" an zwei Stellen (Dialog UND Verlauf-Detail) vorkommt
+    // und ein zentraler Overlay beide gleich abdeckt.
+    var pdfExportInProgress by remember { mutableStateOf(false) }
+    if (pdfExportInProgress) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = {},
+            properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        ) {
+            Column(
+                Modifier
+                    .background(com.segeluhr.app.ui.theme.PanelDark, androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                    .padding(28.dp),
+                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+            ) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text("PDF wird erstellt…", color = com.segeluhr.app.ui.theme.TextLight)
+                Text("Lädt Kartenkacheln, kann einige Sekunden dauern.", fontSize = 12.sp, color = com.segeluhr.app.ui.theme.TextDim, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+    }
+
+    // Tages-Auswertung (siehe docs/Erweiterung_Tages_Auswertung.md) —
+    // erscheint automatisch bei App-Stopp, tab-unabhängig wie
+    // BuoyRoundingConfirmBanner unten, aber als Dialog statt Banner (deutlich
+    // mehr Inhalt, soll nicht mit einem Tab-Wechsel wieder verschwinden).
+    val sessionReport = state.sessionReport
+    if (sessionReport != null) {
+        com.segeluhr.app.ui.components.SessionReportDialog(
+            report = sessionReport,
+            onDismiss = viewModel::dismissSessionReport,
+            onShare = { sharePdf(context, coroutineScope, sessionReport) { inProgress -> pdfExportInProgress = inProgress } },
+        )
+    }
+
     var selectedTab by remember { mutableStateOf(Tab.NORMAL) }
 
     Scaffold(
@@ -188,6 +271,7 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     Tab.WIND to Icons.Filled.Explore,
                     Tab.TRAINING to Icons.Filled.TrackChanges,
                     Tab.LOG to Icons.Filled.ShowChart,
+                    Tab.SESSIONS to Icons.Filled.History,
                     Tab.SETUP to Icons.Filled.Settings,
                 )
                 Tab.values().forEach { tab ->
@@ -247,6 +331,21 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onSetWaypointFromMap = viewModel::startWaypointMapPick,
                 )
                 Tab.LOG -> LogScreen(state, onClearLog = viewModel::clearManeuverLog)
+                Tab.SESSIONS -> {
+                    val sessions by viewModel.sessionHistory().collectAsState(initial = emptyList())
+                    com.segeluhr.app.ui.screens.SessionHistoryScreen(
+                        sessions = sessions,
+                        onDeleteSession = viewModel::deleteSession,
+                        onExportPdf = { report -> sharePdf(context, coroutineScope, report) { inProgress -> pdfExportInProgress = inProgress } },
+                        onImportLog = { uri ->
+                            viewModel.importDiagnosticsLog(uri) { success ->
+                                if (!success) {
+                                    android.widget.Toast.makeText(context, "Import fehlgeschlagen — keine gültige Diagnose-Log-CSV.", android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                    )
+                }
                 Tab.SETUP -> SetupScreen(
                     state,
                     onSetWaypoint = viewModel::captureWaypoint,

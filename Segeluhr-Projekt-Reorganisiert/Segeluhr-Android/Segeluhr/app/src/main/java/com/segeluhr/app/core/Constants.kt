@@ -77,6 +77,11 @@ object Constants {
     /** Reagiert niemand auf die "Boje hier korrigieren?"-Nachfrage, gilt sie nach dieser Zeit automatisch als bestätigt. */
     const val ROUNDING_CONFIRM_TIMEOUT_MS = 20_000L
 
+    // Tages-Auswertung (17.08.2026, siehe docs/Erweiterung_Tages_Auswertung.md,
+    // SessionSummaryEngine/WindEngine.sessionManeuvers).
+    /** Bug-Wechsel (WindEngine.tickContinuous, Vorzeichenwechsel von awa) mit |awa| unter diesem Wert gilt als Wende (Bug durch den Wind), darüber als Halse (Heck durch den Wind) — gleiche Symmetrie-Annahme wie bei absorbCalibrationSample, kein eigenes Polardiagramm. */
+    const val TACK_VS_GYBE_AWA_THRESHOLD_DEG = 90.0
+
     // Competition-Manöver-Timing (12.08.2026, Roman-Wunschliste "vor dem
     // nächsten Test", siehe docs/Erweiterung_TWatch_Ultra_NavRedesign.md):
     // Vorschläge kamen im echten Rennen zu schnell/zu oft hintereinander.
