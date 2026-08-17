@@ -19,6 +19,17 @@ object Constants {
     const val MIN_TACK_ANGLE_DEG = 60.0
     const val MAX_TACK_ANGLE_DEG = 110.0
     const val WIND_SHIFT_THRESHOLD_DEG = 6.0
+    /**
+     * Plausibilitäts-Deckel für WindEngine.tickContinuous() (16.08.2026,
+     * siehe Diagnose-Log-Auswertung 15./16.08. in PROJEKT_STATUS.md): ein
+     * "Windshift" in dieser Größenordnung binnen einem einzelnen ruhigen-
+     * Kurs-Fenster ist real nie ein echter Shift, sondern fast immer eine
+     * Wende/Halse, die TACK_SIGN_DEADZONE_DEG nicht als Bug-Wechsel erkannt
+     * hat (z.B. wegen verrauschtem COG bei schlechtem GPS-Fix) — betraf im
+     * 15.08.-Log 26% aller Wind-Shift-Meldungen (bis zu 122°), im 16.08.-Log
+     * mit besserem GPS nur 9%.
+     */
+    const val WIND_SHIFT_MAX_PLAUSIBLE_DEG = 45.0
     const val TACK_SIGN_DEADZONE_DEG = 5.0
     const val WIND_LOG_INTERVAL_MS = 60_000L
     const val WIND_LOG_SIZE = 30
