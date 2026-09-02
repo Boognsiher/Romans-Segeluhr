@@ -194,3 +194,65 @@ dieses ganzen Projekts. Ergebnisse:
   Reconnect nach BLE-Abbruch, Verhalten bei ausgeschaltetem Display über
   längere Zeit) noch nicht getestet — nur eine kurze Schreibtisch-Session
   heute Abend.
+
+## 02.09.2026: Physische-Tasten-Bedienung (Wasserdicht-Modus)
+
+**Roman-Problem:** beim Segeln wird die Uhr nass, der Touchscreen ist dann
+über den Wasserdicht-Modus deaktiviert — bisher war die App damit während
+der Fahrt unbedienbar (nur in Pausen per Touch nutzbar). Einzige
+verbleibende Eingabe ist die untere ("Zurück"-)Taste der Watch 5 Pro
+(`KEYCODE_BACK`), die im Wasserdicht-Modus laut Roman weiterhin
+funktioniert. Die obere Taste ist auf Wear OS i.d.R. system-reserviert
+(Power/Bixby/Home) und wird Vordergrund-Apps normalerweise nicht
+zugestellt — `MainActivity` fängt defensiv zusätzlich `KEYCODE_STEM_1` ab,
+falls sie auf dieser Watch doch durchkommt, unverifiziert bis zum nächsten
+Hardwaretest.
+
+**Gestenmuster (Roman-Entscheidung, eine Taste, zwei Gesten):**
+- **Kurzer Druck = Kontextaktion.** Aktuell nur auf dem CD-Tab belegt,
+  zustandsabhängig (nur eine Taste für drei Aktionen verfügbar): nicht
+  gestartet → `CMD_COUNTDOWN_START`, läuft (COUNTDOWN) →
+  `CMD_COUNTDOWN_SYNC_NEXT_MINUTE`, läuft (RACE) → `CMD_COUNTDOWN_RESET`.
+  Auf allen anderen Tabs aktuell ein No-Op. `CountdownScreen.kt` zeigt
+  einen Hinweistext ("Taste: Start"/"Sync"/"Reset"), der exakt dieselbe
+  Logik spiegelt — einübbar per Touch in der Pause.
+- **Langer Druck (System-Standard-Schwellwert, `ViewConfiguration.
+  getLongPressTimeout()`) = nächster Tab**, im Ring (Menu→Nav→...).
+- Beide Gesten lösen zusätzlich eine kurze, unterscheidbare Vibration aus
+  (1 Puls = Kontextaktion, 2 Pulse = Tab-Wechsel) — blinde Bestätigung,
+  da man aufs Display schauen, aber nicht antippen kann.
+- **Bewusst NICHT belegt:** Bojen-Rundungs-Bestätigung (`RoundingConfirm
+  Banner`) — soll laut Roman langfristig automatisch erkannt werden
+  (geplante Auswertung aus Wassertest-Daten), deshalb hier kein manueller
+  Tasten-Weg dafür gebaut. Heimweg an/aus war nicht in der Muss-Liste,
+  bleibt vorerst Touch-only im Menu-Tab.
+
+**Technisch:** `MainActivity.dispatchKeyEvent()` misst die Druckdauer
+(`ACTION_DOWN`-Zeitstempel bis `ACTION_UP`, `repeatCount==0`-Guard gegen
+Auto-Repeat beim Halten) und ruft `SegeluhrWatchViewModel.
+onHardwareButtonShortPress()`/`onHardwareButtonLongPress()`. Da der aktive
+Tab im `HorizontalPager`-Zustand lebt (Compose-UI), nicht im ViewModel,
+meldet `SegelnApp.kt` den aktuellen Seitenindex per `onTabChanged()`
+zurück; für Tab-Navigation aus dem ViewModel heraus (Taste ODER Auto-
+Fokus, siehe unten) gibt es umgekehrt `navigateToTab: SharedFlow<Int>`,
+den `SegelnApp.kt` per `LaunchedEffect` abonniert und mit
+`pagerState.animateScrollToPage()` umsetzt.
+
+**Zusätzlich: Auto-Fokus auf den Nav-Tab beim Wettfahrt-Start**
+(derselbe Roman-Wunsch-Kontext) — im Startmoment (0:00-Signal,
+`StartCountdownEngine` COUNTDOWN→RACE) sind beide Hände typischerweise am
+Boot beschäftigt, die App springt jetzt von selbst auf den Nav-Tab
+(SOG/VMC/Manöver-Ampel), statt dass man das manuell nachholen muss.
+`SegeluhrWatchViewModel.watchForRaceStart()` beobachtet dafür
+`raceData.raceStateOrdinal` auf den Flankenwechsel 1→2 (COUNTDOWN→RACE)
+und emittiert denselben `navigateToTab`-Flow — unabhängig davon, ob es
+sich um eine echte Competition oder einen freien Race-Timer handelt,
+beide feuern denselben `onRaceStart()` in `StartCountdownEngine`.
+
+**Nur geschrieben, NICHT kompiliert/getestet** — kein Android-SDK/Plugin-
+Cache in dieser Umgebung (Netzwerk zum Google-Maven-Repository blockiert),
+`gradle compileDebugKotlin` schlägt schon beim Plugin-Auflösen fehl.
+Verifikation (inkl. ob `KEYCODE_STEM_1` auf dieser Watch überhaupt
+ankommt, ob die Kurz/Lang-Schwelle sich auf dem Wasser gut anfühlt, ob die
+Sync/Reset-Zuordnung im Ernstfall die richtige ist) steht beim nächsten
+Hardwaretest aus.

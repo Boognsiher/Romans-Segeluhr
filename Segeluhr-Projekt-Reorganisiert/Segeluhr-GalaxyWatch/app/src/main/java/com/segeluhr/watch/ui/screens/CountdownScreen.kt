@@ -38,6 +38,15 @@ import com.segeluhr.watch.viewmodel.SegeluhrWatchViewModel
  * ca. 168dp verfügbare Breite (212dp Displaybreite abzüglich 22dp
  * Seiten-Padding je Seite aus SailScreenScaffold.kt) und schnitt "Sync"
  * rechts ab (Roman-Feedback 14.08. Abend).
+ *
+ * **02.09.2026, Roman-Wunsch (Wasserdicht-Modus/nasse Hände):** dieselben
+ * drei Aktionen liegen jetzt zusätzlich auf der unteren Hardware-Taste
+ * (kurzer Druck), siehe SegeluhrWatchViewModel.onHardwareButtonShortPress()
+ * — nur EINE Taste verfügbar, deshalb zustandsabhängig statt aller drei
+ * gleichzeitig: nicht gestartet -> Start, läuft (Countdown) -> Sync, läuft
+ * (Race) -> Reset. Der Hinweistext unten spiegelt exakt diese Logik, damit
+ * die Belegung schon in der Pause (Touch) einübbar ist, bevor man auf die
+ * Taste angewiesen ist.
  */
 @Composable
 fun CountdownScreen(state: WatchUiState, viewModel: SegeluhrWatchViewModel) {
@@ -69,6 +78,12 @@ fun CountdownScreen(state: WatchUiState, viewModel: SegeluhrWatchViewModel) {
             CdButton("Reset", viewModel::resetCountdown)
             CdButton("Sync", viewModel::syncCountdown)
         }
+        val keyAction = when (state.race?.raceStateOrdinal ?: 0) {
+            0 -> "Start"
+            1 -> "Sync"
+            else -> "Reset"
+        }
+        Text("Taste: $keyAction", color = TextDim, fontSize = 9.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 

@@ -12,7 +12,9 @@ import com.segeluhr.watch.ble.WatchBleForegroundService
 import com.segeluhr.watch.core.HapticPlayer
 import com.segeluhr.watch.data.WatchUiState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -34,6 +36,65 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
 
     private val _commandOverlay = MutableStateFlow<String?>(null)
     private val _ownBatteryPct = MutableStateFlow<Int?>(null)
+
+    // ---- Hardware-Tasten-Bedienung (02.09.2026, Roman-Wunsch) ----
+    // Im Wasserdicht-Modus ist der Touchscreen deaktiviert - einzige
+    // verbleibende Bedienung ist die untere ("Zurück"-)Taste der Watch 5
+    // Pro, siehe MainActivity.dispatchKeyEvent(). Die obere Taste ist auf
+    // Wear OS i.d.R. system-reserviert (Power/Bixby/Home) und wird
+    // Vordergrund-Apps normalerweise nicht zugestellt - MainActivity fängt
+    // sie defensiv trotzdem ab, unverifiziert bis zum nächsten Hardwaretest.
+    //
+    // Zwei Gesten, je Vibration zur blinden Bestätigung (nasse Hände, Blick
+    // aufs Display möglich, Antippen nicht):
+    // - Kurz = Kontextaktion (aktuell nur auf dem CD-Tab belegt, siehe
+    //   onHardwareButtonShortPress()) -> 1 Puls
+    // - Lang = nächster Tab (Ring, kein Ende) -> 2 Pulse
+    // Welcher Tab gerade aktiv ist, meldet SegelnApp per onTabChanged() aus
+    // dem HorizontalPager - das ViewModel kennt sonst keine Pager-Details.
+    // _navigateToTab trägt in beiden Fällen (Taste ODER Auto-Fokus unten)
+    // einen absoluten Ziel-Index, SegelnApp ruft damit pagerState.animateScrollToPage() auf.
+    private var currentTabIndex = 0
+    private val _navigateToTab = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+    val navigateToTab: SharedFlow<Int> = _navigateToTab
+
+    fun onTabChanged(index: Int) {
+        currentTabIndex = index
+    }
+
+    fun onHardwareButtonShortPress() {
+        hapticPlayer.play(BleProtocol.HAPTIC_STEP1)
+        if (currentTabIndex != TAB_INDEX_COUNTDOWN) return
+        when (uiState.value.race?.raceStateOrdinal ?: 0) {
+            0 -> { bleClient.sendCommand(BleProtocol.CMD_COUNTDOWN_START); showOverlay("Start") }
+            1 -> { bleClient.sendCommand(BleProtocol.CMD_COUNTDOWN_SYNC_NEXT_MINUTE); showOverlay("Sync") }
+            else -> { bleClient.sendCommand(BleProtocol.CMD_COUNTDOWN_RESET); showOverlay("Reset") }
+        }
+    }
+
+    fun onHardwareButtonLongPress() {
+        hapticPlayer.play(BleProtocol.HAPTIC_DONE2)
+        _navigateToTab.tryEmit((currentTabIndex + 1) % TAB_COUNT)
+    }
+
+    // Auto-Fokus auf den Nav-Tab beim Wettfahrt-Start (02.09.2026,
+    // Roman-Wunsch): im Startmoment (0:00-Signal, StartCountdownEngine
+    // COUNTDOWN->RACE) sind beide Hände typischerweise am Boot beschäftigt
+    // - die App soll dann von selbst auf den Tab mit SOG/VMC/Manöver-Ampel
+    // springen, statt dass man das noch manuell nachholen muss. Reiner
+    // Zustandswechsel-Trigger (raceStateOrdinal 1->2), unabhängig davon, ob
+    // es sich um eine echte Competition oder einen freien Race-Timer
+    // handelt - beide feuern denselben onRaceStart() in StartCountdownEngine.
+    private var lastRaceStateOrdinal: Int? = null
+
+    private fun watchForRaceStart() {
+        bleClient.raceData.onEach { race ->
+            val prev = lastRaceStateOrdinal
+            val cur = race?.raceStateOrdinal
+            if (prev == 1 && cur == 2) _navigateToTab.tryEmit(TAB_INDEX_NAV)
+            lastRaceStateOrdinal = cur
+        }.launchIn(viewModelScope)
+    }
 
     // Kotlins combine() gibt es nur bis 5 Argumente auf einmal - deshalb in
     // zwei Zwischen-Datenklassen gestückelt statt einem einzigen Riesen-Aufruf.
@@ -65,6 +126,7 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
         bleClient.hapticEvents.onEach { hapticPlayer.play(it) }.launchIn(viewModelScope)
         WatchBleForegroundService.start(application)
         pollOwnBattery()
+        watchForRaceStart()
     }
 
     private fun pollOwnBattery() {
@@ -125,5 +187,13 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
     fun clearWaypoint(id: Int) {
         bleClient.sendCommand(BleProtocol.CMD_CLEAR_WAYPOINT, id)
         showOverlay("Wegpunkt gelöscht")
+    }
+
+    private companion object {
+        // Indizes/Anzahl von SegelnApp.TAB_TITLES (Nav/Wind/Heim/CD/Man/Menu)
+        // - bei Umsortierung dort mitpflegen.
+        const val TAB_INDEX_NAV = 0
+        const val TAB_INDEX_COUNTDOWN = 3
+        const val TAB_COUNT = 6
     }
 }

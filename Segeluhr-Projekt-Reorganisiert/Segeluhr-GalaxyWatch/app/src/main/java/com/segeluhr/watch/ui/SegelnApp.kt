@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -34,6 +35,12 @@ private val TAB_TITLES = listOf("Nav", "Wind", "Heim", "CD", "Man", "Menu")
  * 14.08. Abend wieder gestrichen — Roman-Feedback: Display zu klein dafür.
  * Wegpunkte lassen sich hier nur noch "an der aktuellen Position" setzen,
  * wie auf der Ultra.
+ *
+ * **02.09.2026:** Tab-Wechsel per Wisch-Geste bleibt bestehen, ist im
+ * Wasserdicht-Modus (Touch deaktiviert) aber nicht nutzbar — die beiden
+ * LaunchedEffects unten koppeln den Pager zusätzlich an die physische
+ * Hardware-Taste (langer Druck = nächster Tab, siehe MainActivity.kt/
+ * SegeluhrWatchViewModel.kt).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -42,6 +49,17 @@ fun SegelnApp(viewModel: SegeluhrWatchViewModel) {
 
     Box(Modifier.fillMaxSize().background(BgDark)) {
         val pagerState = rememberPagerState(pageCount = { TAB_TITLES.size })
+
+        // Hardware-Tasten-Bedienung + Auto-Fokus (siehe SegeluhrWatchViewModel-
+        // Klassendoku): aktiver Tab ans ViewModel melden (für die
+        // Kontextaktion der kurzen Taste), umgekehrt auf navigateToTab
+        // reagieren (langer Tastendruck = nächster Tab, ODER automatischer
+        // Sprung auf den Nav-Tab beim Wettfahrt-Start).
+        LaunchedEffect(pagerState.currentPage) { viewModel.onTabChanged(pagerState.currentPage) }
+        LaunchedEffect(Unit) {
+            viewModel.navigateToTab.collect { target -> pagerState.animateScrollToPage(target) }
+        }
+
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             SailScreenScaffold(
                 connectionState = state.connectionState,
