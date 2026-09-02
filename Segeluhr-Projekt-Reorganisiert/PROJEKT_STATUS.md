@@ -204,7 +204,11 @@ beenden"-Button).
   (`WaypointSetFlag2`). Setup-Tab: neue Sektion "Lee-Variante"
   (Segmented-Button + kontextabhängige Wegpunkt-Zeilen).
 - **Galaxy-Watch-App**: `BleProtocol.kt` (WaypointId/Flags/2-Byte-Decode)
-  + `MenuScreen.kt` (vier neue Wegpunkt-Zeilen) mitgezogen.
+  + `MenuScreen.kt` (vier neue Wegpunkt-Zeilen) mitgezogen. Auf
+  Roman-Nachfrage zusätzlich **Pin/Boot per Hardware-Taste** (Nav-Tab,
+  kurzer Druck: Pin fehlt→Pin, sonst Boot fehlt→Boot, sonst wieder Pin) —
+  die Startlinie wird erfahrungsgemäss noch kurz vor dem Start final
+  gelegt, wenn Touch (Wasserdicht-Modus) schon nicht mehr geht.
 - **T-Watch-Ultra-Firmware bewusst NICHT angefasst** (nicht im Einsatz bei
   diesem Test) — zeigt danach falsche `legNames[]`-Texte und liest die
   neuen Wegpunkte/das 2. Status-Byte nicht, siehe "Plattform-Umfang" in der

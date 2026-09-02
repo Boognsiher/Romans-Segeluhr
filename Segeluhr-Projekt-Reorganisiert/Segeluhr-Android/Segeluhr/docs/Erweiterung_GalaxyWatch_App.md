@@ -273,3 +273,21 @@ Verifikation (inkl. ob `KEYCODE_STEM_1` auf dieser Watch überhaupt
 ankommt, ob die Kurz/Lang-Schwelle sich auf dem Wasser gut anfühlt, ob die
 Sync/Reset-Zuordnung im Ernstfall die richtige ist) steht beim nächsten
 Hardwaretest aus.
+
+**Nachtrag 02.09.2026 (spät): Pin/Boot per Taste.** Roman-Nachfrage bei
+der Kurs-Modell-Überarbeitung: die Startlinie (Pin/Boot) wird
+erfahrungsgemäss noch kurz vor dem Start final gelegt/korrigiert — anders
+als Marke1/Lee-Boje/Gate (stehen laut Kurs-Modell schon vorher fest)
+brauchte sie deshalb noch eine eigene Tasten-Aktion, nicht nur Touch im
+Menu-Tab. Liegt jetzt auf dem **Nav-Tab** (bisher ohne jede Tasten-
+Funktion, kurzer Druck war dort No-Op) statt auf einem thematisch
+naheliegenderen Tab, weil Nav der Standard-/meistgesehene Tab ist:
+zustandslose feste Regel — Pin fehlt → Pin setzen, sonst Boot fehlt →
+Boot setzen, sonst (beide schon gesetzt) → wieder Pin (Annahme: der wird
+laut Startlinie-Bias-Logik öfter nachjustiert als das Committee-Boot,
+noch nicht durch echte Praxis bestätigt). Hinweistext "Taste: Pin/Boot
+setzen" unten auf dem Nav-Tab spiegelt die Regel live. Reine
+Wiederverwendung von `CMD_SET_WAYPOINT`/`WaypointId.PIN`/`.BOAT` — kein
+neuer BLE-Befehl nötig. **Nur geschrieben, nicht getestet** — ob die feste
+"immer wieder Pin"-Regel im Ernstfall die richtige ist (vs. z.B.
+Alternierung), steht beim nächsten Hardwaretest aus.

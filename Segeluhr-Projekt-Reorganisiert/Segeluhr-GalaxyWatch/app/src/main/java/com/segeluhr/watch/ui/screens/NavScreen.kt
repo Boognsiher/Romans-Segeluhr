@@ -20,6 +20,13 @@ import com.segeluhr.watch.ui.theme.TextLight
  * Modus (BoatState), Manöver-Ampel, Bootsgeschwindigkeit, Ziel-VMC, Lift/
  * Header. Kein Solo-GPS auf dieser Uhr — SOG/COG kommen wie bei der Ultra
  * ausschliesslich vom Handy (CHAR_GPS_UUID).
+ *
+ * **02.09.2026, Roman-Wunsch:** liegt hier (statt auf einem thematisch
+ * passenderen Tab) auch die Tasten-Kontextaktion für Pin/Boot — Nav ist
+ * der Standard-/meistgesehene Tab, und Pin/Boot werden erfahrungsgemäss
+ * noch kurz vor dem Start final gelegt, wenn Touch (Wasserdicht-Modus)
+ * schon nicht mehr geht. Regel siehe SegeluhrWatchViewModel.
+ * setStartLineWaypointHere() — Hinweistext hier spiegelt sie 1:1.
  */
 @Composable
 fun NavScreen(state: WatchUiState) {
@@ -58,5 +65,7 @@ fun NavScreen(state: WatchUiState) {
                 color = TextDim, fontSize = 9.sp, modifier = Modifier.padding(top = 6.dp),
             )
         }
+        val startLineKeyHint = if (state.waypoints?.pinSet != true) "Pin" else "Boot"
+        Text("Taste: $startLineKeyHint setzen", color = TextDim, fontSize = 9.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }

@@ -47,8 +47,10 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
     //
     // Zwei Gesten, je Vibration zur blinden Bestätigung (nasse Hände, Blick
     // aufs Display möglich, Antippen nicht):
-    // - Kurz = Kontextaktion (aktuell nur auf dem CD-Tab belegt, siehe
-    //   onHardwareButtonShortPress()) -> 1 Puls
+    // - Kurz = Kontextaktion, pro Tab unterschiedlich belegt (siehe
+    //   onHardwareButtonShortPress()): CD-Tab = Countdown Start/Sync/Reset,
+    //   Nav-Tab = Pin/Boot setzen (02.09.2026 ergänzt, siehe
+    //   setStartLineWaypointHere()), sonst No-Op -> 1 Puls
     // - Lang = nächster Tab (Ring, kein Ende) -> 2 Pulse
     // Welcher Tab gerade aktiv ist, meldet SegelnApp per onTabChanged() aus
     // dem HorizontalPager - das ViewModel kennt sonst keine Pager-Details.
@@ -64,12 +66,32 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
 
     fun onHardwareButtonShortPress() {
         hapticPlayer.play(BleProtocol.HAPTIC_STEP1)
-        if (currentTabIndex != TAB_INDEX_COUNTDOWN) return
-        when (uiState.value.race?.raceStateOrdinal ?: 0) {
-            0 -> { bleClient.sendCommand(BleProtocol.CMD_COUNTDOWN_START); showOverlay("Start") }
-            1 -> { bleClient.sendCommand(BleProtocol.CMD_COUNTDOWN_SYNC_NEXT_MINUTE); showOverlay("Sync") }
-            else -> { bleClient.sendCommand(BleProtocol.CMD_COUNTDOWN_RESET); showOverlay("Reset") }
+        when (currentTabIndex) {
+            TAB_INDEX_NAV -> setStartLineWaypointHere()
+            TAB_INDEX_COUNTDOWN -> when (uiState.value.race?.raceStateOrdinal ?: 0) {
+                0 -> { bleClient.sendCommand(BleProtocol.CMD_COUNTDOWN_START); showOverlay("Start") }
+                1 -> { bleClient.sendCommand(BleProtocol.CMD_COUNTDOWN_SYNC_NEXT_MINUTE); showOverlay("Sync") }
+                else -> { bleClient.sendCommand(BleProtocol.CMD_COUNTDOWN_RESET); showOverlay("Reset") }
+            }
         }
+    }
+
+    /**
+     * Startlinie per Taste (02.09.2026, Roman-Wunsch): Pin/Boot werden laut
+     * Roman erfahrungsgemäss noch kurz vor dem Start final gelegt/
+     * korrigiert — anders als Marke1/Lee-Boje/Gate (die stehen laut Kurs-
+     * Modell schon vorher fest) brauchen sie deshalb eine eigene Tasten-
+     * Aktion, nicht nur Touch im Menu-Tab. Feste, zustandslose Regel statt
+     * Umschalter: Pin fehlt → Pin, sonst Boot fehlt → Boot, sonst (beide
+     * schon gesetzt) → wieder Pin (der wird laut Startlinie-Bias-Logik
+     * erfahrungsgemäss öfter nachjustiert als das Committee-Boot). Der
+     * CD-Tab-Taste-Hinweistext auf NavScreen.kt spiegelt dieselbe Regel.
+     */
+    private fun setStartLineWaypointHere() {
+        val wp = uiState.value.waypoints
+        val id = if (wp?.pinSet != true) BleProtocol.WaypointId.PIN else BleProtocol.WaypointId.BOAT
+        bleClient.sendCommand(BleProtocol.CMD_SET_WAYPOINT, id)
+        showOverlay(if (id == BleProtocol.WaypointId.PIN) "Pin gesetzt" else "Boot gesetzt")
     }
 
     fun onHardwareButtonLongPress() {
