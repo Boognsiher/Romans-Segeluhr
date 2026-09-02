@@ -74,3 +74,62 @@ Roman: "möglichst viele Infos, welche du brauchst kannst du bestimmen").
   das ein Punkt zum Nachdenken.
 
 **Noch nicht kompiliert/getestet** — Test heute Abend geplant.
+
+## 02.09.2026: deutlich erweitert im Hinblick auf automatische Bojenerkennung
+
+Roman-Wunsch im Vorfeld des nächsten Wassertests ("logge alles was du
+denkst dass es hilft, ich habe genug Speicherplatz") — Ziel: nach dem Test
+per Muster-Suche (wie schon 16.08.2026 beim Windshift-Filter, siehe
+`PROJEKT_STATUS.md`) herausfinden, ob sich Bojen-Rundungen zuverlässiger
+automatisch erkennen lassen als mit der aktuellen `MarkRoundingDetector`-
+Heuristik. Neue Spalten (ans Ende der bestehenden Kopfzeile angehängt,
+siehe unten):
+
+- **Distanz + Peilung zu allen acht Wegpunkt-Typen** (`dist_*_m`/
+  `brg_*_deg` für Pin/Boot-Ende/Ziel/Boje1/Boje2/Home/Marke1/Marke2) — bisher
+  gab es nur `home_dist_m`/`comp_dist_m` (aktives Leg), nicht die Rohdistanz
+  zu JEDEM gesetzten Punkt gleichzeitig.
+- **`wind_side`** ("upwind"/"downwind"/leer) — exakt dieselbe Amwind/
+  Vorwind-Formel wie `MarkRoundingDetector` (`abs(angleDiff(cog, windDir))
+  < 90`), hier aber rein im Logger aus `cog_deg`/`wind_dir_deg` nachgerechnet,
+  OHNE die Engine-internen (privaten) Detector-Instanzen anzufassen —
+  bewusst risikoarm kurz vor einem echten Wassertest.
+- **`cog_rate_dps`**: Kursänderungsrate in °/s zwischen zwei Ticks (null bei
+  Lücken >5s, z.B. nach Uhr-Reconnect) — soll spätere Analyse-Skripte davon
+  entlasten, das selbst aus `cog_deg` zu differenzieren.
+- **`race_state`/`countdown_seconds`**: fehlte bisher komplett im Log,
+  obwohl für die Wettfahrt-Auswertung offensichtlich relevant.
+- **`comp_vmc_kn`**: Lücke geschlossen — `CompetitionGuidance.vmcKn` wurde
+  schon lange berechnet, aber nie geloggt (nur das Heimweg-Pendant
+  `home_vmc_kn` war schon da).
+- **`gps_fresh`/`gps_moving`, `line_bias_deg`/`line_bias_favors`,
+  `active_buoy_label`/`active_buoy_bearing_deg`/`active_buoy_dist_m`,
+  `avg_tack_score`/`avg_jibe_score`**: ebenfalls schon vorhandene, aber
+  bisher nie geloggte `SegeluhrUiState`-Felder.
+- **`pending_confirm_source`/`pending_confirm_waypoint_key`/
+  `pending_confirm_candidate_lat`/`_lon`/`pending_confirm_age_s`**: hält
+  fest, wann/wo/warum die BESTEHENDE Rundungs-Rückfrage
+  (`PendingBuoyConfirmation`) ausgelöst wurde — direkter Vergleichspunkt für
+  jedes künftige Muster ("hätte ein neuer Algorithmus hier auch/anders
+  reagiert?").
+
+**Bewusst NICHT gemacht:** die `MarkRoundingDetector`-Instanzen aus
+`TrainingEngine`/`CompetitionEngine` live mitzuloggen (z.B. deren
+`Result`/`lastSide`/Steady-Kurs pro Tick) — beide Instanzen sind privat,
+das hätte Änderungen an den Segel-Engines selbst bedeutet. Kurz vor einem
+echten Wassertest bewusst vermieden; falls die Muster-Suche nach dem Test
+merkt, dass genau dieses interne Signal fehlt, ist das ein guter Kandidat
+für eine gezielte Nacharbeit DANACH, mit den echten Daten als Referenz.
+
+**Spalten-Reihenfolge:** alle neuen Felder hängen strikt HINTER dem
+bisherigen letzten Feld (`event`). Grund: `DiagnosticsLogImporter.kt` liest
+die für den CSV-Reimport nötigen Felder über feste 0-basierte
+Spalten-Indizes (`COL_WATCH_CONNECTED = 39` usw.) — jede Umsortierung
+mittendrin hätte den bestehenden Reimport (u.a. der beiden echten Törns
+vom 15./16.08.) unbemerkt kaputt gemacht.
+
+**Nur geschrieben, nicht kompiliert/getestet** (kein Android-SDK/Plugin-
+Cache in dieser Umgebung) — Verifikation (u.a. ob alle neuen Spalten bei
+echten Werten plausibel aussehen) steht beim nächsten Wassertest an,
+zusammen mit der physischen-Tasten-Bedienung der Galaxy-Watch-App (siehe
+`Erweiterung_GalaxyWatch_App.md`).

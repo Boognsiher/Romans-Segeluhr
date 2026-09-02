@@ -163,6 +163,25 @@ Details/Volltext aller vier Bugfixes: `docs/Erweiterung_Tages_Auswertung.md`
 Abschnitt "Nachtrag 17.08.2026". **Noch offen**: Wettfahrt-Session-Grenzen
 (Countdown-Start→Ende) weiterhin nicht auf Hardware getestet.
 
+## 02.09.2026: Diagnose-Log deutlich erweitert (Vorbereitung automatische Bojenerkennung)
+
+Roman-Plan: beim nächsten Wassertest einen Segelkurs mit der jetzt
+tastenbedienbaren Galaxy-Watch-App absegeln, danach anhand des Logs ein
+Muster für automatische Bojenerkennung suchen (analog zum 16.08.-
+Windshift-Filter-Befund). Dafür `DiagnosticsLogger.kt` um 35 neue Spalten
+ergänzt (immer ans Ende angehängt, `DiagnosticsLogImporter.kt`s feste
+Spalten-Indizes bleiben dadurch unberührt) — u.a. Distanz+Peilung zu ALLEN
+acht Wegpunkt-Typen, eine reine Log-Ableitung der Amwind/Vorwind-"Seite"
+(`wind_side`, dieselbe Formel wie `MarkRoundingDetector`, aber ohne dessen
+private Engine-Instanzen anzufassen), Kursänderungsrate (`cog_rate_dps`),
+bisher fehlendes `race_state`/`countdown_seconds`, sowie mehrere schon
+berechnete, aber nie geloggte `SegeluhrUiState`-Felder (Linien-Bias, aktive
+Boje, Competition-VMC, Pending-Bojen-Rückfrage mit Quelle/Kandidat-
+Position/Alter). Details: `docs/Erweiterung_Diagnose_Log.md` Abschnitt
+"02.09.2026". **Nur geschrieben, nicht kompiliert/getestet** (kein
+Android-SDK/Plugin-Cache in dieser Umgebung) — Verifikation zusammen mit
+der Hardware-Tasten-Bedienung beim nächsten Wassertest.
+
 ## Bekannte offene Punkte
 
 - ~~**S3 (Land-Uhr) zeigt eine falsche/alte Zeit**~~ — 09.08. erneut
