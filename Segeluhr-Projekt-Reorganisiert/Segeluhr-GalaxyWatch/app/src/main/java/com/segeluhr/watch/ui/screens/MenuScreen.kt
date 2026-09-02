@@ -40,10 +40,23 @@ private val WAYPOINT_ENTRIES = listOf(
     WaypointEntry("Boje 2", BleProtocol.WaypointId.BUOY2) { it.buoy2Set },
     WaypointEntry("Ziel", BleProtocol.WaypointId.TARGET) { it.targetSet },
     WaypointEntry("Home", BleProtocol.WaypointId.HOME) { it.homeSet },
+    // "Marke 2" (COMPETITION_MARK2) 02.09.2026 entfernt — die Reach-Bake, die
+    // sie modellierte, gibt es in Romans echtem Kurs-Modell nicht mehr
+    // (siehe docs/Erweiterung_Competition_Kursmodell.md am Handy), ein
+    // weiterhin sichtbarer Button hätte ohne jede Wirkung nur verwirrt.
+    // Der BLE-Wegpunkt/-Flag existiert serverseitig unverändert weiter
+    // (rückwärtskompatibel), nur hier auf der Uhr nicht mehr angeboten.
     WaypointEntry("Marke 1", BleProtocol.WaypointId.COMPETITION_MARK1) { it.mark1Set },
-    WaypointEntry("Marke 2", BleProtocol.WaypointId.COMPETITION_MARK2) { it.mark2Set },
     WaypointEntry("Pin", BleProtocol.WaypointId.PIN) { it.pinSet },
     WaypointEntry("Boot-Ende", BleProtocol.WaypointId.BOAT) { it.boatSet },
+    // NEU (02.09.2026, Romans echtes Kurs-Modell) — welche davon gebraucht
+    // werden, hängt von der am Handy gewählten Lee-Variante ab, hier
+    // trotzdem immer alle vier sichtbar (Uhr kennt die Lee-Variante selbst
+    // nicht, gleiches Prinzip wie schon bei Marke1).
+    WaypointEntry("Lee-Boje", BleProtocol.WaypointId.LEE_BUOY) { it.leeBuoySet },
+    WaypointEntry("Gate A", BleProtocol.WaypointId.GATE_A) { it.gateASet },
+    WaypointEntry("Gate B", BleProtocol.WaypointId.GATE_B) { it.gateBSet },
+    WaypointEntry("Zielboje", BleProtocol.WaypointId.FINISH_BUOY) { it.finishBuoySet },
 )
 
 /**

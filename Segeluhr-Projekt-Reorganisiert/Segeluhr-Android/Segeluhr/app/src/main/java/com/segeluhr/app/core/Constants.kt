@@ -89,4 +89,10 @@ object Constants {
     const val COMPETITION_MANEUVER_START_GRACE_MS = 10_000L
     /** Nach einem ausgelösten Vorschlag mindestens so lange bis zum nächsten, selbst wenn maneuverNeeded zwischendurch wieder auf false springt. */
     const val COMPETITION_MANEUVER_SUGGEST_COOLDOWN_MS = 15_000L
+
+    // Reales Kurs-Modell (02.09.2026, Roman-Korrektur am Kurs-Modell, siehe
+    // docs/Erweiterung_Competition_Kursmodell.md): Luvboje -> Lee-Boje/Gate
+    // -> Ziel, IMMER zwei Runden (Roman: "es gibt immer 2 Runden").
+    /** Anzahl Runden (Luvboje+Lee-Bein), bevor CompetitionEngine auf CompetitionLeg.FINISH wechselt. */
+    const val COMPETITION_LAP_COUNT = 2
 }

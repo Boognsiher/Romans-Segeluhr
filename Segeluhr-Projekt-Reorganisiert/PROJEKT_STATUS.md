@@ -182,6 +182,47 @@ Position/Alter). Details: `docs/Erweiterung_Diagnose_Log.md` Abschnitt
 Android-SDK/Plugin-Cache in dieser Umgebung) — Verifikation zusammen mit
 der Hardware-Tasten-Bedienung beim nächsten Wassertest.
 
+## 02.09.2026 (spät): Competition-Kursmodell an Romans echten Verein-Kurs angepasst
+
+Roman-Korrektur an der Regattabahn-Skizze (siehe oben): der echte Kurs ist
+Luvboje (immer gegen den Uhrzeigersinn gerundet, Halbwind-Schlag nur Teil
+der Rundung) → Lee-Boje/Gate → immer 2 Runden → Ziel — komplett anders als
+das bisherige `CompetitionEngine`-Modell (Luvbake→Entlastungsboje→immer
+geschätzter Vorwind). Grössere Änderung, **auf Roman-Entscheidung** trotz
+fehlender Compile-/Hardware-Verifikation vor dem nächsten Wassertest
+umgesetzt (drei Vorab-Entscheidungen: Android+Galaxy-Watch reicht,
+T-Watch-Ultra bleibt vorerst unangetastet; Gate-Boje automatisch die
+nähere; kein automatisches Ziel-Erkennen, weiterhin manueller "Wettfahrt
+beenden"-Button).
+
+- **Neues Kurs-Modell in `CompetitionEngine.kt`**: `CompetitionLeg` neu
+  `{UPWIND, DOWNWIND, FINISH}` (Ordinal-Bedeutung geändert!), neues
+  `LeewardMode`-Enum (`LEE_IS_PIN`/`SEPARATE_BUOY`/`GATE`) + neue
+  `CompetitionCourseConfig`-Datenklasse, `Constants.COMPETITION_LAP_COUNT = 2`.
+  Vier neue Wegpunkte (Lee-Boje, Gate A/B, Zielboje) — BLE `WaypointId`
+  10-13, `CHAR_WAYPOINTS_STATUS_UUID` jetzt 2 statt 1 Byte
+  (`WaypointSetFlag2`). Setup-Tab: neue Sektion "Lee-Variante"
+  (Segmented-Button + kontextabhängige Wegpunkt-Zeilen).
+- **Galaxy-Watch-App**: `BleProtocol.kt` (WaypointId/Flags/2-Byte-Decode)
+  + `MenuScreen.kt` (vier neue Wegpunkt-Zeilen) mitgezogen.
+- **T-Watch-Ultra-Firmware bewusst NICHT angefasst** (nicht im Einsatz bei
+  diesem Test) — zeigt danach falsche `legNames[]`-Texte und liest die
+  neuen Wegpunkte/das 2. Status-Byte nicht, siehe "Plattform-Umfang" in der
+  neuen Doku für die offene Nacharbeit vor ihrem nächsten Einsatz.
+- **Diagnose-Log** um die vier neuen Wegpunkte (Distanz+Peilung) sowie
+  `leeward_mode` erweitert, gleiches Anhäng-Prinzip wie oben.
+- **Bekannte Vereinfachung**: FINISH-Ziel-Punkt ist der einfache
+  arithmetische Mittelpunkt der Ziellinie, keine echte geodätische
+  Berechnung — für die kurzen Start-/Ziellinien-Distanzen ausreichend.
+
+Details: `docs/Erweiterung_Competition_Kursmodell.md` (neu),
+`docs/Erweiterung_Competition_Modus.md` (SUPERSEDED-Hinweis ergänzt).
+**Nur geschrieben, nicht kompiliert/getestet** — kein Android-SDK/Plugin-
+Cache in dieser Umgebung. Vor dem Wassertest unbedingt in Android Studio
+bauen (Kotlin-Compile-Fehler bei einer Änderung dieser Grösse nicht
+auszuschliessen) und die Lee-Variante passend zum tatsächlichen
+Vereins-Kurs einstellen.
+
 ## Bekannte offene Punkte
 
 - ~~**S3 (Land-Uhr) zeigt eine falsche/alte Zeit**~~ — 09.08. erneut

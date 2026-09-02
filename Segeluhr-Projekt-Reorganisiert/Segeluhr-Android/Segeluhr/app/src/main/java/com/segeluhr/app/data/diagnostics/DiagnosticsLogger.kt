@@ -104,6 +104,12 @@ class DiagnosticsLogger(private val context: Context) {
         "dist_buoy1_m", "brg_buoy1_deg", "dist_buoy2_m", "brg_buoy2_deg",
         "dist_home_m", "brg_home_deg",
         "dist_mark1_m", "brg_mark1_deg", "dist_mark2_m", "brg_mark2_deg",
+        // ---- 02.09.2026 (spät) ergänzt, Kurs-Modell-Überarbeitung — siehe
+        // docs/Erweiterung_Competition_Kursmodell.md, wieder IMMER ans Ende ----
+        "leeward_mode",
+        "dist_lee_buoy_m", "brg_lee_buoy_deg",
+        "dist_gate_a_m", "brg_gate_a_deg", "dist_gate_b_m", "brg_gate_b_deg",
+        "dist_finish_buoy_m", "brg_finish_buoy_deg",
     ).joinToString(",")
 
     /**
@@ -141,6 +147,10 @@ class DiagnosticsLogger(private val context: Context) {
         val (distHome, brgHome) = distBrg(fix.lat, fix.lon, state.home)
         val (distMark1, brgMark1) = distBrg(fix.lat, fix.lon, state.competitionMark1)
         val (distMark2, brgMark2) = distBrg(fix.lat, fix.lon, state.competitionMark2)
+        val (distLeeBuoy, brgLeeBuoy) = distBrg(fix.lat, fix.lon, state.leeBuoy)
+        val (distGateA, brgGateA) = distBrg(fix.lat, fix.lon, state.gateA)
+        val (distGateB, brgGateB) = distBrg(fix.lat, fix.lon, state.gateB)
+        val (distFinishBuoy, brgFinishBuoy) = distBrg(fix.lat, fix.lon, state.finishBuoy)
 
         val row = listOf(
             isoTime.format(Date(now)), now,
@@ -174,6 +184,10 @@ class DiagnosticsLogger(private val context: Context) {
             distBuoy1, brgBuoy1, distBuoy2, brgBuoy2,
             distHome, brgHome,
             distMark1, brgMark1, distMark2, brgMark2,
+            state.leewardMode,
+            distLeeBuoy, brgLeeBuoy,
+            distGateA, brgGateA, distGateB, brgGateB,
+            distFinishBuoy, brgFinishBuoy,
         ).joinToString(",") { it?.toString() ?: "" }
 
         w.write(row + "\n")

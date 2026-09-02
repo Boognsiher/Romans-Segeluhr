@@ -1,5 +1,13 @@
 # Erweiterung: Competition-Modus (echtes Rennen)
 
+> **02.09.2026: Kurs-Modell unten (Abschnitt "Kurs-Modell mit
+> Entlastungsboje") ist SUPERSEDED** — beruhte auf einer Annahme, nicht auf
+> Romans echtem Verein-Kurs. Der Rest dieser Datei (Race-vs-Competition-
+> Abgrenzung, automatischer Start, laufende Navigationshilfe statt
+> Zufallskommandos) gilt weiterhin unverändert. Das aktuelle Kurs-Modell
+> (Luvboje gegen den Uhrzeigersinn, drei Lee-Varianten, immer 2 Runden,
+> Ziel) steht in `Erweiterung_Competition_Kursmodell.md`.
+
 Nicht Teil der ursprünglichen `Segeluhr_Spezifikation.md` — spätere
 Erweiterung. Es gibt jetzt zwei klar getrennte "Race"-artige Konzepte, die
 absichtlich unterschiedlich heissen, um Verwechslungen zu vermeiden:

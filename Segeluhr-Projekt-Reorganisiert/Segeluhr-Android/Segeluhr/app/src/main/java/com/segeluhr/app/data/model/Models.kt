@@ -100,20 +100,64 @@ data class HomeGuidance(
 )
 
 /**
- * Etappe im Competition-Modus (Erweiterung, siehe
- * docs/Erweiterung_Competition_Modus.md): Luvbake -> ggf. kurzer Halbwind-
- * Schlag zur Entlastungsboje -> Vorwind -> nächste Runde.
+ * Etappe im Competition-Modus. **02.09.2026 überarbeitet** (Roman-Korrektur
+ * am Kurs-Modell, siehe docs/Erweiterung_Competition_Kursmodell.md): Luvboje
+ * -> Lee-Boje/Gate -> nächste Runde (immer [Constants.COMPETITION_LAP_COUNT]
+ * Runden) -> Ziel. Der Halbwind-Schlag nach der Luvboje ist nur Teil der
+ * Rundungsbewegung (immer gegen den Uhrzeigersinn), KEINE eigene Etappe mehr
+ * — ersetzt das alte, am ursprünglichen (falschen) Kurs-Modell orientierte
+ * `REACH_TO_OFFSET`. **Ordinal ändert sich** (0=UPWIND, 1=DOWNWIND,
+ * 2=FINISH) — betrifft `BleProtocol.encodeRaceStatus()`/T-Watch-Ultra-
+ * Firmware, siehe dortige Doku.
  */
-enum class CompetitionLeg { UPWIND, REACH_TO_OFFSET, DOWNWIND }
+enum class CompetitionLeg { UPWIND, DOWNWIND, FINISH }
+
+/**
+ * Welche der drei Lee-Bereich-Varianten Romans Verein vor dem Start
+ * festlegt (Erweiterung 02.09.2026, siehe
+ * docs/Erweiterung_Competition_Kursmodell.md) — bestimmt sowohl die
+ * Rundung am Ende jeder Runde als auch die Ziel-Geometrie nach der letzten
+ * Runde:
+ * - [LEE_IS_PIN]: die Lee-Boje ist dieselbe Boje wie der Startlinien-Pin ->
+ *   Ziel danach halbwind hinter dem Startboot, mit einer separaten
+ *   Zielboje in Lee.
+ * - [SEPARATE_BUOY]: eigenständige Lee-Boje -> Ziel danach amwind durch die
+ *   Startlinie (Pin<->Boot).
+ * - [GATE]: zwei Gate-Bojen, die näher liegende wird pro Runde automatisch
+ *   gewählt und von innen nach aussen gerundet -> Ziel danach amwind durch
+ *   die Startlinie, wie [SEPARATE_BUOY].
+ */
+enum class LeewardMode { LEE_IS_PIN, SEPARATE_BUOY, GATE }
+
+/**
+ * Bündelt alle Kurs-Konfigurationspunkte für den Lee-/Ziel-Bereich
+ * (Erweiterung 02.09.2026) — vor dem Start festgelegt, ändert sich während
+ * der Wettfahrt nicht. Eigene Datenklasse statt einzelner Parameter, weil
+ * `CompetitionEngine.tick()`/`windShiftReferencePoint()` sie beide brauchen
+ * und die Parameterliste sonst zu lang würde. [pin]/[boat] sind dieselben
+ * Startlinien-Wegpunkte wie anderswo — hier zusätzlich gebraucht, weil sie
+ * je nach [leewardMode] auch Lee-Marke ([LeewardMode.LEE_IS_PIN]) bzw.
+ * einer der beiden Ziellinien-Enden sind.
+ */
+data class CompetitionCourseConfig(
+    val leewardMode: LeewardMode,
+    val pin: GeoPoint?,
+    val boat: GeoPoint?,
+    val leeBuoy: GeoPoint?,
+    val gateA: GeoPoint?,
+    val gateB: GeoPoint?,
+    val finishBuoy: GeoPoint?,
+)
 
 /**
  * Anzeige-Info fürs aktuelle Etappen-Ziel im Competition-Modus — echte
  * Bojen (mit Distanz) oder Windschätzung (ohne Distanz, da kein GPS-Punkt).
  * [vmcKn] wie bei [HomeGuidance]: über ein Zeitfenster gemessene tatsächliche
  * Annäherung an das aktuelle Etappenziel (siehe
- * [com.segeluhr.app.core.HomeProgressTracker]), null auf DOWNWIND (kein
- * Leetonnen-Wegpunkt vorgesehen, siehe CompetitionEngine-Klassendoku) oder
- * solange noch nicht genug Zeitfenster-Historie vorliegt.
+ * [com.segeluhr.app.core.HomeProgressTracker]), null ohne auflösbares Ziel
+ * (z.B. DOWNWIND ohne gesetzte Lee-Boje/Gate, siehe
+ * [CompetitionCourseConfig]) oder solange noch nicht genug
+ * Zeitfenster-Historie vorliegt.
  */
 data class CompetitionGuidance(
     val leg: CompetitionLeg,

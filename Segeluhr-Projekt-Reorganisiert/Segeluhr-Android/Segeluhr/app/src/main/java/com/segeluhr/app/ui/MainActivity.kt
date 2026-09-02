@@ -79,8 +79,16 @@ private fun sharePdf(
 private fun waypointLabelFor(key: String): String = when (key) {
     "buoy1" -> "Boje 1"
     "buoy2" -> "Boje 2"
-    "competitionMark1" -> "Luvbake (Hauptbake)"
+    "competitionMark1" -> "Luvboje"
+    // "competitionMark2" 02.09.2026 aus dem Setup-Tab entfernt (siehe
+    // docs/Erweiterung_Competition_Kursmodell.md), Label-Fall bewusst
+    // stehen gelassen — der Wegpunkt/Key existiert intern weiter.
     "competitionMark2" -> "Entlastungsboje (Halbwind)"
+    // NEU (02.09.2026, siehe docs/Erweiterung_Competition_Kursmodell.md)
+    "leeBuoy" -> "Lee-Boje"
+    "gateA" -> "Gate A"
+    "gateB" -> "Gate B"
+    "finishBuoy" -> "Zielboje (Lee, hinter Boot)"
     else -> "Wegpunkt"
 }
 
@@ -364,6 +372,7 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onStopApp = viewModel::stopApp,
                     onStartApp = viewModel::startApp,
                     onSetWaypointFromMap = viewModel::startWaypointMapPick,
+                    onLeewardModeChanged = viewModel::setLeewardMode,
                 )
             }
         }

@@ -83,6 +83,12 @@ data class SegeluhrUiState(
     val home: GeoPoint? = null,
     val competitionMark1: GeoPoint? = null,
     val competitionMark2: GeoPoint? = null,
+    // Lee-/Ziel-Bereich (02.09.2026, siehe docs/Erweiterung_Competition_Kursmodell.md)
+    val leeBuoy: GeoPoint? = null,
+    val gateA: GeoPoint? = null,
+    val gateB: GeoPoint? = null,
+    val finishBuoy: GeoPoint? = null,
+    val leewardMode: LeewardMode = LeewardMode.SEPARATE_BUOY,
 
     // Heimweg-Navigation (Erweiterung, siehe docs/Erweiterung_Heimweg.md)
     val homeModeActive: Boolean = false,

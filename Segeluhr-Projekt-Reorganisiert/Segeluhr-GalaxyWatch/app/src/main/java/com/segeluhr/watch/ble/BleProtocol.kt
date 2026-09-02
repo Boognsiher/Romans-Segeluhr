@@ -71,9 +71,15 @@ object BleProtocol {
         const val HOME: Int = 7
         const val COMPETITION_MARK1: Int = 8
         const val COMPETITION_MARK2: Int = 9
+        // NEU (02.09.2026, Romans echtes Kurs-Modell, siehe
+        // docs/Erweiterung_Competition_Kursmodell.md am Handy).
+        const val LEE_BUOY: Int = 10
+        const val GATE_A: Int = 11
+        const val GATE_B: Int = 12
+        const val FINISH_BUOY: Int = 13
     }
 
-    /** Bit-Zuordnung für CHAR_WAYPOINTS_STATUS_UUID, siehe BleProtocol.kt am Handy. */
+    /** Bit-Zuordnung für CHAR_WAYPOINTS_STATUS_UUID Byte 1, siehe BleProtocol.kt am Handy. */
     object WaypointSetFlag {
         const val BUOY1: Int = 1 shl 0
         const val BUOY2: Int = 1 shl 1
@@ -83,6 +89,14 @@ object BleProtocol {
         const val COMPETITION_MARK2: Int = 1 shl 5
         const val PIN: Int = 1 shl 6
         const val BOAT: Int = 1 shl 7
+    }
+
+    /** Byte 2 (02.09.2026 ergänzt, siehe BleProtocol.kt am Handy — WaypointSetFlag2). */
+    object WaypointSetFlag2 {
+        const val LEE_BUOY: Int = 1 shl 0
+        const val GATE_A: Int = 1 shl 1
+        const val GATE_B: Int = 1 shl 2
+        const val FINISH_BUOY: Int = 1 shl 3
     }
 
     // Haptik-Muster-Codes, 1:1 zu BleProtocol.kt/VibrationPatterns.kt am Handy.
@@ -203,10 +217,18 @@ object BleProtocol {
     data class WaypointsStatus(
         val buoy1Set: Boolean, val buoy2Set: Boolean, val targetSet: Boolean, val homeSet: Boolean,
         val mark1Set: Boolean, val mark2Set: Boolean, val pinSet: Boolean, val boatSet: Boolean,
+        val leeBuoySet: Boolean = false, val gateASet: Boolean = false, val gateBSet: Boolean = false, val finishBuoySet: Boolean = false,
     )
 
+    /**
+     * 02.09.2026: Byte 2 ergänzt (siehe [WaypointSetFlag2]/BleProtocol.kt am
+     * Handy) — `data.getOrNull(1)` statt hartem Index-Zugriff, damit ein
+     * (theoretisch) noch 1-Byte-altes Paket nicht abstürzt, sondern die
+     * neuen Felder einfach false liefert.
+     */
     fun decodeWaypointsStatus(data: ByteArray): WaypointsStatus? {
         val flags = data.getOrNull(0)?.toInt()?.and(0xFF) ?: return null
+        val flags2 = data.getOrNull(1)?.toInt()?.and(0xFF) ?: 0
         return WaypointsStatus(
             buoy1Set = (flags and WaypointSetFlag.BUOY1) != 0,
             buoy2Set = (flags and WaypointSetFlag.BUOY2) != 0,
@@ -216,6 +238,10 @@ object BleProtocol {
             mark2Set = (flags and WaypointSetFlag.COMPETITION_MARK2) != 0,
             pinSet = (flags and WaypointSetFlag.PIN) != 0,
             boatSet = (flags and WaypointSetFlag.BOAT) != 0,
+            leeBuoySet = (flags2 and WaypointSetFlag2.LEE_BUOY) != 0,
+            gateASet = (flags2 and WaypointSetFlag2.GATE_A) != 0,
+            gateBSet = (flags2 and WaypointSetFlag2.GATE_B) != 0,
+            finishBuoySet = (flags2 and WaypointSetFlag2.FINISH_BUOY) != 0,
         )
     }
 

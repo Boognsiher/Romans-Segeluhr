@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.segeluhr.app.core.GeoPoint
 import com.segeluhr.app.data.model.AppRole
+import com.segeluhr.app.data.model.LeewardMode
 import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.ui.components.SectionCard
 import com.segeluhr.app.ui.components.WaypointRow
@@ -49,6 +50,8 @@ fun SetupScreen(
     onStartApp: () -> Unit,
     // NEU (12.08.2026, siehe docs/Erweiterung_Boje_Kartenauswahl.md)
     onSetWaypointFromMap: (String) -> Unit,
+    // NEU (02.09.2026, siehe docs/Erweiterung_Competition_Kursmodell.md)
+    onLeewardModeChanged: (LeewardMode) -> Unit,
 ) {
     Column(
         Modifier
@@ -85,10 +88,59 @@ fun SetupScreen(
         }
 
         SectionCard("Wettfahrt-Bojen (Luv, optional)") {
-            WaypointRow("Luvbake (Hauptbake)", fmt(state.competitionMark1), { onSetWaypoint("competitionMark1") }, { onClearWaypoint("competitionMark1") }, { onSetWaypointFromMap("competitionMark1") })
-            WaypointRow("Entlastungsboje (Halbwind)", fmt(state.competitionMark2), { onSetWaypoint("competitionMark2") }, { onClearWaypoint("competitionMark2") }, { onSetWaypointFromMap("competitionMark2") })
+            WaypointRow("Luvboje", fmt(state.competitionMark1), { onSetWaypoint("competitionMark1") }, { onClearWaypoint("competitionMark1") }, { onSetWaypointFromMap("competitionMark1") })
             Text(
-                "Für den Competition-Modus (startet automatisch beim Startsignal). Ohne gesetzte Luvbake wird sie genau gegen den Wind geschätzt. Die Entlastungsboje ist optional — falls gesetzt, wird nach der Luvbake ein kurzer Halbwind-Schlag dorthin eingeplant.",
+                "Für den Competition-Modus (startet automatisch beim Startsignal). Ohne gesetzte Luvboje wird sie genau gegen den Wind geschätzt — immer gegen den Uhrzeigersinn gerundet.",
+                fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        SectionCard("Lee-Variante (vor dem Start festlegen)") {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                val modes = listOf(
+                    LeewardMode.LEE_IS_PIN to "= Pin",
+                    LeewardMode.SEPARATE_BUOY to "eigene Boje",
+                    LeewardMode.GATE to "Gate",
+                )
+                modes.forEach { (mode, label) ->
+                    val active = state.leewardMode == mode
+                    Button(
+                        onClick = { onLeewardModeChanged(mode) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (active) Teal else Panel2Dark,
+                            contentColor = if (active) Color(0xFF04201C) else TextDim,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) { Text(label, fontSize = 12.sp) }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            when (state.leewardMode) {
+                LeewardMode.LEE_IS_PIN -> {
+                    WaypointRow("Zielboje (Lee, hinter Boot)", fmt(state.finishBuoy), { onSetWaypoint("finishBuoy") }, { onClearWaypoint("finishBuoy") }, { onSetWaypointFromMap("finishBuoy") })
+                    Text(
+                        "Lee-Boje = Pin-Ende der Startlinie (kein eigener Wegpunkt nötig). Ziel danach halbwind hinter dem Startboot, zwischen Boot und Zielboje.",
+                        fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                LeewardMode.SEPARATE_BUOY -> {
+                    WaypointRow("Lee-Boje", fmt(state.leeBuoy), { onSetWaypoint("leeBuoy") }, { onClearWaypoint("leeBuoy") }, { onSetWaypointFromMap("leeBuoy") })
+                    Text(
+                        "Eigenständige Lee-Boje. Ziel danach amwind durch die Startlinie (Pin↔Boot).",
+                        fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                LeewardMode.GATE -> {
+                    WaypointRow("Gate A", fmt(state.gateA), { onSetWaypoint("gateA") }, { onClearWaypoint("gateA") }, { onSetWaypointFromMap("gateA") })
+                    WaypointRow("Gate B", fmt(state.gateB), { onSetWaypoint("gateB") }, { onClearWaypoint("gateB") }, { onSetWaypointFromMap("gateB") })
+                    Text(
+                        "Die näher liegende der beiden Gate-Bojen wird pro Runde automatisch gewählt und von innen nach aussen gerundet. Ziel danach amwind durch die Startlinie (Pin↔Boot).",
+                        fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+            Text(
+                "Ohne gesetzte Lee-Boje/Gate wird das Vorwind-Bein wie bisher rein per Amwind/Vorwind-Kurswechsel geschätzt. Immer 2 Runden, danach Ziel.",
                 fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
             )
         }

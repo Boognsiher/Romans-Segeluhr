@@ -8,6 +8,7 @@ import com.segeluhr.app.core.GeoPoint
 import com.segeluhr.app.core.LakeCircle
 import com.segeluhr.app.data.model.AppRole
 import com.segeluhr.app.data.model.BoatProfile
+import com.segeluhr.app.data.model.LeewardMode
 import com.segeluhr.app.data.model.OperationMode
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +44,12 @@ class SettingsRepository(private val context: Context) {
         val HOME_LAT = doublePreferencesKey("home_lat"); val HOME_LON = doublePreferencesKey("home_lon")
         val COMPETITION_MARK1_LAT = doublePreferencesKey("competition_mark1_lat"); val COMPETITION_MARK1_LON = doublePreferencesKey("competition_mark1_lon")
         val COMPETITION_MARK2_LAT = doublePreferencesKey("competition_mark2_lat"); val COMPETITION_MARK2_LON = doublePreferencesKey("competition_mark2_lon")
+        // Lee-/Ziel-Bereich (02.09.2026, siehe docs/Erweiterung_Competition_Kursmodell.md)
+        val LEE_BUOY_LAT = doublePreferencesKey("lee_buoy_lat"); val LEE_BUOY_LON = doublePreferencesKey("lee_buoy_lon")
+        val GATE_A_LAT = doublePreferencesKey("gate_a_lat"); val GATE_A_LON = doublePreferencesKey("gate_a_lon")
+        val GATE_B_LAT = doublePreferencesKey("gate_b_lat"); val GATE_B_LON = doublePreferencesKey("gate_b_lon")
+        val FINISH_BUOY_LAT = doublePreferencesKey("finish_buoy_lat"); val FINISH_BUOY_LON = doublePreferencesKey("finish_buoy_lon")
+        val LEEWARD_MODE = stringPreferencesKey("leeward_mode")
 
         val WIND_DIR = doublePreferencesKey("wind_dir")
         val WIND_CALIBRATED = booleanPreferencesKey("wind_calibrated")
@@ -69,6 +76,11 @@ class SettingsRepository(private val context: Context) {
         val home: GeoPoint? = null,
         val competitionMark1: GeoPoint? = null,
         val competitionMark2: GeoPoint? = null,
+        // Lee-/Ziel-Bereich (02.09.2026, siehe docs/Erweiterung_Competition_Kursmodell.md)
+        val leeBuoy: GeoPoint? = null,
+        val gateA: GeoPoint? = null,
+        val gateB: GeoPoint? = null,
+        val finishBuoy: GeoPoint? = null,
     )
 
     data class WindCalib(val windDir: Double?, val calibrated: Boolean)
@@ -183,7 +195,24 @@ class SettingsRepository(private val context: Context) {
             home = pt(Keys.HOME_LAT, Keys.HOME_LON),
             competitionMark1 = pt(Keys.COMPETITION_MARK1_LAT, Keys.COMPETITION_MARK1_LON),
             competitionMark2 = pt(Keys.COMPETITION_MARK2_LAT, Keys.COMPETITION_MARK2_LON),
+            leeBuoy = pt(Keys.LEE_BUOY_LAT, Keys.LEE_BUOY_LON),
+            gateA = pt(Keys.GATE_A_LAT, Keys.GATE_A_LON),
+            gateB = pt(Keys.GATE_B_LAT, Keys.GATE_B_LON),
+            finishBuoy = pt(Keys.FINISH_BUOY_LAT, Keys.FINISH_BUOY_LON),
         )
+    }
+
+    /** Default [LeewardMode.SEPARATE_BUOY] — generischste Annahme, bis vor dem Start bewusst gewählt wird (Setup-Tab). */
+    val leewardModeFlow: Flow<LeewardMode> = context.dataStore.data.map { p ->
+        when (p[Keys.LEEWARD_MODE]) {
+            LeewardMode.LEE_IS_PIN.name -> LeewardMode.LEE_IS_PIN
+            LeewardMode.GATE.name -> LeewardMode.GATE
+            else -> LeewardMode.SEPARATE_BUOY
+        }
+    }
+
+    suspend fun setLeewardMode(mode: LeewardMode) {
+        context.dataStore.edit { it[Keys.LEEWARD_MODE] = mode.name }
     }
 
     val windCalibFlow: Flow<WindCalib> = context.dataStore.data.map { p ->
@@ -220,6 +249,10 @@ class SettingsRepository(private val context: Context) {
                 "home" -> { p[Keys.HOME_LAT] = point.lat; p[Keys.HOME_LON] = point.lon }
                 "competitionMark1" -> { p[Keys.COMPETITION_MARK1_LAT] = point.lat; p[Keys.COMPETITION_MARK1_LON] = point.lon }
                 "competitionMark2" -> { p[Keys.COMPETITION_MARK2_LAT] = point.lat; p[Keys.COMPETITION_MARK2_LON] = point.lon }
+                "leeBuoy" -> { p[Keys.LEE_BUOY_LAT] = point.lat; p[Keys.LEE_BUOY_LON] = point.lon }
+                "gateA" -> { p[Keys.GATE_A_LAT] = point.lat; p[Keys.GATE_A_LON] = point.lon }
+                "gateB" -> { p[Keys.GATE_B_LAT] = point.lat; p[Keys.GATE_B_LON] = point.lon }
+                "finishBuoy" -> { p[Keys.FINISH_BUOY_LAT] = point.lat; p[Keys.FINISH_BUOY_LON] = point.lon }
             }
         }
     }
@@ -279,6 +312,10 @@ class SettingsRepository(private val context: Context) {
                 "home" -> { p.remove(Keys.HOME_LAT); p.remove(Keys.HOME_LON) }
                 "competitionMark1" -> { p.remove(Keys.COMPETITION_MARK1_LAT); p.remove(Keys.COMPETITION_MARK1_LON) }
                 "competitionMark2" -> { p.remove(Keys.COMPETITION_MARK2_LAT); p.remove(Keys.COMPETITION_MARK2_LON) }
+                "leeBuoy" -> { p.remove(Keys.LEE_BUOY_LAT); p.remove(Keys.LEE_BUOY_LON) }
+                "gateA" -> { p.remove(Keys.GATE_A_LAT); p.remove(Keys.GATE_A_LON) }
+                "gateB" -> { p.remove(Keys.GATE_B_LAT); p.remove(Keys.GATE_B_LON) }
+                "finishBuoy" -> { p.remove(Keys.FINISH_BUOY_LAT); p.remove(Keys.FINISH_BUOY_LON) }
             }
         }
     }

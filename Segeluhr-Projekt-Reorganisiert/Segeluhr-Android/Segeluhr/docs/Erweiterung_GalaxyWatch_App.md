@@ -182,6 +182,23 @@ dieses ganzen Projekts. Ergebnisse:
   `Constants.COUNTDOWN_DURATION_MS` bewusst fest auf 5 Minuten verdrahtet
   (Standard-Regatta-Startprotokoll), kein fehlendes Feature.
 
+## 02.09.2026 (spät): vier neue Wegpunkte fürs Competition-Kursmodell
+
+Roman-Korrektur am Kurs-Modell (siehe `Erweiterung_Competition_Kursmodell.md`
+am Handy) — `MenuScreen.kt` bekam vier neue Wegpunkt-Zeilen (Lee-Boje,
+Gate A, Gate B, Zielboje), gleiches "Hier setzen"/"Löschen"-Muster wie die
+bestehenden. `BleProtocol.kt` entsprechend erweitert: `WaypointId` 10-13,
+neues `WaypointSetFlag2` für den 2. Byte der jetzt 2-Byte-
+`WaypointsStatus` (`decodeWaypointsStatus()` liest Byte 2 defensiv per
+`getOrNull(1)`, fällt auf `false` zurück statt abzustürzen). Welche der
+vier Zeilen tatsächlich gebraucht werden, hängt von der am Handy gewählten
+Lee-Variante ab — auf der Uhr trotzdem immer alle vier sichtbar (gleiches
+Prinzip wie schon bei Marke1/Marke2, die Uhr kennt die Lee-Variante selbst
+nicht). Kein Kartenpicker (wie bei den übrigen Wegpunkten hier schon
+14.08. gestrichen), nur "an der aktuellen Boots-Position".
+
+**Nur geschrieben, nicht kompiliert/getestet** — kein Android-SDK hier.
+
 ## Offene Punkte
 
 - **Kein Wear-Compose-Vorschau/Emulator-Test** — nur auf der echten Watch

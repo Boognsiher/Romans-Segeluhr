@@ -17,6 +17,8 @@ import com.segeluhr.app.data.db.toRecord
 import com.segeluhr.app.data.db.toReport
 import com.segeluhr.app.data.model.AppRole
 import com.segeluhr.app.data.model.BuoyConfirmSource
+import com.segeluhr.app.data.model.CompetitionCourseConfig
+import com.segeluhr.app.data.model.LeewardMode
 import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.data.model.PendingBuoyConfirmation
 import com.segeluhr.app.data.model.RaceState
@@ -55,6 +57,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     // zu S.fix / mainTick() im Browser-Prototyp).
     private var currentFix: Fix = Fix()
     private var currentWaypoints = SettingsRepository.Waypoints(null, null, null, null, null)
+    // Lee-Varianten-Einstellung (02.09.2026, siehe docs/Erweiterung_Competition_Kursmodell.md)
+    // — analog zu currentWaypoints: laufend aus dem DataStore-Flow aktualisiert,
+    // von der Tickschleife nur einmal pro Sekunde gelesen.
+    private var currentLeewardMode: LeewardMode = LeewardMode.SEPARATE_BUOY
     // Boots-Kalibrierung: nur bei tatsächlichem Profilwechsel windEngine
     // neu befüllen, nicht bei jeder Aenderung innerhalb desselben aktiven
     // Profils (siehe init{}-Collector unten).
@@ -137,8 +143,15 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                         home = wp.home,
                         competitionMark1 = wp.competitionMark1,
                         competitionMark2 = wp.competitionMark2,
+                        leeBuoy = wp.leeBuoy, gateA = wp.gateA, gateB = wp.gateB, finishBuoy = wp.finishBuoy,
                     )
                 }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepo.leewardModeFlow.collect { mode ->
+                currentLeewardMode = mode
+                _uiState.update { it.copy(leewardMode = mode) }
             }
         }
         viewModelScope.launch {
@@ -246,6 +259,14 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private fun currentlyValid(): Boolean =
         currentFix.valid && (System.currentTimeMillis() - currentFix.timestampMs < 5000)
 
+    /** Bündelt Lee-/Ziel-Wegpunkte + Lee-Variante für CompetitionEngine, siehe CompetitionCourseConfig-Doku. */
+    private fun currentCourseConfig() = CompetitionCourseConfig(
+        leewardMode = currentLeewardMode,
+        pin = currentWaypoints.pin, boat = currentWaypoints.boat,
+        leeBuoy = currentWaypoints.leeBuoy, gateA = currentWaypoints.gateA, gateB = currentWaypoints.gateB,
+        finishBuoy = currentWaypoints.finishBuoy,
+    )
+
     private suspend fun tick() {
         val fix = currentFix
         val valid = currentlyValid()
@@ -257,7 +278,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         // Wegpunkt aus dem Setup-Tab.
         val windShiftReference = when {
             competitionActive -> competitionEngine.windShiftReferencePoint(
-                fix, windEngine.windDir, currentWaypoints.competitionMark1, currentWaypoints.competitionMark2,
+                fix, windEngine.windDir, currentWaypoints.competitionMark1, currentCourseConfig(),
             ) ?: currentWaypoints.target
             trainingEngine.trainMode == TrainMode.RACE ->
                 trainingEngine.activeBuoy(currentWaypoints.buoy1, currentWaypoints.buoy2) ?: currentWaypoints.target
@@ -284,7 +305,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
 
         val competitionGuidance = if (competitionActive) {
             competitionEngine.tick(
-                fix, windEngine.windDir, currentWaypoints.competitionMark1, currentWaypoints.competitionMark2,
+                fix, windEngine.windDir, currentWaypoints.competitionMark1, currentCourseConfig(),
                 windEngine.closehauledAngleDeg, windEngine.downwindAngleDeg,
             )
         } else null
@@ -478,6 +499,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             mark2Set = currentWaypoints.competitionMark2 != null,
             pinSet = currentWaypoints.pin != null,
             boatSet = currentWaypoints.boat != null,
+            leeBuoySet = currentWaypoints.leeBuoy != null,
+            gateASet = currentWaypoints.gateA != null,
+            gateBSet = currentWaypoints.gateB != null,
+            finishBuoySet = currentWaypoints.finishBuoy != null,
         )
 
         bleManager.notifyRaceStatus(
@@ -791,7 +816,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(pendingBuoyConfirmation = null) }
         when (pending.source) {
             BuoyConfirmSource.TRAINING -> trainingEngine.confirmPendingRounding()
-            BuoyConfirmSource.COMPETITION -> competitionEngine.confirmPendingRounding(currentWaypoints.competitionMark2)
+            BuoyConfirmSource.COMPETITION -> competitionEngine.confirmPendingRounding()
         }
         viewModelScope.launch { settingsRepo.setWaypoint(pending.waypointKey, pending.candidatePosition) }
     }
@@ -969,7 +994,15 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         BleProtocol.WaypointId.HOME -> "home"
         BleProtocol.WaypointId.COMPETITION_MARK1 -> "competitionMark1"
         BleProtocol.WaypointId.COMPETITION_MARK2 -> "competitionMark2"
+        BleProtocol.WaypointId.LEE_BUOY -> "leeBuoy"
+        BleProtocol.WaypointId.GATE_A -> "gateA"
+        BleProtocol.WaypointId.GATE_B -> "gateB"
+        BleProtocol.WaypointId.FINISH_BUOY -> "finishBuoy"
         else -> null
+    }
+
+    fun setLeewardMode(mode: LeewardMode) {
+        viewModelScope.launch { settingsRepo.setLeewardMode(mode) }
     }
 
     fun setOperationMode(mode: OperationMode) {
