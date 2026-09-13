@@ -160,16 +160,15 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         }
         viewModelScope.launch {
             // Erster Wert = der beim App-Start aus DataStore wiederhergestellte Modus.
-            // War der Foreground-Service (GATT-Server) beim letzten Mal aktiv, muss er
-            // hier explizit neu gestartet werden — sonst zeigt die UI "Mit Uhr" an,
-            // ohne dass tatsächlich ein Dienst im Hintergrund läuft (genau der Bug,
-            // der zu "verbunden, aber es kommt nichts an" führt).
+            // Der Foreground-Service muss IMMER (neu) gestartet werden, unabhängig vom
+            // Modus — er hält nicht nur die GATT-Bridge zur Uhr am Laufen, sondern ist
+            // auch im "Ohne Uhr"-Modus nötig, damit GPS bei ausgeschaltetem Display/App
+            // im Hintergrund weiterläuft (siehe SegeluhrForegroundService-Kommentar;
+            // vorher lief er nur im WITH_WATCH-Modus, wodurch das Log ohne Uhr abriss).
             val initialMode = settingsRepo.operationModeFlow.first()
             haptics.preferWatch = (initialMode == OperationMode.WITH_WATCH)
             _uiState.update { it.copy(operationMode = initialMode) }
-            if (initialMode == OperationMode.WITH_WATCH) {
-                SegeluhrForegroundService.start(getApplication())
-            }
+            SegeluhrForegroundService.start(getApplication())
         }
         viewModelScope.launch {
             // Ab dem zweiten emittierten Wert: nur noch UI-State/Haptik-Ziel
@@ -231,9 +230,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private fun resumeBackgroundWork() {
         if (_uiState.value.locationPermissionGranted) startGps()
         startTicker()
-        if (_uiState.value.operationMode == OperationMode.WITH_WATCH) {
-            SegeluhrForegroundService.start(getApplication())
-        }
+        // Immer starten (nicht nur im WITH_WATCH-Modus) — hält GPS auch "Ohne
+        // Uhr" bei ausgeschaltetem Display/App im Hintergrund am Laufen,
+        // siehe SegeluhrForegroundService-Kommentar.
+        SegeluhrForegroundService.start(getApplication())
     }
 
     /** Hält GPS/Tick-Loop/Foreground-Service an — KEINE Datenlöschung, nur Pause. */
@@ -975,12 +975,9 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     fun setOperationMode(mode: OperationMode) {
         viewModelScope.launch { settingsRepo.setOperationMode(mode) }
         haptics.preferWatch = (mode == OperationMode.WITH_WATCH)
-        val app = getApplication<Application>()
-        if (mode == OperationMode.WITH_WATCH) {
-            SegeluhrForegroundService.start(app)
-        } else {
-            SegeluhrForegroundService.stop(app)
-        }
+        // Der Foreground-Service selbst läuft unabhängig vom Modus weiter
+        // (siehe resumeBackgroundWork/SegeluhrForegroundService) — hier nur
+        // noch Haptik-Ziel + Persistenz umschalten, kein Start/Stop mehr.
     }
 
     /**

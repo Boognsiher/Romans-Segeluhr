@@ -163,6 +163,47 @@ Details/Volltext aller vier Bugfixes: `docs/Erweiterung_Tages_Auswertung.md`
 Abschnitt "Nachtrag 17.08.2026". **Noch offen**: Wettfahrt-Session-Grenzen
 (Countdown-Start→Ende) weiterhin nicht auf Hardware getestet.
 
+## 13.09.2026: Bugfix "Log trackt nicht mit, wenn nur das Handy ohne Uhr mit ist"
+
+Roman-Meldung: beim Segeln nur mit dem Handy (Betriebsmodus "Ohne Uhr",
+`OperationMode.STANDALONE`) bricht das GPS-Log ab, sobald das Handy z.B. in
+der wasserdichten Tasche steckt und das Display ausgeht.
+
+**Ursache gefunden**: `SegeluhrForegroundService` (hält GPS am Laufen, auch
+wenn die App im Hintergrund ist/das Display aus ist — sonst drosselt/stoppt
+Android FusedLocationProviderClient-Updates) wurde bisher NUR im
+`WITH_WATCH`-Modus gestartet (`setOperationMode()`/`resumeBackgroundWork()`/
+initialer Start beim App-Launch, alle drei an `OperationMode.WITH_WATCH`
+geknüpft) — historisch, weil der Dienst ursprünglich reine "BLE-Bridge zur
+Uhr" war. Im "Ohne Uhr"-Modus lief GPS nur noch über den an die
+Activity/ViewModel-Lebensdauer gebundenen `viewModelScope`-Job, ohne
+Foreground-Exemption und ohne Wake Lock — genau das reisst ab, sobald die
+App in den Hintergrund geht bzw. das Gerät in Doze/App-Standby wechselt.
+Nebenbefund: der Setup-Schalter "Display wach halten" war seit seiner
+Einführung komplett wirkungslos (kein `PowerManager.WakeLock` im Code
+gefunden, nur ein persistiertes UI-Flag ohne jeden Seiteneffekt).
+
+**Fix** (`ble/SegeluhrForegroundService.kt`, `viewmodel/SegeluhrViewModel.kt`,
+`ui/screens/SetupScreen.kt`):
+- Foreground-Service läuft jetzt in BEIDEN Betriebsmodi — Start/Stopp nur
+  noch über `resumeBackgroundWork()`/`pauseBackgroundWork()` (App-Stopp,
+  Land-Rolle), nicht mehr zusätzlich an den Modus gekoppelt. GATT-
+  Advertising ist laut eigener Doku ohnehin für Dauerbetrieb ausgelegt
+  ("dauerhaft advertisen, geringer Verbrauch"), macht also auch ohne Uhr
+  nichts kaputt (Watch kann sich jederzeit dazu verbinden).
+- Notification-Text ("GPS-Tracking läuft (ohne Uhr)" vs. "GPS wird an die
+  T-Watch übertragen") folgt jetzt live dem tatsächlichen Modus statt fest
+  auf die BLE-Bridge-Formulierung zu verweisen.
+- "Display wach halten" (Setup-Tab, umbenannt zu "GPS-Tracking robust
+  halten") hält jetzt tatsächlich einen `PARTIAL_WAKE_LOCK`, solange der
+  Dienst läuft — Bildschirm bleibt bewusst aus, nur die CPU bleibt für den
+  1Hz-Tick wach.
+
+**Nur der Fix selbst** (kein Android-SDK/Netzwerkzugriff auf Googles Maven
+in dieser Umgebung, daher nicht kompiliert) — Verifikation auf Hardware
+(insb. echter Segeltörn nur mit Handy, Display aus, längere Dauer) noch
+offen.
+
 ## Bekannte offene Punkte
 
 - ~~**S3 (Land-Uhr) zeigt eine falsche/alte Zeit**~~ — 09.08. erneut

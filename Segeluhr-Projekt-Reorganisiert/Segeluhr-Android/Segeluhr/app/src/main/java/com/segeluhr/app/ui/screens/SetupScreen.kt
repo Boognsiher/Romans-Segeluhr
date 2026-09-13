@@ -195,7 +195,8 @@ fun SetupScreen(
                         "(kein zusätzlicher Akkuverbrauch im Hintergrund). \"Start\" nimmt " +
                         "wieder genau dort auf."
                 } else {
-                    "GPS läuft aktuell durchgehend, solange die App offen ist — bei Pausen " +
+                    "GPS läuft durchgehend im Hintergrund (auch bei ausgeschaltetem Display, " +
+                        "z.B. Handy in der Tasche), egal ob mit oder ohne Uhr — bei Pausen " +
                         "(z.B. Mittagspause am Steg) hier stoppen, um Akku zu sparen."
                 },
                 fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(bottom = 10.dp),
@@ -236,7 +237,8 @@ fun SetupScreen(
             Spacer(Modifier.height(10.dp))
             val explanation = when (state.operationMode) {
                 OperationMode.STANDALONE ->
-                    "Das Handy vibriert selbst (Standalone) und rechnet alles lokal — die Uhr wird nicht gebraucht."
+                    "Das Handy vibriert selbst (Standalone) und rechnet alles lokal — die Uhr wird nicht gebraucht. " +
+                        "GPS/Log laufen auch hier im Hintergrund weiter (Benachrichtigung \"Segeluhr — Tracking aktiv\")."
                 OperationMode.WITH_WATCH ->
                     if (state.watchConnected) {
                         "✅ Uhr verbunden — GPS und Vibrationsmuster-Kommandos werden per BLE an die T-Watch Ultra gesendet. Das Handy selbst vibriert nicht."
@@ -250,14 +252,21 @@ fun SetupScreen(
             )
         }
 
-        SectionCard("Bildschirm") {
+        SectionCard("Tracking im Hintergrund") {
             Row(
                 Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Display wach halten")
+                Text("GPS-Tracking robust halten")
                 Switch(checked = state.wakeLockEnabled, onCheckedChange = onWakeLockChanged)
             }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Hält die CPU wach (Bildschirm bleibt aus), damit das GPS-Log auch bei " +
+                    "ausgeschaltetem Display zuverlässig weiterläuft, z.B. Handy in " +
+                    "wasserdichter Tasche am Körper. Kostet etwas mehr Akku.",
+                fontSize = 12.sp, color = TextDim,
+            )
         }
 
         SectionCard("GPS") {
