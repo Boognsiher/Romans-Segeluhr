@@ -215,6 +215,17 @@ in `MainActivity.kt`, Dauer per `SystemClock.elapsedRealtime()`-Differenz):
 - **Langer Druck** (≥ 500ms) → nächste Anzeige (`onPhysicalButtonNextPage()`,
   zyklisch Nav→Wind→Heim→CD→Man→Menu→Nav...).
 
+**Ausnahme, solange die Bojen-Rundungs-Rückfrage aussteht** (22.09.2026,
+Roman-Feedback zur Frage "was passiert, wenn nicht bestätigt wird?"): ohne
+aktive Antwort zählt nach `ROUNDING_CONFIRM_TIMEOUT_MS` (20s, siehe
+`Erweiterung_Vereinheitlichte_Bojenerkennung.md`/`Constants.kt`) automatisch
+"Ja" — für ein bewusstes "Nein" gab es auf der Uhr bisher nur den
+Touch-Button im Overlay, also wieder genau das Nässe-Problem. Deshalb wird
+der Taster währenddessen komplett von der Rückfrage belegt (Tab-Wechsel
+ergibt eh keinen Sinn, solange das Overlay über allem liegt): **kurzer
+Druck = Ja, langer Druck = Nein.** Sobald die Rückfrage aufgelöst ist
+(bestätigt/abgelehnt/Timeout), gilt wieder die normale Zuordnung oben.
+
 **Welchen Tastencode die Watch 5 Pro dafür tatsächlich sendet, ist ohne
 Hardware-Test nicht sicher bekannt** — `MainActivity.kt` hört deshalb
 bewusst auf alle drei Stem-Tastencodes (`KEYCODE_STEM_1/2/3`) UND die

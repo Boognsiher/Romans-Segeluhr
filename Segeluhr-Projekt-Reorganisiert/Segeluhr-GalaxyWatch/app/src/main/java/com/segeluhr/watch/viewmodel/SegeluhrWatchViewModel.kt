@@ -49,8 +49,26 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
         _currentPage.value = page
     }
 
-    /** Langer Tastendruck (siehe MainActivity.onKeyUp): zur nächsten Anzeige weiterschalten. */
+    /**
+     * Langer Tastendruck (siehe MainActivity.onKeyUp): normalerweise zur
+     * nächsten Anzeige weiterschalten. Steht gerade eine Bojen-Rundungs-
+     * Rückfrage aus (siehe [onPhysicalButtonAction]), wird der Taster
+     * stattdessen komplett von der Rückfrage belegt — Tab-Wechsel ergibt
+     * währenddessen ohnehin wenig Sinn (Overlay liegt sowieso über allem,
+     * siehe SegelnApp.kt) — und langer Druck wird zum "Nein" (22.09.2026,
+     * Roman-Feedback: sonst gäbe es auf der Uhr keine zuverlässige,
+     * touch-unabhängige Möglichkeit, aktiv abzulehnen — ein verpasstes
+     * "Nein" landet nach ROUNDING_CONFIRM_TIMEOUT_MS sonst automatisch beim
+     * "Ja" (Auto-Timeout, siehe SegeluhrViewModel.updatePendingBuoyConfirmation()
+     * am Handy).
+     */
     fun onPhysicalButtonNextPage() {
+        if (uiState.value.race?.roundingConfirmPending == true) {
+            rejectBuoyRounding()
+            hapticPlayer.play(BleProtocol.HAPTIC_STEP1)
+            showOverlay("Abgelehnt")
+            return
+        }
         _currentPage.value = (_currentPage.value + 1) % TAB_COUNT
         hapticPlayer.play(BleProtocol.HAPTIC_STEP1)
     }
@@ -63,7 +81,8 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
      * Reset/Sync), das sich im Stillstand erledigen lässt.
      * Bojen-Rückfrage hat Vorrang vor dem Tab-Check, weil sie tab-unabhängig
      * als Overlay erscheint (siehe SegelnApp.kt) und die dringendere der
-     * beiden Aktionen ist.
+     * beiden Aktionen ist. Solange sie aussteht, ist der Taster komplett
+     * von ihr belegt: kurz = Ja, lang = Nein (siehe [onPhysicalButtonNextPage]).
      */
     fun onPhysicalButtonAction() {
         when {
