@@ -36,6 +36,22 @@ object GeoUtils {
         return normalize360(toDeg(atan2(sy, sx)))
     }
 
+    /**
+     * Gewichteter zirkulärer Mittelwert — Paare (Gradwert, Gewicht). Für
+     * WindEngine.windHistory (siehe docs/Erweiterung_Windschaetzung_Robust.md):
+     * ein einzelnes Sample kippt den Gesamtwert nicht mehr sofort um, sondern
+     * fliesst nur proportional zu seinem Gewicht ein.
+     */
+    fun circularMeanWeighted(valuesWithWeights: List<Pair<Double, Double>>): Double {
+        var sx = 0.0
+        var sy = 0.0
+        for ((v, w) in valuesWithWeights) {
+            sx += w * cos(toRad(v))
+            sy += w * sin(toRad(v))
+        }
+        return normalize360(toDeg(atan2(sy, sx)))
+    }
+
     fun bearingDeg(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val p1 = toRad(lat1)
         val p2 = toRad(lat2)

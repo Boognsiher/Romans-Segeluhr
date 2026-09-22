@@ -1,10 +1,17 @@
-# Erweiterung: Robuste, kontinuierliche Windschätzung (Konzept)
+# Erweiterung: Robuste, kontinuierliche Windschätzung
 
 > Diese Erweiterung steht NICHT in der ursprünglichen Spezifikation und wird
 > hier gemäss Doku-Konvention separat dokumentiert.
 
-## Status: KONZEPT (22.09.2026, Roman-Wunsch — Idee durchdacht + gegen echte
-Diagnose-Logs geprüft, noch keine Code-Änderung an `WindEngine`)
+## Status: IMPLEMENTIERT, NICHT KOMPILIERT (22.09.2026, Roman-Wunsch: vor dem
+Segelwochenende einbauen) — Abschnitte 3b/3c sowie der Teil von 3a, der
+KEINE Punkt-vor-Wind-Klassifikation ohne bekannten Wind braucht, sind jetzt
+in `WindEngine.kt` umgesetzt. Bewusst NICHT umgesetzt: die in Abschnitt 3d
+skizzierte Amwind/Downwind-Erkennung ganz ohne vorherige Kalibrierung — siehe
+Abschnitt 4, die Speed-Dip-Hypothese dafür hat sich nicht validiert. Diese
+Umgebung hat kein Android-SDK und keinen Netzwerkzugriff auf die Google/Maven-
+Repos (siehe Abschnitt 6) — **vor dem Wochenende in Android Studio
+kompilieren und mindestens kurz antesten.**
 
 ## 1. Motivation
 
@@ -52,10 +59,19 @@ Zwei-Schläge-Kalibrierung (ruhiger Kurs → Manöver → ruhiger Kurs). Statt
 eine isolierte, angekündigte Sonderaktion zu verlangen, soll jedes
 erkannte Manöver (Bug-Wechsel wird von `tickContinuous()` ohnehin schon
 verfolgt) automatisch zu einem Kalibrier-Sample werden, sofern beide Seiten
-"steady" waren (`CourseTracker.steady()`). Damit entsteht der erste
-Windwert von selbst aus der ersten sauberen Wende/Halse der Session — kein
-Kalibrier-Button mehr nötig, um überhaupt loszulegen. Der bestehende
-Button bleibt als optionaler "sofort-und-sicher"-Shortcut erhalten.
+"steady" waren (`CourseTracker.steady()`).
+
+**Umsetzungs-Trick (22.09.2026), der 3d dafür überflüssig macht:** für den
+Bisektor zweier Kurse ist es egal, ob das dazwischenliegende Manöver eine
+Wende oder eine Halse war — beide sind symmetrisch zur Windachse, der
+Bisektor ergibt so oder so dieselbe Achse, nur mit einer 180°-Mehrdeutigkeit
+(Wind-VON vs. Wind-NACH). Diese Mehrdeutigkeit lässt sich auflösen, indem
+man die zum bereits bekannten `windDir` näherliegende der beiden möglichen
+Richtungen nimmt — **das funktioniert aber nur, wenn schon ein `windDir`
+existiert.** Für den ALLERERSTEN Wert der Session bleibt deshalb weiterhin
+ein einziger expliziter Kalibrierlauf nötig (siehe Abschnitt 6) — danach
+läuft alles automatisch, ganz ohne die ungeprüfte Speed-Dip-Klassifikation
+aus 3d.
 
 ### 3b. Historien-Puffer statt Einzelwert
 
@@ -156,21 +172,77 @@ richtig liegen. Braucht sauberes Test-Ground-Truth (siehe offene Punkte).
   unabhängige Ground Truth statt einer selbst-referenziellen Ableitung.
   `tack_gybe_speed_check.py` lässt sich direkt gegen ein neues Log erneut
   laufen lassen.
-- **Fallback, falls Speed-Dip sich nicht validieren lässt**: reine
-  Kurswinkel-Heuristik (60–110° ≈ Wende, >110° ≈ Halse, ohne Speed-Dip) —
-  gröber, aber unabhängig von diesem unsicheren Zusatzsignal.
-- **Konkrete Fenstergrössen/Schwellen** für 3b/3c (Puffergrösse, Dauer
-  kurzfristiges vs. langfristiges Fenster, Divergenz-Schwelle für einen
-  "echten" Shift) — noch nicht festgelegt, braucht wahrscheinlich mehrere
-  echte Sessions zum Kalibrieren.
+- **3d bleibt zurückgestellt** (siehe Abschnitt 6) — die Speed-Dip-
+  Hypothese wird nicht mehr gebraucht, um 3a umzusetzen (siehe Trick dort),
+  bleibt aber als mögliche spätere Ergänzung im Hinterkopf (z.B. um auch
+  den ALLERERSTEN Wert der Session ganz ohne Kalibrierlauf zu bootstrappen).
+- **Konkrete Fenstergrössen/Schwellen** — mit Startwerten versehen (siehe
+  Abschnitt 6, `Constants.WIND_HISTORY_*`), aber NICHT gegen echte Daten
+  kalibriert (nur plausibel gewählt). Nach dem Wochenende gegen das neue
+  `wind_sample_count`-Feld im Diagnose-Log prüfen: baut sich die
+  Vertrauensanzeige im Wind-Tab plausibel auf, reagiert die Schätzung
+  angemessen schnell auf echte Wenden?
 - **Verhältnis zum bestehenden Kalibrier-Button**: bleibt als optionaler
-  manueller Shortcut, oder komplett durch den Auto-Bootstrap ersetzt?
-  Tendenz: behalten (kostet nichts, hilft z.B. wenn das erste automatisch
-  erkannte Manöver in Welle/Böe unsauber war).
+  manueller Shortcut erhalten (siehe Abschnitt 6) — bewusste Entscheidung,
+  nicht offen.
 - **Zusammenspiel mit unabhängigem Bug-Signal** (3e/`Erweiterung_Mastuhr.md`):
   sobald Heel- oder Präsenz-Sensor existiert, sollte er in die
   Qualitätsgewichtung der Puffer-Samples einfliessen (stimmen AWA-Vorzeichen
   und unabhängiges Signal überein → hohe Konfidenz, sonst Sample verwerfen)
   — heute nicht umsetzbar (keine Hardware), Platzhalter für später.
-- **Noch keine Zeile Code in `WindEngine` geändert** — reine
-  Konzept-/Analyse-Phase.
+- **Zwei-Zeitskalen-Modell (3c) nur teilweise umgesetzt**: der Ringpuffer
+  selbst dämpft Ausreisser bereits deutlich (siehe Abschnitt 6), aber ein
+  echtes separates Fast/Slow-Paar mit eigenem Divergenz-Alarm (statt nur
+  einem gemeinsamen gewichteten Mittel) ist noch nicht gebaut — bewusst
+  zurückgestellt, um vor dem Wochenende nicht zu viel ungetesteten,
+  komplexen Code auf einmal einzubauen.
+- **Kompilieren + Testen steht noch aus** — diese Umgebung hat kein
+  Android-SDK und keinen Netzwerkzugriff auf die Google/Maven-Repos für
+  Gradle, siehe Abschnitt 6.
+
+## 6. Umsetzung (22.09.2026)
+
+Umgesetzt in `WindEngine.kt` (+ `Constants.kt`, `GeoUtils.kt`,
+`SegeluhrUiState.kt`, `SegeluhrViewModel.kt`, `WindScreen.kt`,
+`DiagnosticsLogger.kt`):
+
+- **`WindSample`/`windHistory`** (Ringpuffer, `ArrayDeque<WindSample>`,
+  max. `WIND_HISTORY_MAX_SAMPLES` = 12 Einträge, `WIND_HISTORY_MAX_AGE_MS` =
+  45 Min.) ersetzt die einzelne fortlaufend verschobene `windDir`-Zahl.
+  Jedes Sample hat ein Basisgewicht je Herkunft
+  (`WIND_SAMPLE_WEIGHT_EXPLICIT_CALIB` = 1.0,
+  `WIND_SAMPLE_WEIGHT_MANEUVER` = 0.6 für automatisch erkannte Wenden/Halsen,
+  `WIND_SAMPLE_WEIGHT_SHIFT_OBSERVATION` = 0.8 für den bisherigen
+  Kurs-Shift-Pfad) und altert zusätzlich mit `WIND_HISTORY_DECAY_HALFLIFE_MS`
+  (15 Min. Halbwertszeit) — `GeoUtils.circularMeanWeighted()` (neu) bildet
+  daraus den aktuellen `windDir`. Alle drei bisherigen Zuweisungsstellen
+  (`tickCalibration()`-Erfolgsfall, Bug-Wechsel- und Shift-Zweig in
+  `tickContinuous()`) laufen jetzt über die neue zentrale `addWindSample()`.
+- **Automatischer Bootstrap (3a)**: der bestehende Bug-Wechsel-Erkennung in
+  `tickContinuous()` (die für `sessionManeuvers` ohnehin schon läuft)
+  erzeugt jetzt zusätzlich ein Wind-Sample aus dem Bisektor beider Legs,
+  sofern der Zeitabstand `MANEUVER_SAMPLE_MAX_GAP_MS` (3 Min.) nicht
+  überschritten ist — 180°-Mehrdeutigkeit aufgelöst über die zu `windDir`
+  näherliegende Richtung (siehe Abschnitt 3a). **Der explizite
+  Kalibrierlauf bleibt Pflicht für den ALLERERSTEN Wert der Session**
+  (`windDir` ist vorher `null`, es gibt nichts zum Auflösen der
+  Mehrdeutigkeit) — danach ist keine weitere Handaktion mehr nötig.
+- **Persistenz/Neustart**: `restore()` sät den Puffer beim App-Start mit
+  einem Sample aus dem gespeicherten Wert (Zeitstempel "jetzt", da das
+  echte Alter unbekannt ist) statt den Wert ungepuffert zu übernehmen.
+- **UI**: Wind-Tab zeigt jetzt zusätzlich eine "Vertrauen"-Zeile
+  (niedrig/mittel/hoch nach `windSampleCount`) sowie einen Hinweistext,
+  dass nach der einmaligen Kalibrierung keine weitere Aktion mehr nötig ist.
+- **Diagnose-Log**: neue Spalte `wind_sample_count` — Basis, um nach dem
+  Wochenende zu prüfen, ob sich der Puffer plausibel aufbaut/verhält.
+- **Watch-/Firmware-Änderungen: KEINE nötig.** `BleGattServerManager.
+  notifyWindStatus()` (Signatur/Encoding unverändert) sendet weiterhin nur
+  `windDirDeg`/`calibrated`/`trendDeg`/`isLift` — die robustere Berechnung
+  passiert komplett phone-seitig, für Galaxy-Watch-App und beide
+  T-Watch-Firmwares transparent. `windSampleCount` ist reine Phone-UI/
+  Diagnose-Log-Anzeige, nicht Teil des BLE-Protokolls.
+- **Nicht kompiliert**: diese Umgebung hat weder Android-SDK noch
+  Netzwerkzugriff auf die von Gradle/AGP benötigten Google/Maven-Repos
+  (`com.android.application`-Plugin liess sich nicht auflösen, siehe
+  Testlauf). Stattdessen manuell Zeile für Zeile gegengelesen. **Vor dem
+  Wochenende in Android Studio kompilieren.**

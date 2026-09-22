@@ -4,6 +4,7 @@ import com.segeluhr.app.core.*
 import com.segeluhr.app.data.model.WindCalibState
 import com.segeluhr.app.data.model.WindLogPoint
 import kotlin.math.abs
+import kotlin.math.pow
 
 /**
  * Windrichtung wird nie direkt gemessen, sondern abgeleitet und ständig über
@@ -39,6 +40,21 @@ import kotlin.math.abs
  * `SettingsRepository.boatProfilesFlow`) — diese Klasse kennt zu jedem
  * Zeitpunkt nur das gerade AKTIVE Profil (`activeProfileId`). Beim
  * Profilwechsel ruft der ViewModel [restoreBoatProfile] erneut auf.
+ *
+ * Seit der Erweiterung "Robuste, kontinuierliche Windschätzung" (22.09.2026,
+ * siehe docs/Erweiterung_Windschaetzung_Robust.md) ist `windDir` kein
+ * fortlaufend verschobener Einzelwert mehr, sondern ein gewichtetes Mittel
+ * über [windHistory] — einen Ringpuffer der letzten Wind-Bisektoren aus drei
+ * Quellen (explizite Kalibrierung, automatisch erkannte Wenden/Halsen beim
+ * normalen Segeln, direkte Kurs-Shifts auf demselben Bug). Eine einzelne
+ * schlechte Messung kippt dadurch nicht mehr sofort den ganzen Schätzwert,
+ * und die App liefert schon nach der ERSTEN Kalibrierung + der ersten
+ * natürlichen Wende laufend bessere Werte, ohne weitere Handaktion.
+ * Bewusst NICHT umgesetzt (siehe Doku, Abschnitt 4): eine
+ * Amwind/Downwind-Erkennung ganz ohne vorherige Kalibrierung — die dafür
+ * geprüfte Speed-Dip-Hypothese hat sich an echten Diagnose-Logs nicht als
+ * verlässlich erwiesen. Ein einziger expliziter Kalibrierlauf bleibt daher
+ * weiterhin die einzige Voraussetzung, bevor überhaupt ein windDir existiert.
  */
 /**
  * Eine erkannte Wende/Halse für die Tages-Auswertung (Erweiterung,
@@ -60,6 +76,16 @@ data class WindShiftEvent(val timestampMs: Long, val isHeader: Boolean?)
 /** Ein erfolgreicher Windkalibrierlauf für die Tages-/Wettfahrt-Auswertung. */
 data class CalibrationEvent(val timestampMs: Long)
 
+/**
+ * Ein einzelnes Wind-Sample im Ringpuffer [WindEngine.windHistory] (siehe
+ * docs/Erweiterung_Windschaetzung_Robust.md) — [bisectorDeg] ist bereits eine
+ * absolute Windrichtung (180°-Mehrdeutigkeit aufgelöst), [weight] das
+ * Basisgewicht je nach Herkunft (explizite Kalibrierung vs. automatisch
+ * erkanntes Manöver vs. Kurs-Shift), unabhängig vom Alter — der Alterseinfluss
+ * kommt erst beim Auswerten über `WIND_HISTORY_DECAY_HALFLIFE_MS` dazu.
+ */
+data class WindSample(val timestampMs: Long, val bisectorDeg: Double, val weight: Double)
+
 class WindEngine(
     private val vib: HapticFeedback,
     private val status: StatusSink,
@@ -80,7 +106,14 @@ class WindEngine(
 
     private val continuousTracker = CourseTracker()
     private var lastSteadyCOG: Double? = null
+    private var lastSteadyAtMs: Long? = null
     private var tackSign: Int? = null
+
+    // ---- Robuste, kontinuierliche Windschätzung (siehe Klassendoku oben
+    // und docs/Erweiterung_Windschaetzung_Robust.md) ----
+    private val windHistory = ArrayDeque<WindSample>()
+    /** Für die UI (Wind-Tab): wie viele Messungen stecken gerade im Schätzwert. */
+    val windSampleCount: Int get() = windHistory.size
 
     // Windverlauf-Log (Abschnitt 4.3): kumulierte Abweichung vom ersten Wert
     private val _windLog = mutableListOf<WindLogPoint>()
@@ -123,10 +156,20 @@ class WindEngine(
     private val _sessionCalibrations = mutableListOf<CalibrationEvent>()
     val sessionCalibrations: List<CalibrationEvent> get() = _sessionCalibrations
 
-    /** Beim App-Start aus der Persistenz laden */
+    /**
+     * Beim App-Start aus der Persistenz laden. Sät [windHistory] mit einem
+     * einzelnen Sample (Zeitstempel "jetzt", da das echte Alter der
+     * gespeicherten Messung nicht bekannt ist) — der Wert bleibt damit
+     * nutzbar, wird aber von der ersten neuen Messung dieser Session bei
+     * Bedarf normal weiter verfeinert/korrigiert statt stur festzuhängen.
+     */
     fun restore(windDir: Double?, calibrated: Boolean) {
         this.windDir = windDir
         this.windCalibrated = calibrated
+        windHistory.clear()
+        if (windDir != null && calibrated) {
+            windHistory.addLast(WindSample(System.currentTimeMillis(), windDir, Constants.WIND_SAMPLE_WEIGHT_EXPLICIT_CALIB))
+        }
     }
 
     /**
@@ -223,6 +266,52 @@ class WindEngine(
         onBoatProfileChanged(activeProfileId, closehauledAngleDeg, closehauledSampleCount, downwindAngleDeg)
     }
 
+    /**
+     * Zentrale Stelle, über die JEDE neue Windmessung einfliesst — egal ob
+     * aus der expliziten Kalibrierung, einer automatisch erkannten Wende/
+     * Halse oder einem Kurs-Shift auf demselben Bug (siehe Klassendoku und
+     * docs/Erweiterung_Windschaetzung_Robust.md). Ersetzt die früheren
+     * direkten `windDir = ...`-Zuweisungen.
+     */
+    private suspend fun addWindSample(bisectorDeg: Double, weight: Double, timestampMs: Long) {
+        windHistory.addLast(WindSample(timestampMs, bisectorDeg, weight))
+        pruneWindHistory(timestampMs)
+        recomputeWindDir(timestampMs)
+    }
+
+    private fun pruneWindHistory(nowMs: Long) {
+        while (windHistory.isNotEmpty() && nowMs - windHistory.first().timestampMs > Constants.WIND_HISTORY_MAX_AGE_MS) {
+            windHistory.removeFirst()
+        }
+        while (windHistory.size > Constants.WIND_HISTORY_MAX_SAMPLES) {
+            windHistory.removeFirst()
+        }
+    }
+
+    /**
+     * Gewichtetes Mittel über [windHistory] — Basisgewicht je Sample-Herkunft
+     * (siehe [WindSample]) mal ein mit dem Alter exponentiell abklingender
+     * Faktor (`WIND_HISTORY_DECAY_HALFLIFE_MS`), damit eine anhaltende echte
+     * Winddrehung sich durchsetzt statt für immer von alten Messungen
+     * ausgebremst zu werden. Ruft `onWindChanged` nur auf, wenn sich der
+     * Schätzwert dadurch tatsächlich sichtbar verändert hat.
+     */
+    private suspend fun recomputeWindDir(nowMs: Long) {
+        if (windHistory.isEmpty()) return
+        val weighted = windHistory.map { sample ->
+            val ageMs = (nowMs - sample.timestampMs).coerceAtLeast(0L)
+            val recency = 0.5.pow(ageMs.toDouble() / Constants.WIND_HISTORY_DECAY_HALFLIFE_MS)
+            sample.bisectorDeg to (sample.weight * recency)
+        }
+        val newDir = GeoUtils.circularMeanWeighted(weighted)
+        val previousDir = windDir
+        windDir = newDir
+        windCalibrated = true
+        if (previousDir == null || abs(GeoUtils.angleDiff(newDir, previousDir)) >= 0.1) {
+            onWindChanged(newDir, true)
+        }
+    }
+
     fun startCalibration(currentlyValid: Boolean) {
         if (!currentlyValid) {
             status.setStatus("Kein GPS-Fix — Kalibrierung nicht möglich.", StatusLevel.RED)
@@ -294,11 +383,10 @@ class WindEngine(
                     val diff = abs(GeoUtils.angleDiff(t1, tack2))
                     if (diff in Constants.MIN_TACK_ANGLE_DEG..Constants.MAX_TACK_ANGLE_DEG) {
                         val newWindDir = GeoUtils.circularMean(listOf(t1, tack2))
-                        windDir = newWindDir
-                        windCalibrated = true
                         calibState = WindCalibState.IDLE
                         continuousTracker.reset()
                         lastSteadyCOG = null
+                        lastSteadyAtMs = null
                         tackSign = null
                         // Zeitstempel bewusst aus dem Fix (nicht System.currentTimeMillis()),
                         // damit ein Import (siehe DiagnosticsLogImporter) die ORIGINALEN
@@ -321,7 +409,7 @@ class WindEngine(
                         } else {
                             status.setStatus("Wind kalibriert: ${Math.round(newWindDir)}°", StatusLevel.GREEN)
                         }
-                        onWindChanged(newWindDir, true)
+                        addWindSample(newWindDir, Constants.WIND_SAMPLE_WEIGHT_EXPLICIT_CALIB, fix.timestampMs)
                     } else {
                         vib.error4()
                         status.setStatus("Wendewinkel unplausibel (${"%.0f".format(diff)}°) — erneut versuchen.", StatusLevel.RED)
@@ -365,18 +453,44 @@ class WindEngine(
             // Referenzkurs vorliegt - derselbe Bug-Wechsel-Moment, den die
             // Header/Lift-Erkennung unten ohnehin schon per tackSign verfolgt.
             val previousSteady = lastSteadyCOG
+            val previousSteadyAtMs = lastSteadyAtMs
             if (curTackSign != null && previousSteady != null) {
                 val angle = abs(GeoUtils.angleDiff(avg, previousSteady))
                 val isTack = abs(awa) < Constants.TACK_VS_GYBE_AWA_THRESHOLD_DEG
                 // Zeitstempel aus dem Fix, siehe Kommentar bei _sessionCalibrations oben.
                 _sessionManeuvers.add(TackEvent(fix.timestampMs, angle, isTack))
+
+                // Automatischer Bootstrap/Nachschärfen der Windschätzung (siehe
+                // Klassendoku, docs/Erweiterung_Windschaetzung_Robust.md Abschnitt
+                // 3a): jede erkannte Wende ODER Halse liefert denselben Bisektor
+                // wie die explizite Kalibrierung - ob es eine Wende oder Halse war,
+                // spielt dafür KEINE Rolle (siehe Doku Abschnitt 3d, warum die
+                // Speed-Dip-Unterscheidung dafür bewusst NICHT gebraucht wird): der
+                // Bisektor zweier symmetrisch zum Wind gesegelter Kurse ergibt so
+                // oder so die Windachse, nur mit 180°-Mehrdeutigkeit - aufgelöst,
+                // indem die zur bereits bekannten Windrichtung `wd` näherliegende
+                // der beiden möglichen Richtungen gewählt wird. Nur verwenden, wenn
+                // beide Legs zeitlich nah beieinander liegen (MANEUVER_SAMPLE_MAX_GAP_MS)
+                // - sonst könnte der Wind zwischen ihnen selbst schon gedreht haben.
+                if (previousSteadyAtMs != null &&
+                    fix.timestampMs - previousSteadyAtMs <= Constants.MANEUVER_SAMPLE_MAX_GAP_MS
+                ) {
+                    val rawBisector = GeoUtils.circularMean(listOf(previousSteady, avg))
+                    val bisector = if (abs(GeoUtils.angleDiff(rawBisector, wd)) <= 90.0) {
+                        rawBisector
+                    } else {
+                        GeoUtils.normalize360(rawBisector + 180.0)
+                    }
+                    addWindSample(bisector, Constants.WIND_SAMPLE_WEIGHT_MANEUVER, fix.timestampMs)
+                }
             }
             tackSign = newTackSign
             lastSteadyCOG = avg
+            lastSteadyAtMs = fix.timestampMs
             return
         }
 
-        val lastSteady = lastSteadyCOG ?: run { lastSteadyCOG = avg; return }
+        val lastSteady = lastSteadyCOG ?: run { lastSteadyCOG = avg; lastSteadyAtMs = fix.timestampMs; return }
         val shift = GeoUtils.angleDiff(avg, lastSteady)
         if (abs(shift) > Constants.WIND_SHIFT_MAX_PLAUSIBLE_DEG) {
             // Plausibilitäts-Filter, siehe Constants.WIND_SHIFT_MAX_PLAUSIBLE_DEG-Doku:
@@ -385,13 +499,14 @@ class WindEngine(
             // Riesensprung jeden weiteren Tick erneut), aber ohne Status/Haptik
             // und ohne windDir mit dem unplausiblen Wert zu verfälschen.
             lastSteadyCOG = avg
+            lastSteadyAtMs = fix.timestampMs
             return
         }
         if (abs(shift) >= Constants.WIND_SHIFT_THRESHOLD_DEG) {
             val prevSteady = lastSteady
-            val newWindDir = GeoUtils.normalize360(wd + shift)
-            windDir = newWindDir
+            val newWindDirGuess = GeoUtils.normalize360(wd + shift)
             lastSteadyCOG = avg
+            lastSteadyAtMs = fix.timestampMs
             // Zeitstempel aus dem Fix, siehe Kommentar bei _sessionCalibrations oben.
             val shiftAtMs = fix.timestampMs
 
@@ -412,7 +527,7 @@ class WindEngine(
                 }
             }
             _sessionWindShifts.add(WindShiftEvent(shiftAtMs, isHeader))
-            onWindChanged(newWindDir, true)
+            addWindSample(newWindDirGuess, Constants.WIND_SAMPLE_WEIGHT_SHIFT_OBSERVATION, shiftAtMs)
         }
     }
 

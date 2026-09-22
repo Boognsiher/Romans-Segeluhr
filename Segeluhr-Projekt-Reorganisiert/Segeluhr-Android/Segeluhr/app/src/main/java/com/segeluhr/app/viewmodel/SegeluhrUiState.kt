@@ -22,6 +22,11 @@ data class SegeluhrUiState(
     val windLog: List<WindLogPoint> = emptyList(),
     val windNet: Double? = null,
     val windRange: Double? = null,
+    // Robuste Windschätzung (siehe docs/Erweiterung_Windschaetzung_Robust.md):
+    // wie viele Messungen (Kalibrierung + automatisch erkannte Manöver/Shifts)
+    // gerade im gewichteten Mittel stecken — reine Vertrauens-Anzeige fürs
+    // Wind-Tab, beeinflusst keine Berechnung.
+    val windSampleCount: Int = 0,
 
     // Boots-Kalibrierung (Erweiterung, siehe docs/Erweiterung_Boots_Kalibrierung.md).
     // closehauledAngleDeg/closehauledSampleCount/downwindAngleDeg spiegeln

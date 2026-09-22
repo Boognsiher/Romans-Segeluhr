@@ -507,6 +507,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 windLog = windEngine.windLog,
                 windNet = trend?.first,
                 windRange = trend?.second,
+                windSampleCount = windEngine.windSampleCount,
                 closehauledAngleDeg = windEngine.closehauledAngleDeg,
                 closehauledSampleCount = windEngine.closehauledSampleCount,
                 downwindAngleDeg = windEngine.downwindAngleDeg,

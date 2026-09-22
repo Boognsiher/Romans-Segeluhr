@@ -46,6 +46,19 @@ fun WindScreen(
             }
             StatRow("Status", statusText, valueColor = TextDim)
             StatRow("Windrichtung", if (state.windCalibrated) "${state.windDir?.toInt()}°" else "--", valueColor = Teal)
+            if (state.windCalibrated) {
+                // Robuste Windschätzung (siehe docs/Erweiterung_Windschaetzung_Robust.md):
+                // windDir ist ein gewichtetes Mittel über windSampleCount Messungen
+                // (Kalibrierung + automatisch erkannte Wenden/Halsen/Shifts), keine
+                // einzelne fortlaufend verschobene Zahl mehr — reine Transparenz für
+                // den Segler, wie "verlässlich" der Wert gerade ist.
+                val confidenceText = when {
+                    state.windSampleCount <= 1 -> "niedrig (nur 1 Messung)"
+                    state.windSampleCount < 4 -> "mittel (${state.windSampleCount} Messungen)"
+                    else -> "hoch (${state.windSampleCount} Messungen)"
+                }
+                StatRow("Vertrauen", confidenceText, valueColor = TextDim)
+            }
 
             Spacer(Modifier.height(10.dp))
             if (state.windCalibState == WindCalibState.IDLE) {
@@ -61,6 +74,10 @@ fun WindScreen(
             Text(
                 "Ablauf: 1) Ruhigen Amwind-Kurs halten. 2) Bei Signal wenden. 3) Neuen ruhigen Kurs auf dem anderen Bug halten. Wendewinkel muss zwischen 60° und 110° liegen.",
                 fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 8.dp),
+            )
+            Text(
+                "Danach reicht das einmalige Kalibrieren: jede weitere Wende oder Halse beim normalen Segeln verfeinert die Windschätzung automatisch mit.",
+                fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(top = 4.dp),
             )
         }
 

@@ -48,7 +48,7 @@ class DiagnosticsLogger(private val context: Context) {
     private val header = listOf(
         "ts_iso", "ts_epoch_ms",
         "lat", "lon", "sog_kn", "cog_deg", "gps_valid", "gps_accuracy_m",
-        "wind_dir_deg", "wind_calibrated", "wind_calib_state", "wind_net_deg", "wind_range_deg",
+        "wind_dir_deg", "wind_calibrated", "wind_calib_state", "wind_net_deg", "wind_range_deg", "wind_sample_count",
         "closehauled_twa_deg", "closehauled_samples", "downwind_twa_deg",
         "calib_mode_on", "smart_mode_on", "active_boat_profile",
         "vmg_kn", "distance_traveled_m",
@@ -92,7 +92,7 @@ class DiagnosticsLogger(private val context: Context) {
         val row = listOf(
             isoTime.format(Date(now)), now,
             fix.lat, fix.lon, fix.sogKn, fix.cogDeg, fix.valid, fix.accuracyM,
-            state.windDir, state.windCalibrated, state.windCalibState, state.windNet, state.windRange,
+            state.windDir, state.windCalibrated, state.windCalibState, state.windNet, state.windRange, state.windSampleCount,
             state.closehauledAngleDeg, state.closehauledSampleCount, state.downwindAngleDeg,
             state.calibrationModeEnabled, state.smartModeEnabled, state.activeBoatProfileId,
             state.vmg, state.distanceTraveledM,
