@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -39,9 +40,27 @@ private val TAB_TITLES = listOf("Nav", "Wind", "Heim", "CD", "Man", "Menu")
 @Composable
 fun SegelnApp(viewModel: SegeluhrWatchViewModel) {
     val state by viewModel.uiState.collectAsState()
+    val targetPage by viewModel.currentPage.collectAsState()
 
     Box(Modifier.fillMaxSize().background(BgDark)) {
         val pagerState = rememberPagerState(pageCount = { TAB_TITLES.size })
+
+        // Zwei-Wege-Sync mit dem physischen Taster (siehe MainActivity/
+        // SegeluhrWatchViewModel.onPhysicalButtonShortPress, Roman-Wunsch
+        // "Taster statt Touch bei Nässe"): ein Tastendruck setzt
+        // viewModel.currentPage, das hier den Pager dorthin scrollt. Ein
+        // manueller Wisch (Touch funktioniert ja z.B. an Land/im Stillstand
+        // weiterhin) hält umgekehrt currentPage aktuell, damit der nächste
+        // Tastendruck vom tatsächlich sichtbaren Tab aus weiterzählt statt zu
+        // einem alten Stand zurückzuspringen. Je ein Guard verhindert, dass
+        // sich beide Effekte gegenseitig hochschaukeln.
+        LaunchedEffect(targetPage) {
+            if (pagerState.currentPage != targetPage) pagerState.animateScrollToPage(targetPage)
+        }
+        LaunchedEffect(pagerState.currentPage) {
+            if (viewModel.currentPage.value != pagerState.currentPage) viewModel.setCurrentPage(pagerState.currentPage)
+        }
+
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             SailScreenScaffold(
                 connectionState = state.connectionState,

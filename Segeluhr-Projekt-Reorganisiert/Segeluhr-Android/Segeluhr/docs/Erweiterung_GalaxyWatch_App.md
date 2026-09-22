@@ -182,6 +182,86 @@ dieses ganzen Projekts. Ergebnisse:
   `Constants.COUNTDOWN_DURATION_MS` bewusst fest auf 5 Minuten verdrahtet
   (Standard-Regatta-Startprotokoll), kein fehlendes Feature.
 
+## Physischer Taster als Touch-Ersatz (22.09.2026, Roman-Wunsch)
+
+**Motivation:** kapazitiver Touchscreen + nasse/behandschuhte Finger beim
+Segeln funktioniert unzuverlässig — genau das Problem, das die T-Watch S3
+umgeht, indem sie in einem wasserdichten Sack am Handgelenk steckt (Touch
+funktioniert dort noch durch die Folie). Die Galaxy Watch hat keine
+Schutzhülle und bisher **komplett** touch-abhängige Bedienung (keine
+`KeyEvent`-Behandlung irgendwo im Projekt) — Roman-Vorgabe: die zwei
+zeitkritischen Live-Aktionen (Countdown starten, Anzeige wechseln) müssen
+über die Hardware-Taste laufen, Touch bleibt nur noch für Dinge, die sich
+im Stillstand erledigen lassen (Einstellungen, Wegpunkte, Reset/Sync,
+Trainingsmodus wählen).
+
+### Hardware-Einschränkung
+
+Die Watch 5 Pro hat **kein** rotierendes Lünette wie die Classic-Modelle,
+nur zwei Tasten. Der obere Home-Knopf ist auf Wear OS system-reserviert
+(geht immer zum Ziffernblatt/App-Drawer, lässt sich von einer App nicht
+abfangen) — nutzbar ist real nur die untere Taste. Das bedeutet: **eine**
+physische Taste muss zwei Funktionen abdecken, gelöst über
+Druckdauer-Unterscheidung (Standard-Android-Muster, `onKeyDown`/`onKeyUp`
+in `MainActivity.kt`, Dauer per `SystemClock.elapsedRealtime()`-Differenz):
+
+- **Kurzer Druck** (< 500ms) → nächste Anzeige (`onPhysicalButtonShortPress()`,
+  zyklisch Nav→Wind→Heim→CD→Man→Menu→Nav...).
+- **Langer Druck** (≥ 500ms) → kontextabhängige Hauptaktion
+  (`onPhysicalButtonLongPress()`): Bojen-Rundung bestätigen, falls die
+  Rückfrage gerade aussteht (Vorrang, weil tab-unabhängig als Overlay
+  erscheint und die dringendere der beiden Aktionen ist); sonst Countdown
+  starten, falls der CD-Tab gerade sichtbar ist; sonst keine Aktion.
+
+**Welchen Tastencode die Watch 5 Pro dafür tatsächlich sendet, ist ohne
+Hardware-Test nicht sicher bekannt** — `MainActivity.kt` hört deshalb
+bewusst auf alle drei Stem-Tastencodes (`KEYCODE_STEM_1/2/3`) UND die
+Zurück-Taste (`KEYCODE_BACK`) gleichzeitig; welcher davon nie feuert,
+schadet nicht. Beide `onKeyDown`/`onKeyUp` konsumieren das Event immer
+(`return true`), die App hat ohnehin keine Navigations-Hierarchie, aus der
+man mit "Zurück" aussteigen müsste.
+
+### Umsetzung
+
+- **`SegeluhrWatchViewModel`**: neuer `currentPage`-`StateFlow<Int>` ist ab
+  jetzt die Wahrheitsquelle fürs sichtbare Tab (`TAB_COUNT`/`CD_TAB_INDEX`
+  im Companion Object — müssen synchron zu `SegelnApp.TAB_TITLES` bleiben).
+  `onPhysicalButtonShortPress()`/`onPhysicalButtonLongPress()` plus lokales
+  Haptik-Feedback über die bestehende `HapticPlayer` (1 Puls für
+  Tab-Wechsel = `HAPTIC_STEP1`, 2 Pulse für eine ausgelöste Aktion =
+  `HAPTIC_DONE2`, dieselbe Semantik wie die vom Handy kommenden Codes) und
+  ein `CommandOverlay`-Banner ("Start!"/"Bestätigt") als visuelle
+  Bestätigung — Bildschirm bleibt ja lesbar, nur Touch ist das Problem.
+- **`SegelnApp.kt`**: `HorizontalPager` zwei-wege mit `viewModel.currentPage`
+  synchronisiert (`LaunchedEffect` in beide Richtungen, je mit Gleichheits-
+  Guard gegen gegenseitiges Hochschaukeln) — ein Tastendruck scrollt den
+  Pager programmatisch, ein manueller Wisch (Touch funktioniert ja an Land/
+  im Stillstand weiterhin) hält `currentPage` seinerseits aktuell.
+- **`MainActivity.kt`**: `onKeyDown`/`onKeyUp` messen die Druckdauer und
+  rufen die passende ViewModel-Funktion.
+
+### Bewusst NICHT über den Taster gelegt
+
+Reset/Sync (CD-Tab), Trainingsmodus-Wahl, Wegpunkte setzen/löschen,
+Wind-Kalibrierung starten/abbrechen, Heimweg-Modus umschalten — alles
+Setup-artige Aktionen, die laut Roman-Vorgabe im Stillstand per Touch
+erledigt werden können, bleiben unverändert reine Touch-Buttons im
+Menu-/CD-Tab.
+
+### Offene Punkte (dieser Abschnitt)
+
+- **Nicht auf echter Hardware getestet** — insbesondere, welcher der vier
+  gehörten Tastencodes tatsächlich feuert, und ob die Watch 5 Pro einen
+  sehr langen Tastendruck (deutlich über 500ms) irgendwann selbst
+  abfängt (App-Liste/Ausschalten), bevor `onKeyUp` überhaupt ankommt.
+- **500ms-Schwelle ungetestet** — reine Plausibilitätsannahme, evtl. auf
+  dem Wasser (mit Handschuhen, hastigerem Druck) nachjustieren.
+- **Nicht kompiliert** — diese Umgebung hat kein Android-SDK/keinen
+  Netzwerkzugriff auf die für Gradle/AGP nötigen Google/Maven-Repos, siehe
+  `docs/Erweiterung_Windschaetzung_Robust.md` Abschnitt 6 für den
+  dokumentierten Versuch. Vor dem Wochenende in Android Studio kompilieren
+  und auf echter Hardware verifizieren.
+
 ## Offene Punkte
 
 - **Kein Wear-Compose-Vorschau/Emulator-Test** — nur auf der echten Watch

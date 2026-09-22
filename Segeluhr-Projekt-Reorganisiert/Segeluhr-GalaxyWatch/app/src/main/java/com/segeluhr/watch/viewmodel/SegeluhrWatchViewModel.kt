@@ -35,6 +35,49 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
     private val _commandOverlay = MutableStateFlow<String?>(null)
     private val _ownBatteryPct = MutableStateFlow<Int?>(null)
 
+    // ---- Physischer Taster als Touch-Ersatz (22.09.2026, Roman-Wunsch, siehe
+    // docs/Erweiterung_GalaxyWatch_App.md "Physischer Taster") ----
+    // currentPage ist ab jetzt die Wahrheitsquelle fürs aktuell sichtbare Tab
+    // (SegelnApp.kt synct den HorizontalPager in BEIDE Richtungen dagegen),
+    // damit ein Tastendruck von woher auch immer die letzte Anzeige weiss.
+    private val _currentPage = MutableStateFlow(0)
+    val currentPage: StateFlow<Int> = _currentPage
+
+    fun setCurrentPage(page: Int) {
+        _currentPage.value = page
+    }
+
+    /** Kurzer Tastendruck (siehe MainActivity.onKeyUp): zur nächsten Anzeige weiterschalten. */
+    fun onPhysicalButtonShortPress() {
+        _currentPage.value = (_currentPage.value + 1) % TAB_COUNT
+        hapticPlayer.play(BleProtocol.HAPTIC_STEP1)
+    }
+
+    /**
+     * Langer Tastendruck: kontextabhängige Hauptaktion, damit Countdown-Start
+     * und Bojen-Rundungs-Bestätigung (die zwei zeitkritischen Aktionen beim
+     * Segeln) auch mit nassen/behandschuhten Händen zuverlässig auslösbar
+     * sind — Touch bleibt für alles andere (Einstellungen, Wegpunkte,
+     * Reset/Sync), das sich im Stillstand erledigen lässt.
+     * Bojen-Rückfrage hat Vorrang vor dem Tab-Check, weil sie tab-unabhängig
+     * als Overlay erscheint (siehe SegelnApp.kt) und die dringendere der
+     * beiden Aktionen ist.
+     */
+    fun onPhysicalButtonLongPress() {
+        when {
+            uiState.value.race?.roundingConfirmPending == true -> {
+                confirmBuoyRounding()
+                hapticPlayer.play(BleProtocol.HAPTIC_DONE2)
+                showOverlay("Bestätigt")
+            }
+            _currentPage.value == CD_TAB_INDEX -> {
+                startCountdown()
+                hapticPlayer.play(BleProtocol.HAPTIC_DONE2)
+                showOverlay("Start!")
+            }
+        }
+    }
+
     // Kotlins combine() gibt es nur bis 5 Argumente auf einmal - deshalb in
     // zwei Zwischen-Datenklassen gestückelt statt einem einzigen Riesen-Aufruf.
     private data class WatchUiStatePartial1(
@@ -125,5 +168,11 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
     fun clearWaypoint(id: Int) {
         bleClient.sendCommand(BleProtocol.CMD_CLEAR_WAYPOINT, id)
         showOverlay("Wegpunkt gelöscht")
+    }
+
+    companion object {
+        // Muss synchron zu SegelnApp.TAB_TITLES bleiben (Nav/Wind/Heim/CD/Man/Menu).
+        const val TAB_COUNT = 6
+        const val CD_TAB_INDEX = 3
     }
 }
