@@ -246,3 +246,67 @@ Umgesetzt in `WindEngine.kt` (+ `Constants.kt`, `GeoUtils.kt`,
   (`com.android.application`-Plugin liess sich nicht auflösen, siehe
   Testlauf). Stattdessen manuell Zeile für Zeile gegengelesen. **Vor dem
   Wochenende in Android Studio kompilieren.**
+
+## 7. Ausweich-/Bojenmanöver während der Regatta ausfiltern (Nachtrag 22.09.2026)
+
+Roman-Frage: Während der Regatta (nach dem Countdown) kann die Logik davon
+ausgehen, dass fast immer anliegende Kurse (Amwind/Vorwind) gesegelt werden
+— Ausnahmen sind Ausweichmanöver und Bojenrundungen, dazwischen aber auch
+mal Halbwindkurse oder wartende Stellungen (z.B. Startlinien-Dial-up).
+Werden solche Legs ausgefiltert, damit sie die Windschätzung nicht
+verfälschen?
+
+**Antwort: teilweise, jetzt vollständig nachgezogen.** Bereits vorher
+gefiltert:
+- `CourseTracker.sample()` verwirft den ganzen Puffer sofort unter
+  `MIN_SPEED_KN` (1.5kn) — reines Treibenlassen/Stillstehen kommt gar nicht
+  erst als "ruhiger Kurs" durch.
+- `CourseTracker.steady()`s Positions-Check (`POSITION_CHECK_MIN_DIST_M`/
+  `POSITION_CHECK_MAX_DEV_DEG`) verwirft eine "ruhige" Kursablesung, wenn
+  die tatsächliche Bewegungsrichtung nicht zum gemeldeten COG passt — deckt
+  reines Luven auf der Stelle ab.
+- `WIND_SHIFT_MAX_PLAUSIBLE_DEG` (45°) verwirft einen einzelnen
+  Riesensprung als vermutlich verpasste Wende/Halse.
+
+**Nicht gefiltert war:** ein sauber gehaltener Halbwind-Kurs bei normaler
+Fahrt (Ausweichen, Bojenanlauf, Dial-up) — das erfüllt alle obigen Checks
+anstandslos und wurde bisher genauso als Wende/Halse-Bisektor bzw.
+Kurs-Shift gewertet wie ein echtes Am-Wind-/Vorwind-Leg.
+
+**Fix**: neue `WindEngine.isPlausibleRacingLeg(absAwaDeg, isRacing)` —
+verwirft ein Leg für die Windschätzung, wenn sein AWA-Betrag weder nahe
+`closehauledAngleDeg` noch nahe `downwindAngleDeg` liegt (Toleranzband
+bewusst identisch zu den bestehenden Smart-Modus-Bändern
+`SMART_CLOSEHAULED_LEARN_BAND_DEG`/`SMART_DOWNWIND_LEARN_BAND_DEG`, 20° —
+dieselbe Frage, schon vorhandene Konstanten wiederverwendet statt neue
+erfunden). Nur scharf, wenn `isRacing = true` — ausserhalb der Regatta
+sind Raumschots-Kurse ganz normales Segeln und sollen weiterhin zur
+Windschätzung beitragen, wie bisher.
+
+- **`tickContinuous()`** bekommt einen neuen Parameter `isRacing: Boolean`
+  (Default `false`, rückwärtskompatibel). Geprüft an BEIDEN neuen
+  `addWindSample()`-Aufrufstellen: dem automatischen Bootstrap aus Wende/
+  Halse (beide Legs müssen plausibel sein) und dem Kurs-Shift-Pfad
+  (ebenfalls beide Legs) — dort wird bei Unplausibilität auch die
+  Status-/Haptik-Meldung ("Wind-Shift: Header/Lift") unterdrückt, damit
+  während eines Ausweichmanövers keine irreführende Wind-Meldung
+  aufploppt. Der Referenzkurs (`lastSteadyCOG`) wird trotzdem übernommen,
+  analog zum bestehenden `WIND_SHIFT_MAX_PLAUSIBLE_DEG`-Muster.
+- **`SegeluhrViewModel.tick()`** übergibt
+  `isRacing = competitionActive || trainingEngine.trainMode == TrainMode.RACE`
+  — sowohl echte Competition als auch der Trainings-Racemode gelten als
+  "es wird jetzt taktisch gesegelt".
+- **`_sessionManeuvers`** (Tages-Auswertung, Wende-/Halsen-Zählung) bleibt
+  bewusst UNGEFILTERT — ein Ausweichmanöver ist ja trotzdem ein reales
+  Manöver, nur kein verlässlicher Windbeleg. Nur der Windschätzungs-Beitrag
+  wird unterdrückt, nicht die Statistik.
+- **Nebenbei gefunden + gefixt**: `DiagnosticsLogImporter.kt` löste Spalten
+  bisher über feste Indizes auf — durch die neue `wind_sample_count`-Spalte
+  (Abschnitt 6) wäre das für jede ab jetzt neu aufgezeichnete CSV falsch
+  gewesen (alle Indizes ab `watch_connected` um 1 verschoben). Umgestellt
+  auf Namens-Auflösung über die Kopfzeile (funktioniert für alte UND neue
+  CSV-Spaltenzahl) und `isRacing` beim Reimport aus `competition_active`/
+  `train_mode` rekonstruiert, damit ein Reimport denselben Filter anwendet
+  wie der Live-Törn.
+- **Ebenfalls nicht kompiliert** (siehe Abschnitt 6) — Teil derselben
+  ausstehenden Kompilierung vor dem Wochenende.

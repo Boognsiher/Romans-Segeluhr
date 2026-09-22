@@ -266,7 +266,11 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
 
         // Kontinuierliches Wind-Tracking, pausiert während TURNING (Abschnitt 4.2)
         if (windEngine.windCalibrated && trainingEngine.trainState != com.segeluhr.app.data.model.TrainState.TURNING) {
-            windEngine.tickContinuous(fix, windShiftReference)
+            // isRacing (siehe WindEngine.isPlausibleRacingLeg-Doku, Roman-Feedback
+            // zu Ausweich-/Bojenmanövern): Competition UND Trainings-Racemode
+            // gelten beide als "es wird jetzt taktisch gesegelt", nicht nur Competition.
+            val isRacing = competitionActive || trainingEngine.trainMode == TrainMode.RACE
+            windEngine.tickContinuous(fix, windShiftReference, isRacing)
         }
         windEngine.tickLog()
 

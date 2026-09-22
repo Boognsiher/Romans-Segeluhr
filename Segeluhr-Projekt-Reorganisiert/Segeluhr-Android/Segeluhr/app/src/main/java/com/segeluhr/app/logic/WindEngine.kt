@@ -421,8 +421,33 @@ class WindEngine(
         }
     }
 
-    /** Läuft immer, sobald kalibriert — pausiert nur während eines aktiven Trainings-Manövers (TURNING) */
-    suspend fun tickContinuous(fix: Fix, target: GeoPoint?) {
+    /**
+     * Während der Regatta (Roman-Feedback, siehe
+     * docs/Erweiterung_Windschaetzung_Robust.md Abschnitt 7): ausserhalb von
+     * Wende-/Vorwind-Winkel gesegelte Legs sind dann fast immer Ausweich-/
+     * Bojenmanöver oder wartende Stellungen (Startlinien-Dial-up etc.), kein
+     * Beleg für einen echten Windshift. Toleranzband bewusst identisch zu
+     * den Smart-Modus-Bändern (SMART_CLOSEHAULED_LEARN_BAND_DEG/
+     * SMART_DOWNWIND_LEARN_BAND_DEG) — dieselbe Frage ("ist das gerade ein
+     * plausibler Am-Wind-/Vorwind-Kurs?"), nur für die Windschätzung statt
+     * für die Boots-Kalibrierung. Ausserhalb der Regatta KEINE Einschränkung
+     * — Raumschots-Kurse sind dort ganz normales Segeln und sollen weiterhin
+     * zur Windschätzung beitragen.
+     */
+    private fun isPlausibleRacingLeg(absAwaDeg: Double, isRacing: Boolean): Boolean {
+        if (!isRacing) return true
+        val nearCloseHauled = abs(absAwaDeg - closehauledAngleDeg) <= Constants.SMART_CLOSEHAULED_LEARN_BAND_DEG
+        val nearDownwind = abs(absAwaDeg - downwindAngleDeg) <= Constants.SMART_DOWNWIND_LEARN_BAND_DEG
+        return nearCloseHauled || nearDownwind
+    }
+
+    /**
+     * Läuft immer, sobald kalibriert — pausiert nur während eines aktiven
+     * Trainings-Manövers (TURNING). [isRacing] (Competition aktiv ODER
+     * Trainings-Racemode) schaltet den Ausweich-/Bojenmanöver-Filter aus
+     * [isPlausibleRacingLeg] scharf, siehe dortige Doku.
+     */
+    suspend fun tickContinuous(fix: Fix, target: GeoPoint?, isRacing: Boolean = false) {
         val wd = windDir ?: return
         continuousTracker.sample(fix.cogDeg, fix.lat, fix.lon, fix.sogKn)
         val avg = continuousTracker.steady(Constants.STEADY_COURSE_MAX_DEV) ?: return
@@ -472,8 +497,14 @@ class WindEngine(
                 // der beiden möglichen Richtungen gewählt wird. Nur verwenden, wenn
                 // beide Legs zeitlich nah beieinander liegen (MANEUVER_SAMPLE_MAX_GAP_MS)
                 // - sonst könnte der Wind zwischen ihnen selbst schon gedreht haben.
+                // Während der Regatta zusätzlich beide Legs gegen isPlausibleRacingLeg
+                // prüfen (siehe dortige Doku) - ein Ausweich-/Bojenmanöver auf einem
+                // Halbwindkurs soll die Windschätzung nicht verfälschen.
+                val previousAwa = GeoUtils.angleDiff(previousSteady, wd)
                 if (previousSteadyAtMs != null &&
-                    fix.timestampMs - previousSteadyAtMs <= Constants.MANEUVER_SAMPLE_MAX_GAP_MS
+                    fix.timestampMs - previousSteadyAtMs <= Constants.MANEUVER_SAMPLE_MAX_GAP_MS &&
+                    isPlausibleRacingLeg(abs(previousAwa), isRacing) &&
+                    isPlausibleRacingLeg(abs(awa), isRacing)
                 ) {
                     val rawBisector = GeoUtils.circularMean(listOf(previousSteady, avg))
                     val bisector = if (abs(GeoUtils.angleDiff(rawBisector, wd)) <= 90.0) {
@@ -509,6 +540,16 @@ class WindEngine(
             lastSteadyAtMs = fix.timestampMs
             // Zeitstempel aus dem Fix, siehe Kommentar bei _sessionCalibrations oben.
             val shiftAtMs = fix.timestampMs
+
+            // Während der Regatta: ein Kurswechsel auf demselben Bug weg vom
+            // Wende-/Vorwind-Winkel ist meist ein Ausweich-/Bojenmanöver, kein
+            // echter Windshift - siehe isPlausibleRacingLeg-Doku. Weder Status/
+            // Haptik noch Sample/Session-Event auslösen, Referenzkurs oben ist
+            // trotzdem schon übernommen (analog zum MAX_PLAUSIBLE_DEG-Filter).
+            val prevSteadyAwa = GeoUtils.angleDiff(prevSteady, wd)
+            if (!isPlausibleRacingLeg(abs(prevSteadyAwa), isRacing) || !isPlausibleRacingLeg(abs(awa), isRacing)) {
+                return
+            }
 
             var isHeader: Boolean? = null
             if (target != null && fix.lat != null && fix.lon != null) {
