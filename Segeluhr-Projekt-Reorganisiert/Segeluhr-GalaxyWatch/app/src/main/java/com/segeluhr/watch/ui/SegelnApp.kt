@@ -46,7 +46,7 @@ fun SegelnApp(viewModel: SegeluhrWatchViewModel) {
         val pagerState = rememberPagerState(pageCount = { TAB_TITLES.size })
 
         // Zwei-Wege-Sync mit dem physischen Taster (siehe MainActivity/
-        // SegeluhrWatchViewModel.onPhysicalButtonShortPress, Roman-Wunsch
+        // SegeluhrWatchViewModel.onPhysicalButtonNextPage, Roman-Wunsch
         // "Taster statt Touch bei Nässe"): ein Tastendruck setzt
         // viewModel.currentPage, das hier den Pager dorthin scrollt. Ein
         // manueller Wisch (Touch funktioniert ja z.B. an Land/im Stillstand

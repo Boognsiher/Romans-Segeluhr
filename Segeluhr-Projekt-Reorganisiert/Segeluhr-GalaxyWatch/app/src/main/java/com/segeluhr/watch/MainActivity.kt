@@ -33,8 +33,8 @@ class MainActivity : ComponentActivity() {
     // Nässe ist der Touchscreen unzuverlässig, Countdown-Start und Tab-
     // Wechsel sollen über die Hardware-Taste laufen, siehe
     // docs/Erweiterung_GalaxyWatch_App.md "Physischer Taster"). Kurzer Druck
-    // = nächste Anzeige, langer Druck = Hauptaktion (siehe
-    // SegeluhrWatchViewModel.onPhysicalButton{Short,Long}Press).
+    // = Hauptaktion (öfter gebraucht, soll schnell gehen), langer Druck =
+    // nächste Anzeige (siehe SegeluhrWatchViewModel.onPhysicalButton{Action,NextPage}).
     //
     // WELCHE Taste die Watch 5 Pro dafür tatsächlich sendet, ist ohne
     // Hardware-Test nicht sicher bekannt — der Home-Knopf ist auf Wear OS
@@ -56,9 +56,9 @@ class MainActivity : ComponentActivity() {
         if (keyCode in PHYSICAL_ACTION_KEYCODES) {
             val heldMs = SystemClock.elapsedRealtime() - keyDownAtMs
             if (heldMs >= LONG_PRESS_THRESHOLD_MS) {
-                viewModel.onPhysicalButtonLongPress()
+                viewModel.onPhysicalButtonNextPage()
             } else {
-                viewModel.onPhysicalButtonShortPress()
+                viewModel.onPhysicalButtonAction()
             }
             return true
         }

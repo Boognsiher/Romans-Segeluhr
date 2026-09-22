@@ -40,6 +40,8 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
     // currentPage ist ab jetzt die Wahrheitsquelle fürs aktuell sichtbare Tab
     // (SegelnApp.kt synct den HorizontalPager in BEIDE Richtungen dagegen),
     // damit ein Tastendruck von woher auch immer die letzte Anzeige weiss.
+    // Zuordnung 22.09.2026 getauscht (Roman-Feedback): kurzer Druck = Aktion
+    // (öfter gebraucht, soll schneller gehen), langer Druck = Tab-Wechsel.
     private val _currentPage = MutableStateFlow(0)
     val currentPage: StateFlow<Int> = _currentPage
 
@@ -47,14 +49,14 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
         _currentPage.value = page
     }
 
-    /** Kurzer Tastendruck (siehe MainActivity.onKeyUp): zur nächsten Anzeige weiterschalten. */
-    fun onPhysicalButtonShortPress() {
+    /** Langer Tastendruck (siehe MainActivity.onKeyUp): zur nächsten Anzeige weiterschalten. */
+    fun onPhysicalButtonNextPage() {
         _currentPage.value = (_currentPage.value + 1) % TAB_COUNT
         hapticPlayer.play(BleProtocol.HAPTIC_STEP1)
     }
 
     /**
-     * Langer Tastendruck: kontextabhängige Hauptaktion, damit Countdown-Start
+     * Kurzer Tastendruck: kontextabhängige Hauptaktion, damit Countdown-Start
      * und Bojen-Rundungs-Bestätigung (die zwei zeitkritischen Aktionen beim
      * Segeln) auch mit nassen/behandschuhten Händen zuverlässig auslösbar
      * sind — Touch bleibt für alles andere (Einstellungen, Wegpunkte,
@@ -63,7 +65,7 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
      * als Overlay erscheint (siehe SegelnApp.kt) und die dringendere der
      * beiden Aktionen ist.
      */
-    fun onPhysicalButtonLongPress() {
+    fun onPhysicalButtonAction() {
         when {
             uiState.value.race?.roundingConfirmPending == true -> {
                 confirmBuoyRounding()

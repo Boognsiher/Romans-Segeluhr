@@ -205,13 +205,15 @@ physische Taste muss zwei Funktionen abdecken, gelöst über
 Druckdauer-Unterscheidung (Standard-Android-Muster, `onKeyDown`/`onKeyUp`
 in `MainActivity.kt`, Dauer per `SystemClock.elapsedRealtime()`-Differenz):
 
-- **Kurzer Druck** (< 500ms) → nächste Anzeige (`onPhysicalButtonShortPress()`,
-  zyklisch Nav→Wind→Heim→CD→Man→Menu→Nav...).
-- **Langer Druck** (≥ 500ms) → kontextabhängige Hauptaktion
-  (`onPhysicalButtonLongPress()`): Bojen-Rundung bestätigen, falls die
-  Rückfrage gerade aussteht (Vorrang, weil tab-unabhängig als Overlay
+- **Kurzer Druck** (< 500ms) → kontextabhängige Hauptaktion
+  (`onPhysicalButtonAction()`, 22.09.2026 auf Roman-Feedback hin diese
+  Zuordnung statt umgekehrt — die Aktion wird öfter gebraucht, soll also
+  der schnellere/einfachere Druck sein): Bojen-Rundung bestätigen, falls
+  die Rückfrage gerade aussteht (Vorrang, weil tab-unabhängig als Overlay
   erscheint und die dringendere der beiden Aktionen ist); sonst Countdown
   starten, falls der CD-Tab gerade sichtbar ist; sonst keine Aktion.
+- **Langer Druck** (≥ 500ms) → nächste Anzeige (`onPhysicalButtonNextPage()`,
+  zyklisch Nav→Wind→Heim→CD→Man→Menu→Nav...).
 
 **Welchen Tastencode die Watch 5 Pro dafür tatsächlich sendet, ist ohne
 Hardware-Test nicht sicher bekannt** — `MainActivity.kt` hört deshalb
@@ -226,7 +228,7 @@ man mit "Zurück" aussteigen müsste.
 - **`SegeluhrWatchViewModel`**: neuer `currentPage`-`StateFlow<Int>` ist ab
   jetzt die Wahrheitsquelle fürs sichtbare Tab (`TAB_COUNT`/`CD_TAB_INDEX`
   im Companion Object — müssen synchron zu `SegelnApp.TAB_TITLES` bleiben).
-  `onPhysicalButtonShortPress()`/`onPhysicalButtonLongPress()` plus lokales
+  `onPhysicalButtonAction()`/`onPhysicalButtonNextPage()` plus lokales
   Haptik-Feedback über die bestehende `HapticPlayer` (1 Puls für
   Tab-Wechsel = `HAPTIC_STEP1`, 2 Pulse für eine ausgelöste Aktion =
   `HAPTIC_DONE2`, dieselbe Semantik wie die vom Handy kommenden Codes) und
