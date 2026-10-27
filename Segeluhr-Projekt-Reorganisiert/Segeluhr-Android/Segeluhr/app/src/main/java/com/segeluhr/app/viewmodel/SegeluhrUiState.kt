@@ -134,4 +134,15 @@ data class SegeluhrUiState(
     // stopApp() gebaut, null solange kein Bericht ansteht. Zeigt der
     // SessionReportDialog an; dismissSessionReport() setzt wieder auf null.
     val sessionReport: SessionReport? = null,
+
+    // Regatta-Tracker-Anbindung (Erweiterung, siehe docs/Erweiterung_Regatta_Tracker.md).
+    // Das Token bleibt bewusst im SettingsRepository und taucht hier nicht auf.
+    val trackerServerUrl: String = "",
+    val trackerId: String = "",
+    val trackerEnabled: Boolean = false,
+    val trackerStatus: String = "",
+    // Positionen, die wegen fehlender Verbindung noch auf das Senden warten.
+    val trackerPending: Int = 0,
+    // true während Konfig hoch-/runterladen läuft (sperrt die beiden Buttons).
+    val trackerConfigBusy: Boolean = false,
 )

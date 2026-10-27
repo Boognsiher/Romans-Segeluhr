@@ -364,6 +364,11 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onStopApp = viewModel::stopApp,
                     onStartApp = viewModel::startApp,
                     onSetWaypointFromMap = viewModel::startWaypointMapPick,
+                    onSetTrackerLink = viewModel::setTrackerLink,
+                    onTrackerEnabledChanged = viewModel::setTrackerEnabled,
+                    onClearTracker = viewModel::clearTracker,
+                    onUploadTrackerConfig = viewModel::uploadTrackerConfig,
+                    onDownloadTrackerConfig = viewModel::downloadTrackerConfig,
                 )
             }
         }

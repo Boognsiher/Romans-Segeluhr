@@ -28,6 +28,10 @@ import com.segeluhr.app.geo.CirclePacking
 import com.segeluhr.app.geo.LakeAutoDetector
 import com.segeluhr.app.location.LocationProvider
 import com.segeluhr.app.logic.*
+import com.segeluhr.app.tracker.TrackerClient
+import com.segeluhr.app.tracker.TrackerLink
+import com.segeluhr.app.tracker.TrackerPosition
+import com.segeluhr.app.tracker.TrackerSettings
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -98,6 +102,13 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     // Wettfahrt noch nicht abgeschlossen ist (siehe startCountdown/
     // stopCompetition/closeRaceSession) - null ausserhalb einer Wettfahrt.
     private var raceStartedAtMs: Long? = null
+
+    // Regatta-Tracker (siehe docs/Erweiterung_Regatta_Tracker.md)
+    private val trackerClient = TrackerClient()
+    private var trackerSettings = TrackerSettings()
+    private val trackerBuffer = ArrayDeque<TrackerPosition>()
+    private var lastTrackerSampleMs = 0L
+    private var trackerSendJob: Job? = null
 
     init {
         // Steuerbefehle von der Uhr (CMD_*, siehe BleProtocol.kt) auf die
@@ -186,6 +197,17 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             // state.appRole und entscheidet, welcher Screen-Baum ueberhaupt
             // gezeigt wird (siehe docs/Erweiterung_Landuhr_Kartenansicht.md).
             settingsRepo.appRoleFlow.collect { role -> _uiState.update { it.copy(appRole = role) } }
+        }
+        viewModelScope.launch {
+            settingsRepo.trackerSettingsFlow.collect { t ->
+                trackerSettings = t
+                _uiState.update {
+                    it.copy(
+                        trackerServerUrl = t.serverUrl, trackerId = t.trackerId,
+                        trackerEnabled = t.enabled && t.configured,
+                    )
+                }
+            }
         }
         startTicker()
     }
@@ -294,6 +316,8 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         val countdownS = countdownEngine.tick()
 
         distanceTracker.sample(valid, fix.lat, fix.lon, fix.sogKn)
+
+        maybeSendTrackerPosition(fix, valid)
 
         renderTelemetry(fix, valid, countdownS, competitionGuidance)
     }
@@ -826,6 +850,133 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         setOperationMode(OperationMode.STANDALONE)
     }
 
+    // ---- Regatta-Tracker (siehe docs/Erweiterung_Regatta_Tracker.md) ----
+
+    private fun setTrackerStatus(text: String) {
+        _uiState.update { it.copy(trackerStatus = text, trackerPending = trackerBuffer.size) }
+    }
+
+    /** Alle 5 s einen Fix in den Puffer legen und den Puffer an den Server senden (Aufruf aus [tick], nur mit gültigem Fix). */
+    private fun maybeSendTrackerPosition(fix: Fix, valid: Boolean) {
+        val cfg = trackerSettings
+        if (!cfg.enabled || !cfg.configured || !valid) return
+        val lat = fix.lat ?: return
+        val lon = fix.lon ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastTrackerSampleMs < TRACKER_SEND_INTERVAL_MS) return
+        lastTrackerSampleMs = now
+
+        trackerBuffer.addLast(
+            TrackerPosition(
+                lat = lat, lon = lon,
+                accuracyM = fix.accuracyM?.toDouble(),
+                speedMs = fix.sogKn?.let { it / 1.943844 },
+                headingDeg = fix.cogDeg,
+                battery = phoneBatteryFraction(),
+                timestampMs = fix.timestampMs,
+            )
+        )
+        // Bei langem Funkloch nicht unbegrenzt wachsen: älteste Punkte verwerfen.
+        while (trackerBuffer.size > TRACKER_MAX_BUFFER) trackerBuffer.removeFirst()
+
+        if (trackerSendJob?.isActive == true) return
+        trackerSendJob = viewModelScope.launch { flushTrackerBuffer() }
+    }
+
+    private suspend fun flushTrackerBuffer() {
+        while (true) {
+            val cfg = trackerSettings
+            if (!cfg.enabled || !cfg.configured) break
+            val next = trackerBuffer.firstOrNull() ?: break
+            val result = trackerClient.postPosition(cfg, next)
+            if (!result.ok) {
+                setTrackerStatus("Senden fehlgeschlagen: ${result.message}")
+                return
+            }
+            if (trackerBuffer.firstOrNull() === next) trackerBuffer.removeFirst()
+        }
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.GERMANY).format(java.util.Date())
+        setTrackerStatus("Zuletzt gesendet $time")
+    }
+
+    /** Akkustand des Handys als 0..1, null wenn nicht ermittelbar. */
+    private fun phoneBatteryFraction(): Double? {
+        val bm = getApplication<Application>().getSystemService(android.content.Context.BATTERY_SERVICE) as? android.os.BatteryManager
+        val pct = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: return null
+        return if (pct in 0..100) pct / 100.0 else null
+    }
+
+    /** Setup-Tab: Tracker-Link (aus Admin-Bereich / QR-Code) übernehmen. */
+    fun setTrackerLink(link: String) {
+        val parsed = TrackerLink.parse(link)
+        if (parsed == null) {
+            setTrackerStatus("Link nicht erkannt — erwartet: https://server/t/<id>?token=<token>")
+            return
+        }
+        viewModelScope.launch {
+            settingsRepo.setTrackerCredentials(parsed.serverUrl, parsed.trackerId, parsed.token)
+            setTrackerStatus("Tracker ${parsed.trackerId} verbunden.")
+        }
+    }
+
+    fun setTrackerEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepo.setTrackerEnabled(enabled) }
+        if (!enabled) setTrackerStatus("Senden aus.")
+    }
+
+    fun clearTracker() {
+        trackerBuffer.clear()
+        viewModelScope.launch { settingsRepo.clearTracker() }
+        setTrackerStatus("")
+    }
+
+    /** Setup-Tab "Konfiguration hochladen": aktuellen Stand auf dem Server ablegen. */
+    fun uploadTrackerConfig() {
+        val cfg = trackerSettings
+        if (!cfg.configured || _uiState.value.trackerConfigBusy) return
+        _uiState.update { it.copy(trackerConfigBusy = true) }
+        viewModelScope.launch {
+            val result = trackerClient.putConfig(cfg, settingsRepo.exportConfigJson())
+            _uiState.update { it.copy(trackerConfigBusy = false) }
+            setTrackerStatus(if (result.ok) "Konfiguration hochgeladen." else "Hochladen fehlgeschlagen: ${result.message}")
+        }
+    }
+
+    /** Setup-Tab "Konfiguration laden": Server-Stand übernimmt Wegpunkte/Profile/Betriebsmodus lokal. */
+    fun downloadTrackerConfig() {
+        val cfg = trackerSettings
+        if (!cfg.configured || _uiState.value.trackerConfigBusy) return
+        _uiState.update { it.copy(trackerConfigBusy = true) }
+        viewModelScope.launch {
+            val result = trackerClient.getConfig(cfg)
+            val data = result.body?.optJSONObject("data")
+            if (!result.ok || data == null) {
+                _uiState.update { it.copy(trackerConfigBusy = false) }
+                setTrackerStatus("Laden fehlgeschlagen: ${if (result.ok) "leere Antwort" else result.message}")
+                return@launch
+            }
+            // Vor dem Import zurücksetzen: der boatProfilesFlow-Collector lädt die
+            // WindEngine dann garantiert mit den neuen Winkeln, auch bei gleicher Profil-ID.
+            lastLoadedBoatProfileId = null
+            try {
+                settingsRepo.importConfigJson(data)
+            } catch (e: IllegalArgumentException) {
+                _uiState.update { it.copy(trackerConfigBusy = false) }
+                setTrackerStatus("Laden fehlgeschlagen: ${e.message}")
+                return@launch
+            }
+            when (data.optString("operationMode")) {
+                OperationMode.WITH_WATCH.name -> setOperationMode(OperationMode.WITH_WATCH)
+                OperationMode.STANDALONE.name -> setOperationMode(OperationMode.STANDALONE)
+            }
+            _uiState.update { it.copy(trackerConfigBusy = false) }
+            val stamp = (result.body?.optLong("updatedAt", 0L) ?: 0L).takeIf { it > 0 }?.let {
+                java.text.SimpleDateFormat("dd.MM. HH:mm", java.util.Locale.GERMANY).format(java.util.Date(it))
+            }
+            setTrackerStatus("Konfiguration geladen" + (stamp?.let { " (Stand $it)" } ?: "") + ".")
+        }
+    }
+
     fun setWakeLockEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsRepo.setWakeLockEnabled(enabled) }
     }
@@ -1095,5 +1246,12 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             if (report != null) db.sessionDao().insert(report.toEntity())
             onResult(report != null)
         }
+    }
+
+    private companion object {
+        /** Wie oft eine Position an den Tracker-Server geht (wie die Web-Tracker-Seite). */
+        const val TRACKER_SEND_INTERVAL_MS = 5000L
+        /** Max. Positionen im Offline-Puffer (~16 Min bei 5 s). */
+        const val TRACKER_MAX_BUFFER = 200
     }
 }

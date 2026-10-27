@@ -49,6 +49,12 @@ fun SetupScreen(
     onStartApp: () -> Unit,
     // NEU (12.08.2026, siehe docs/Erweiterung_Boje_Kartenauswahl.md)
     onSetWaypointFromMap: (String) -> Unit,
+    // NEU: Regatta-Tracker-Anbindung (siehe docs/Erweiterung_Regatta_Tracker.md)
+    onSetTrackerLink: (String) -> Unit,
+    onTrackerEnabledChanged: (Boolean) -> Unit,
+    onClearTracker: () -> Unit,
+    onUploadTrackerConfig: () -> Unit,
+    onDownloadTrackerConfig: () -> Unit,
 ) {
     Column(
         Modifier
@@ -280,6 +286,84 @@ fun SetupScreen(
                 Button(onClick = onRequestLocationPermission, modifier = Modifier.fillMaxWidth()) {
                     Text("Bluetooth-Berechtigung erlauben (für \"An Land\")")
                 }
+            }
+        }
+
+        SectionCard("Regatta-Tracker") {
+            val connected = state.trackerId.isNotBlank()
+            var linkInput by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+            if (!connected) {
+                Text(
+                    "Tracker-Link aus dem Admin-Bereich des Trackers einfügen (https://…/t/<id>?token=…). " +
+                        "Danach sendet die App ihre Position selbst — kein zweites Handy-Browserfenster nötig.",
+                    fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(bottom = 8.dp),
+                )
+                OutlinedTextField(
+                    value = linkInput,
+                    onValueChange = { linkInput = it },
+                    label = { Text("Tracker-Link") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { onSetTrackerLink(linkInput); linkInput = "" },
+                    enabled = linkInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Verbinden") }
+            } else {
+                Text(
+                    "Verbunden: ${state.trackerServerUrl.substringAfter("://")} · Tracker ${state.trackerId}",
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text("Position senden")
+                        Text(
+                            "Alle 5 s an den Tracker-Server. Läuft nur, solange die App aktiv ist " +
+                                "(bei Standby: \"Display wach halten\" oder Modus \"Mit Uhr\" nutzen).",
+                            fontSize = 11.sp, color = TextDim,
+                        )
+                    }
+                    Switch(checked = state.trackerEnabled, onCheckedChange = onTrackerEnabledChanged)
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = onUploadTrackerConfig,
+                        enabled = !state.trackerConfigBusy,
+                        colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Konfig hochladen") }
+                    OutlinedButton(
+                        onClick = onDownloadTrackerConfig,
+                        enabled = !state.trackerConfigBusy,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Konfig laden") }
+                }
+                Text(
+                    "Konfig = Wegpunkte, Seegrenze, Boots-Profile, Betriebsmodus. \"Laden\" ersetzt die lokalen Werte.",
+                    fontSize = 11.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onClearTracker,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Red),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Verbindung entfernen") }
+            }
+            if (state.trackerStatus.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                val failed = state.trackerStatus.contains("fehlgeschlagen") || state.trackerStatus.contains("nicht erkannt")
+                Text(
+                    state.trackerStatus + if (state.trackerPending > 0) " · ${state.trackerPending} Positionen warten" else "",
+                    fontSize = 12.sp, color = if (failed) Amber else TextDim,
+                )
             }
         }
 
