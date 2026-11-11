@@ -40,8 +40,8 @@ Beim Laden werden in der Konfig fehlende Wegpunkte lokal gelöscht (Server-Stand
 
 - **Noch nicht kompiliert/getestet** (Entwicklungsumgebung ohne Android-SDK) — beim nächsten
   Build in Android Studio auf Compile-Fehler achten, dann auf dem Wasser testen.
-- Senden läuft über den ViewModel-Tick, also nur solange der Prozess lebt. Im Modus "Mit Uhr"
-  hält der Foreground-Service die App am Leben; "Ohne Uhr" bei ausgeschaltetem Display ggf.
-  "Display wach halten" nutzen. Eigener Foreground-Service nur für den Tracker wäre ein möglicher nächster Schritt.
+- Senden läuft über den ViewModel-Tick. Seit dem Merge von `smartphone-tracking-without-watch` (13.09.)
+  läuft der Foreground-Service in beiden Betriebsmodi, das Senden geht also auch ohne Uhr bei
+  ausgeschaltetem Display weiter. Bei "Stopp" (Setup-Tab "App-Betrieb") und in der Land-Rolle ruht es.
 - Token liegt unverschlüsselt in DataStore (wie sonst alle Einstellungen).
 - Zusatzdaten für die Karte (Rennstatus, Wind, Countdown) könnten später im Positions-POST mitgesendet werden.

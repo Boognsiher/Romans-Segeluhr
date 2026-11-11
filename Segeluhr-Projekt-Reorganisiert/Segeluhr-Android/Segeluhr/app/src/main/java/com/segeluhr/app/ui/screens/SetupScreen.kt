@@ -334,8 +334,8 @@ fun SetupScreen(
                     Column(Modifier.weight(1f).padding(end = 8.dp)) {
                         Text("Position senden")
                         Text(
-                            "Alle 5 s an den Tracker-Server. Läuft nur, solange die App aktiv ist " +
-                                "(bei Standby: \"Display wach halten\" oder Modus \"Mit Uhr\" nutzen).",
+                            "Alle 5 s an den Tracker-Server, auch bei ausgeschaltetem Display " +
+                                "(Foreground-Service). Nicht bei \"Stopp\" im App-Betrieb.",
                             fontSize = 11.sp, color = TextDim,
                         )
                     }
