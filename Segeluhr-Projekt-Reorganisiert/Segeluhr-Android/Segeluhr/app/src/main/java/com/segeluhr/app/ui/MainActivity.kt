@@ -183,6 +183,17 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
         return
     }
 
+    // Dritte Rolle (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md) - kein
+    // eigenes ViewModel nötig, nur ein per SettingsRepository gemerkter Link.
+    if (state.appRole == AppRole.SPECTATOR) {
+        SpectatorScreen(
+            url = state.spectatorUrl,
+            onSetUrl = viewModel::setSpectatorUrl,
+            onSwitchToSailorMode = { viewModel.setAppRole(AppRole.SAILOR) },
+        )
+        return
+    }
+
     // See-Grenze-Zeichnen-Modus (siehe docs/Erweiterung_Seegrenze_Zeichnen.md)
     // — ersetzt wie die Land-Rolle oben komplett den Tab-Baum, solange aktiv.
     if (state.lakeDrawModeActive) {
@@ -369,6 +380,9 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onClearTracker = viewModel::clearTracker,
                     onUploadTrackerConfig = viewModel::uploadTrackerConfig,
                     onDownloadTrackerConfig = viewModel::downloadTrackerConfig,
+                    onSetGatewayToken = viewModel::setGatewayToken,
+                    onGatewayEnabledChanged = viewModel::setGatewayEnabled,
+                    onClearGateway = viewModel::clearGateway,
                 )
             }
         }

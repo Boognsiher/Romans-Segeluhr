@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -22,6 +23,7 @@ import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.ui.components.SectionCard
 import com.segeluhr.app.ui.components.WaypointRow
 import com.segeluhr.app.ui.theme.Amber
+import com.segeluhr.app.ui.theme.Green
 import com.segeluhr.app.ui.theme.Red
 import com.segeluhr.app.ui.theme.Teal
 import com.segeluhr.app.ui.theme.TextDim
@@ -55,6 +57,10 @@ fun SetupScreen(
     onClearTracker: () -> Unit,
     onUploadTrackerConfig: () -> Unit,
     onDownloadTrackerConfig: () -> Unit,
+    // NEU: Regatta-Tracker-Gateway (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md)
+    onSetGatewayToken: (String) -> Unit,
+    onGatewayEnabledChanged: (Boolean) -> Unit,
+    onClearGateway: () -> Unit,
 ) {
     Column(
         Modifier
@@ -172,6 +178,7 @@ fun SetupScreen(
                 val roles = listOf(
                     AppRole.SAILOR to "Auf dem Boot",
                     AppRole.SHORE to "An Land",
+                    AppRole.SPECTATOR to "Zuschauer",
                 )
                 roles.forEach { (role, label) ->
                     val active = state.appRole == role
@@ -189,7 +196,8 @@ fun SetupScreen(
             Text(
                 "\"An Land\" zeigt statt der Segel-Tabs nur eine Karte mit der zuletzt " +
                     "per LoRa empfangenen Boot-Position (verbindet sich per Bluetooth mit " +
-                    "der Land-Uhr, nicht mit dem Boot direkt). Zurück geht's im Karten-Screen selbst.",
+                    "der Land-Uhr, nicht mit dem Boot direkt). \"Zuschauer\" zeigt die Live-" +
+                    "Karten-Webseite des Regatta-Tracker-Servers. Zurück geht's im jeweiligen Screen selbst.",
                 fontSize = 12.sp, color = TextDim,
             )
         }
@@ -376,6 +384,73 @@ fun SetupScreen(
             }
         }
 
+        SectionCard("Regatta-Tracker-Gateway") {
+            var tokenInput by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+            Text(
+                "Verbindet sich per Bluetooth mit dem \"RegattaMaster\"-Board, das LoRa-" +
+                    "Positionen ANDERER Boote sammelt, und reicht sie an denselben Tracker-" +
+                    "Server weiter (eigenes Gateway-Token vom Server-Betreiber, braucht einen " +
+                    "verbundenen Tracker oben für die Server-Adresse).",
+                fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(bottom = 8.dp),
+            )
+            if (!state.gatewayConfigured) {
+                OutlinedTextField(
+                    value = tokenInput,
+                    onValueChange = { tokenInput = it },
+                    label = { Text("Gateway-Token") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { onSetGatewayToken(tokenInput); tokenInput = "" },
+                    enabled = tokenInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Token speichern") }
+            } else {
+                Row(
+                    Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Token gespeichert", fontSize = 13.sp)
+                    OutlinedButton(
+                        onClick = onClearGateway,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Red),
+                    ) { Text("Entfernen") }
+                }
+            }
+            if (state.trackerId.isBlank()) {
+                Text(
+                    "Erst oben unter \"Regatta-Tracker\" verbinden (Server-Adresse fehlt sonst).",
+                    fontSize = 11.sp, color = Amber, modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text("Weiterleiten aktiv")
+                    Text(
+                        gatewayConnectionLabel(state.gatewayConnectionState),
+                        fontSize = 11.sp, color = TextDim,
+                    )
+                }
+                Switch(checked = state.gatewayEnabled, onCheckedChange = onGatewayEnabledChanged)
+            }
+            if (state.gatewayStatus.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                val failed = state.gatewayStatus.contains("fehlgeschlagen")
+                Text(
+                    state.gatewayStatus + if (state.gatewayQueuePending > 0) " · ${state.gatewayQueuePending} Positionen warten" else "",
+                    fontSize = 12.sp, color = if (failed) Amber else TextDim,
+                )
+            }
+            GatewayTrackersOverview(state.gatewayTrackers)
+        }
+
         SectionCard("Diagnose-Log") {
             val context = androidx.compose.ui.platform.LocalContext.current
             Row(
@@ -458,3 +533,60 @@ fun SetupScreen(
 }
 
 private fun fmt(p: GeoPoint?): String = if (p == null) "nicht gesetzt" else "%.5f, %.5f".format(p.lat, p.lon)
+
+private fun gatewayConnectionLabel(s: com.segeluhr.app.ble.GatewayConnectionState): String = when (s) {
+    com.segeluhr.app.ble.GatewayConnectionState.DISCONNECTED -> "Keine Verbindung zum RegattaMaster"
+    com.segeluhr.app.ble.GatewayConnectionState.SCANNING -> "Suche RegattaMaster (Bluetooth)..."
+    com.segeluhr.app.ble.GatewayConnectionState.CONNECTING -> "Verbinde mit RegattaMaster..."
+    com.segeluhr.app.ble.GatewayConnectionState.CONNECTED -> "Verbunden mit RegattaMaster"
+}
+
+// Wie lange ein Tracker als "aktiv" gilt, ohne ein neues Paket empfangen zu
+// haben (Master sendet laut Protokoll mehrmals/Sekunde - 10s lässt kurze
+// Funklöcher zu, ohne stale Trackerdaten als aktiv zu zeigen).
+private const val GATEWAY_TRACKER_ACTIVE_MS = 10_000L
+
+/**
+ * Status-Übersicht "wie viele Tracker senden Daten" (Roman-Wunsch), siehe
+ * SegeluhrUiState.gatewayTrackers. Eigener 1s-Ticker (wie LandUhrScreen)
+ * statt den ViewModel-Tick zu nutzen - läuft nur, während diese Section
+ * sichtbar ist, und braucht keinen eigenen State im ViewModel.
+ */
+@Composable
+private fun GatewayTrackersOverview(trackers: List<com.segeluhr.app.viewmodel.GatewayTrackerInfo>) {
+    var now by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    if (trackers.isEmpty()) {
+        Spacer(Modifier.height(10.dp))
+        Text("Noch keine Tracker-Pakete empfangen.", fontSize = 12.sp, color = TextDim)
+        return
+    }
+    val activeCount = trackers.count { now - it.lastSeenMs < GATEWAY_TRACKER_ACTIVE_MS }
+    Spacer(Modifier.height(10.dp))
+    Text(
+        "$activeCount von ${trackers.size} Trackern aktiv (Paket in den letzten ${GATEWAY_TRACKER_ACTIVE_MS / 1000}s)",
+        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (activeCount > 0) Green else TextDim,
+    )
+    Spacer(Modifier.height(6.dp))
+    trackers.forEach { t ->
+        val ageS = (now - t.lastSeenMs) / 1000
+        val active = ageS * 1000 < GATEWAY_TRACKER_ACTIVE_MS
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Tracker ${t.loraId}", fontSize = 12.sp, color = if (active) TextLight else TextDim)
+            Text(
+                "vor ${ageS}s" +
+                    (t.batteryPct?.let { " · Akku $it%" } ?: "") +
+                    " · ${t.rssi} dBm",
+                fontSize = 12.sp, color = if (active) TextDim else TextDim.copy(alpha = 0.6f),
+            )
+        }
+    }
+}

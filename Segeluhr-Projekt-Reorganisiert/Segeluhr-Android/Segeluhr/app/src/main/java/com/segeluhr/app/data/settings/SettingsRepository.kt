@@ -67,6 +67,17 @@ class SettingsRepository(private val context: Context) {
         val TRACKER_ID = stringPreferencesKey("tracker_id")
         val TRACKER_TOKEN = stringPreferencesKey("tracker_token")
         val TRACKER_ENABLED = booleanPreferencesKey("tracker_enabled")
+
+        // Gateway-Rolle für LoRa-Tracker anderer Boote, siehe
+        // docs/Erweiterung_Regatta_Tracker_Gateway.md. Nutzt bewusst dieselbe
+        // TRACKER_URL (ein Server für beides) - nur ein eigenes Secret
+        // (x-gateway-token statt Bearer), da Gateway-Zugang unabhängig vom
+        // eigenen Tracker-Zugang vergeben wird.
+        val GATEWAY_TOKEN = stringPreferencesKey("gateway_token")
+        val GATEWAY_ENABLED = booleanPreferencesKey("gateway_enabled")
+
+        // Zuschauer-Rolle (AppRole.SPECTATOR) - Link zur Live-Karten-Webseite.
+        val SPECTATOR_URL = stringPreferencesKey("spectator_url")
     }
 
     /** Wegpunkt-Schlüssel (wie in setWaypoint/clearWaypoint) -> DataStore-Keys, für Konfig-Export/-Import. */
@@ -380,12 +391,24 @@ class SettingsRepository(private val context: Context) {
     val appRoleFlow: Flow<AppRole> = context.dataStore.data.map { p ->
         when (p[Keys.APP_ROLE]) {
             AppRole.SHORE.name -> AppRole.SHORE
+            AppRole.SPECTATOR.name -> AppRole.SPECTATOR
             else -> AppRole.SAILOR // Default: bisheriges Verhalten, niemand faellt versehentlich in den Land-Modus
         }
     }
 
     suspend fun setAppRole(role: AppRole) {
         context.dataStore.edit { it[Keys.APP_ROLE] = role.name }
+    }
+
+    // ---- Zuschauer-Rolle (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md) ----
+    // Nur ein gemerkter Link zur Live-Karten-Webseite des Tracker-Servers -
+    // bewusst getrennt von TRACKER_URL/TRACKER_ID (das ist der eigene
+    // Positions-Upload, hier geht's nur um die vom Server servierte Seite).
+
+    val spectatorUrlFlow: Flow<String> = context.dataStore.data.map { p -> p[Keys.SPECTATOR_URL].orEmpty() }
+
+    suspend fun setSpectatorUrl(url: String) {
+        context.dataStore.edit { it[Keys.SPECTATOR_URL] = url }
     }
 
     // ---- Regatta-Tracker (siehe docs/Erweiterung_Regatta_Tracker.md) ----
@@ -415,6 +438,29 @@ class SettingsRepository(private val context: Context) {
             p.remove(Keys.TRACKER_URL); p.remove(Keys.TRACKER_ID); p.remove(Keys.TRACKER_TOKEN)
             p.remove(Keys.TRACKER_ENABLED)
         }
+    }
+
+    // ---- Regatta-Tracker-Gateway (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md) ----
+    // Eigenes Token, aber dieselbe Server-URL wie trackerSettingsFlow.serverUrl.
+
+    data class GatewaySettings(val token: String = "", val enabled: Boolean = false) {
+        val configured: Boolean get() = token.isNotBlank()
+    }
+
+    val gatewaySettingsFlow: Flow<GatewaySettings> = context.dataStore.data.map { p ->
+        GatewaySettings(token = p[Keys.GATEWAY_TOKEN].orEmpty(), enabled = p[Keys.GATEWAY_ENABLED] ?: false)
+    }
+
+    suspend fun setGatewayToken(token: String) {
+        context.dataStore.edit { it[Keys.GATEWAY_TOKEN] = token }
+    }
+
+    suspend fun setGatewayEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.GATEWAY_ENABLED] = enabled }
+    }
+
+    suspend fun clearGateway() {
+        context.dataStore.edit { p -> p.remove(Keys.GATEWAY_TOKEN); p.remove(Keys.GATEWAY_ENABLED) }
     }
 
     // ---- Konfiguration auf dem Tracker-Server ablegen / von dort laden ----

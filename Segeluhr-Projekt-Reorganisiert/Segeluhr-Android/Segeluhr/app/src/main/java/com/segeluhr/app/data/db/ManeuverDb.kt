@@ -44,10 +44,19 @@ interface ManeuverDao {
 // noch in der Hardware-Testphase, ein einmaliger Verlust des bisherigen
 // Manöver-Logs beim ersten Start nach diesem Update ist bewusst in Kauf
 // genommen statt einer für ein einzelnes Gerät unnötigen Migration.
-@Database(entities = [ManeuverEntity::class, SessionEntity::class], version = 2, exportSchema = false)
+// Version 3 (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md): neue
+// "gateway_positions"-Tabelle, persistente Warteschlange für per LoRa/BLE
+// vom RegattaMaster empfangene Fremdboot-Positionen. Gleiche destruktive
+// Migration wie oben - die Queue ist ohnehin nur Zwischenspeicher.
+@Database(
+    entities = [ManeuverEntity::class, SessionEntity::class, GatewayPositionEntity::class],
+    version = 3,
+    exportSchema = false,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun maneuverDao(): ManeuverDao
     abstract fun sessionDao(): SessionDao
+    abstract fun gatewayQueueDao(): GatewayQueueDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
