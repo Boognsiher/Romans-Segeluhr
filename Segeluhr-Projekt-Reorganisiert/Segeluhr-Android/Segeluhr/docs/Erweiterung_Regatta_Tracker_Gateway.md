@@ -86,4 +86,7 @@ Setup-Tab ("wie viele Tracker senden gerade Daten").
   GPS-Fix. Jetzt: grün = Paket + Fix, amber = Paket ohne Fix ("KEIN GPS"), grau = inaktiv; die Kopfzeile nennt "N davon
   mit GPS". Fix abgeleitet aus Position ≠ (0,0) und bekanntem HDOP (`GatewayPacket.hasGpsFix`) — Annahme, gegen die
   Tracker-Firmware zu prüfen. Pakete ohne Fix werden bewusst unverändert mit (0, 0) hochgeladen; der Server ersetzt (0, 0) durch die zuletzt gültige Position des Trackers (Entscheidung 12.11.2026, serverseitig noch umzusetzen, siehe `Erweiterung_Geraete_Logik.md`).
+- **Datenvolumen-Zähler und Session-Mitschnitt (12.11.2026):** siehe `Erweiterung_Geraete_Logik.md` Abschnitte 5.3 und 6.
+  Der Relais-Upload ist als Kategorie "Relais" im Zähler ausgewiesen; jedes empfangene Tracker-Paket kann in die
+  Session-CSV geschrieben werden.
 

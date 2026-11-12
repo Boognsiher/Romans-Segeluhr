@@ -391,6 +391,10 @@ private fun SegeluhrApp(viewModel: SegeluhrViewModel, onRequestPermissions: () -
                     onSetGatewayToken = viewModel::setGatewayToken,
                     onGatewayEnabledChanged = viewModel::setGatewayEnabled,
                     onClearGateway = viewModel::clearGateway,
+                    onTrackerLogRecordingChanged = viewModel::setTrackerLogRecording,
+                    onMarkTrackerLogEvent = viewModel::markTrackerLogEvent,
+                    onGetTrackerLogShareUri = viewModel::shareTrackerLogUri,
+                    onResetNetworkUsage = viewModel::resetNetworkUsage,
                     onLeewardModeChanged = viewModel::setLeewardMode,
                 )
             }

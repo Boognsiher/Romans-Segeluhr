@@ -62,6 +62,11 @@ fun SetupScreen(
     onSetGatewayToken: (String) -> Unit,
     onGatewayEnabledChanged: (Boolean) -> Unit,
     onClearGateway: () -> Unit,
+    // NEU (12.11.2026): Datenvolumen-Zaehler + Tracker-Session-Mitschnitt
+    onTrackerLogRecordingChanged: (Boolean) -> Unit,
+    onMarkTrackerLogEvent: (String) -> Unit,
+    onGetTrackerLogShareUri: () -> android.net.Uri?,
+    onResetNetworkUsage: () -> Unit,
     // NEU (02.09.2026, siehe docs/Erweiterung_Competition_Kursmodell.md)
     onLeewardModeChanged: (LeewardMode) -> Unit,
 ) {
@@ -503,6 +508,104 @@ fun SetupScreen(
             GatewayTrackersOverview(state.gatewayTrackers)
         }
 
+        SectionCard("Datenvolumen (Tracker-Übertragung)") {
+            val u = state.networkUsage
+            val factor = com.segeluhr.app.tracker.NetworkUsageCounter.PROTOCOL_OVERHEAD_FACTOR
+            Text(
+                "Seit App-Start: ${formatBytes(u.sessionSent)} gesendet · ${formatBytes(u.sessionReceived)} empfangen " +
+                    "(≈ ${formatBytes(((u.sessionSent + u.sessionReceived) * factor).toLong())} inkl. TLS/TCP-Aufschlag)",
+                fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextLight,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Gesamt" + (if (u.totalSinceMs > 0) " seit " + java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.GERMANY).format(java.util.Date(u.totalSinceMs)) else "") +
+                    ": ${formatBytes(u.totalSent)} gesendet · ${formatBytes(u.totalReceived)} empfangen " +
+                    "(≈ ${formatBytes(((u.totalSent + u.totalReceived) * factor).toLong())})",
+                fontSize = 12.sp, color = TextDim,
+            )
+            Spacer(Modifier.height(6.dp))
+            com.segeluhr.app.tracker.UsageCategory.values().forEach { c ->
+                val b = u.session[c]
+                if (b != null) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(c.label, fontSize = 12.sp, color = TextLight)
+                        Text(
+                            "↑ ${formatBytes(b.sentBytes)} · ↓ ${formatBytes(b.receivedBytes)} · ${b.requests} Anfragen" +
+                                (if (b.failedRequests > 0) " (${b.failedRequests} fehlgeschlagen)" else ""),
+                            fontSize = 12.sp, color = if (b.failedRequests > 0) Amber else TextDim,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Gemessen auf HTTP-Ebene (Kopfzeilen + Inhalt). TLS/TCP-Aufschlag ist eine Schätzung (+25 %). " +
+                    "Nicht enthalten: Kartenkacheln (Land-Rolle) und die Live-Karte der Zuschauer-Rolle.",
+                fontSize = 11.sp, color = TextDim,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onResetNetworkUsage, modifier = Modifier.fillMaxWidth()) { Text("Gesamtzähler zurücksetzen") }
+        }
+
+        SectionCard("Tracker-Session aufzeichnen") {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            Row(
+                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text("Aufzeichnung aktiv")
+                    Text(
+                        "Schreibt jede eigene Position (alle 5 s) und jede über das Relais empfangene Tracker-Position " +
+                            "als CSV mit (inkl. Pakete ohne GPS-Fix). Jeder Start legt eine neue Datei an.",
+                        fontSize = 11.sp, color = TextDim,
+                    )
+                }
+                Switch(checked = state.trackerLogRecording, onCheckedChange = onTrackerLogRecordingChanged)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (state.trackerLogFileName != null) {
+                    "${state.trackerLogFileName} — ${state.trackerLogRowCount} Zeilen" +
+                        if (state.trackerLogRecording) " (läuft)" else " (beendet)"
+                } else {
+                    "Noch keine Aufnahme gestartet."
+                },
+                fontSize = 11.sp, color = if (state.trackerLogRecording) Green else TextDim,
+            )
+            Spacer(Modifier.height(12.dp))
+            var trackerNote by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+            OutlinedTextField(
+                value = trackerNote,
+                onValueChange = { trackerNote = it },
+                label = { Text("Notiz (optional, z.B. \"Start Wettfahrt 2\")") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { onMarkTrackerLogEvent(trackerNote); trackerNote = "" },
+                    enabled = state.trackerLogRecording,
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Ereignis markieren") }
+                OutlinedButton(
+                    onClick = {
+                        val uri = onGetTrackerLogShareUri() ?: return@OutlinedButton
+                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/csv"
+                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(android.content.Intent.createChooser(intent, "Tracker-Session teilen"))
+                    },
+                    enabled = state.trackerLogFileName != null,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Session teilen") }
+            }
+        }
+
         SectionCard("Diagnose-Log") {
             val context = androidx.compose.ui.platform.LocalContext.current
             Row(
@@ -659,4 +762,11 @@ private fun GatewayTrackersOverview(trackers: List<com.segeluhr.app.viewmodel.Ga
             )
         }
     }
+}
+
+/** Bytes lesbar: "812 B", "1,4 KB", "3,2 MB" (Dezimal-Kilobyte, wie bei Mobilfunk-Tarifen ueblich). */
+private fun formatBytes(bytes: Long): String = when {
+    bytes < 1000 -> "$bytes B"
+    bytes < 1_000_000 -> String.format(java.util.Locale.GERMANY, "%.1f KB", bytes / 1000.0)
+    else -> String.format(java.util.Locale.GERMANY, "%.2f MB", bytes / 1_000_000.0)
 }

@@ -13,6 +13,8 @@ import com.segeluhr.app.ble.SegeluhrForegroundService
 import com.segeluhr.app.core.*
 import com.segeluhr.app.data.diagnostics.DiagnosticsLogImporter
 import com.segeluhr.app.data.diagnostics.DiagnosticsLogger
+import com.segeluhr.app.data.diagnostics.TrackerSessionLogger
+import com.segeluhr.app.tracker.NetworkUsageCounter
 import com.segeluhr.app.data.db.AppDatabase
 import com.segeluhr.app.data.db.toEntity
 import com.segeluhr.app.data.db.toRecord
@@ -113,7 +115,12 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private var raceStartedAtMs: Long? = null
 
     // Regatta-Tracker (siehe docs/Erweiterung_Regatta_Tracker.md)
-    private val trackerClient = TrackerClient()
+    // Datenvolumen-Zaehler + Session-Mitschnitt (12.11.2026), siehe
+    // tracker/NetworkUsageCounter.kt und data/diagnostics/TrackerSessionLogger.kt.
+    private val networkUsage = NetworkUsageCounter(application)
+    private val trackerSessionLogger = TrackerSessionLogger(application)
+    private var lastOwnTrackerLogMs = 0L
+    private val trackerClient = TrackerClient(networkUsage)
     private var trackerSettings = TrackerSettings()
     private val trackerBuffer = ArrayDeque<TrackerPosition>()
     private var lastTrackerSampleMs = 0L
@@ -123,7 +130,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     // — reicht LoRa-Positionen ANDERER Boote vom "RegattaMaster"-Board per BLE
     // weiter an denselben Server. Komplett unabhängig vom obigen trackerClient
     // (eigene Position); nutzt aber dieselbe Server-URL (trackerSettings.serverUrl).
-    private val gatewayUploader = GatewayUploader()
+    private val gatewayUploader = GatewayUploader(networkUsage)
     private var gatewayToken = ""
     private var gatewayEnabled = false
     // Status-Übersicht pro LoRa-Tracker (siehe SegeluhrUiState.gatewayTrackers)
@@ -134,6 +141,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
 
     private val gatewayClient = GatewayClient(application) { packet ->
         viewModelScope.launch {
+            if (trackerSessionLogger.isRecording) {
+                trackerSessionLogger.logTracker(packet)
+                _uiState.update { it.copy(trackerLogRowCount = trackerSessionLogger.rowCount) }
+            }
             db.gatewayQueueDao().insert(packet.toEntity())
             db.gatewayQueueDao().trimTo(GATEWAY_MAX_QUEUE)
             val pending = db.gatewayQueueDao().count()
@@ -156,6 +167,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private var gatewayFlushJob: Job? = null
 
     init {
+        // Datenvolumen-Zaehler in den UiState spiegeln (Setup-Tab).
+        viewModelScope.launch {
+            networkUsage.state.collect { u -> _uiState.update { it.copy(networkUsage = u) } }
+        }
         // Steuerbefehle von der Uhr (CMD_*, siehe BleProtocol.kt) auf die
         // bestehenden UI-Aktionen abbilden. Erweiterung für die T-Watch-S3-
         // Firmware, siehe docs/Erweiterung_TWatch_S3_Firmware.md.
@@ -401,6 +416,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         distanceTracker.sample(valid, fix.lat, fix.lon, fix.sogKn)
 
         maybeSendTrackerPosition(fix, valid)
+        maybeLogOwnTrackerPosition(fix, valid)
 
         renderTelemetry(fix, valid, countdownS, competitionGuidance)
     }
@@ -987,6 +1003,43 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         setTrackerStatus("Zuletzt gesendet $time")
     }
 
+    /** Tracker-Session-Mitschnitt: eigene Position alle 5 s, unabhaengig davon, ob der Upload zum Server aktiv ist. */
+    private fun maybeLogOwnTrackerPosition(fix: Fix, valid: Boolean) {
+        if (!trackerSessionLogger.isRecording) return
+        val now = System.currentTimeMillis()
+        if (now - lastOwnTrackerLogMs < TRACKER_SEND_INTERVAL_MS) return
+        lastOwnTrackerLogMs = now
+        trackerSessionLogger.logOwn(
+            timestampMs = fix.timestampMs, lat = fix.lat, lon = fix.lon,
+            speedMs = fix.sogKn?.let { it / 1.943844 }, heading = fix.cogDeg,
+            batteryPct = phoneBatteryFraction()?.let { (it * 100).toInt() },
+            gpsFix = valid, accuracyM = fix.accuracyM?.toDouble(),
+        )
+        _uiState.update { it.copy(trackerLogRowCount = trackerSessionLogger.rowCount) }
+    }
+
+    /** Setup-Tab "Tracker-Session aufzeichnen": Aufnahme starten (neue Datei) oder beenden. */
+    fun setTrackerLogRecording(on: Boolean) {
+        if (on) trackerSessionLogger.start() else trackerSessionLogger.stop()
+        _uiState.update {
+            it.copy(
+                trackerLogRecording = trackerSessionLogger.isRecording,
+                trackerLogRowCount = trackerSessionLogger.rowCount,
+                trackerLogFileName = trackerSessionLogger.currentFileName,
+            )
+        }
+    }
+
+    fun markTrackerLogEvent(note: String) {
+        trackerSessionLogger.markEvent(note)
+        _uiState.update { it.copy(trackerLogRowCount = trackerSessionLogger.rowCount) }
+    }
+
+    fun shareTrackerLogUri() = trackerSessionLogger.shareUri()
+
+    /** Setup-Tab "Datenvolumen": dauerhafte Summe zuruecksetzen. */
+    fun resetNetworkUsage() = networkUsage.resetTotal()
+
     /** Akkustand des Handys als 0..1, null wenn nicht ermittelbar. */
     private fun phoneBatteryFraction(): Double? {
         val bm = getApplication<Application>().getSystemService(android.content.Context.BATTERY_SERVICE) as? android.os.BatteryManager
@@ -1147,6 +1200,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         diagnosticsLogger.close()
+        trackerSessionLogger.close()
         gatewayClient.stop()
     }
 

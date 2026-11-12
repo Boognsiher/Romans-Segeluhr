@@ -61,9 +61,10 @@ object TrackerLink {
     }
 }
 
-class TrackerClient {
+class TrackerClient(usage: NetworkUsageCounter? = null) {
 
     private val http = OkHttpClient.Builder()
+        .apply { usage?.let { addInterceptor(it.interceptor) } }
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .writeTimeout(8, TimeUnit.SECONDS)
@@ -82,14 +83,17 @@ class TrackerClient {
             p.battery?.let { put("battery", it) }
         }
         return call(Request.Builder().url(url(s, "position")).header("Authorization", "Bearer ${s.token}")
+            .tag(UsageCategory::class.java, UsageCategory.OWN_POSITION)
             .post(body.toString().toRequestBody(json)).build())
     }
 
     suspend fun getConfig(s: TrackerSettings): TrackerResult =
-        call(Request.Builder().url(url(s, "config")).header("Authorization", "Bearer ${s.token}").get().build())
+        call(Request.Builder().url(url(s, "config")).header("Authorization", "Bearer ${s.token}")
+            .tag(UsageCategory::class.java, UsageCategory.CONFIG).get().build())
 
     suspend fun putConfig(s: TrackerSettings, config: JSONObject): TrackerResult =
         call(Request.Builder().url(url(s, "config")).header("Authorization", "Bearer ${s.token}")
+            .tag(UsageCategory::class.java, UsageCategory.CONFIG)
             .put(config.toString().toRequestBody(json)).build())
 
     private suspend fun call(request: Request): TrackerResult = withContext(Dispatchers.IO) {

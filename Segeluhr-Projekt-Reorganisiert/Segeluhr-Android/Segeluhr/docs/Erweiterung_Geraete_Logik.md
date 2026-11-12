@@ -98,7 +98,75 @@ weiter, bleibt das unerkannt.
 - **Akku des Tracker-Pakets** ist 0..100 (Wire), der Server erwartet 0..1; umgerechnet wird erst beim Upload.
 - **Tracker-Vertrag:** Quelle der Wahrheit ist `docs/GATEWAY_PROTOCOL.md` im Tracker-Repo; die App erwartet API-Major 1.
 
-## 5. Bekannte Lücken / zu prüfen
+## 5. Abschätzungen: Tracker-Anzahl und Datenvolumen (12.11.2026)
+
+Alle Zahlen sind **Schätzungen** aus Paketgrössen und Code, nicht gemessen. Die LoRa-Einstellungen der Tracker
+(Spreading Factor, Bandbreite, Sendeintervall) stehen im Tracker-Repo und sind hier nicht bekannt; Annahme 125 kHz, CR 4/5.
+
+### 5.1 Wie viele Tracker über den Master?
+
+Die Paketgrösse ist kein Limit. Es zählen:
+
+- **ID:** 1 Byte (`uint8`) im 24-Byte-BLE-Paket, also höchstens 256 Werte (abzüglich evtl. Sonderwerte).
+- **LoRa-Kanal (das echte Limit):** Alle Tracker teilen sich einen Kanal, gleichzeitiges Senden kollidiert. 21 Byte Nutzlast
+  dauern grob SF7 ≈ 55 ms, SF9 ≈ 185 ms, SF10 ≈ 330 ms pro Paket. Ohne Absprache (Aloha) kommen bei SF7 und 2 s Intervall
+  mit 10 Trackern etwa 50–60 % der Pakete an, bei 20 deutlich weniger; bei SF9/SF10 kollidiert es schon bei wenigen
+  Trackern. Längeres Intervall (5–10 s) mit zufälligem Versatz je Tracker skaliert entsprechend besser. Zusätzlich gilt auf
+  869,5 MHz meist 10 % Sendezeit pro Gerät (gesetzlich), das trifft SF10 bei 2 s Intervall.
+- **BLE Master → Handy:** unkritisch (24 Byte pro Notify, mehrere hundert Pakete/s möglich, MTU 185 angefordert).
+- **App/Server:** unkritisch. Queue max. 5000 Pakete (`GATEWAY_MAX_QUEUE`), Batch max. 500 alle 4 s, Server-Limit 2000.
+  Bei 50 Trackern alle 2 s sind es etwa 100 Pakete pro Batch; die Queue überbrückt dann ein Funkloch von etwa 3 Minuten.
+
+**Faustwert:** etwa 10–30 Tracker kommen noch ordentlich an, je nach SF und Intervall. Genauer berechenbar, sobald die
+Tracker-Einstellungen bekannt sind.
+
+### 5.2 Datenvolumen
+
+Pro eigene Position ein Aufruf alle 5 s mit ca. 100 Byte Inhalt; mit Kopfzeilen, TLS und Antwort etwa 0,7 KB (Verbindung
+wird wiederverwendet; bei Neuaufbau pro Aufruf ca. 5–6 KB). Pro Relais-Paket ca. 100 Byte, gesendet in Stapeln alle 4 s mit
+etwa 0,6 MB/h festem Aufwand für die Stapel-Anfragen.
+
+| Fall | Daten pro Stunde |
+|---|---|
+| Eigene Position (alle 5 s) | ca. 0,5 MB |
+| Relais, 5 Tracker alle 2 s | ca. 1,5 MB |
+| Relais, 10 Tracker alle 2 s | ca. 2,4 MB |
+| Relais, 20 Tracker alle 2 s | ca. 4,2 MB |
+| Relais, 10 Tracker alle 5 s | ca. 1,3 MB |
+
+Beispiel: 3 Stunden Regatta mit 10 Trackern (alle 2 s) und eigener Position ≈ 9 MB. Deutlich mehr kosten die
+**Zuschauer-Rolle** (Live-Karte als Webseite, grob 5–30 MB/h) und die **OSM-Karte der Land-Rolle** (Kacheln, danach
+zwischengespeichert). Hebel zum Sparen: Stapelintervall (`GATEWAY_FLUSH_INTERVAL_MS`) von 4 auf 10 s halbiert den festen
+Aufwand, kostet bis zu 6 s Verzögerung auf der Karte.
+
+### 5.3 Datenvolumen-Zähler in der App
+
+`tracker/NetworkUsageCounter.kt`, angezeigt im Setup-Tab ("Datenvolumen (Tracker-Übertragung)"). Ein OkHttp-Interceptor an
+`TrackerClient` und `GatewayUploader` zählt pro Anfrage Request-Zeile + Header + Inhalt und Response-Statuszeile + Header +
+Inhalt, aufgeteilt nach **Eigene Position / Relais / Konfiguration**. Zwei Summen: **seit App-Start** (nur im Speicher) und
+**Gesamt seit Zurücksetzen** (SharedPreferences `network_usage`, überlebt Neustarts, Button "Gesamtzähler zurücksetzen").
+Von OkHttp später ergänzte Header (Host, User-Agent, Content-Length …) sind pauschal mit 120 Byte pro Anfrage angesetzt.
+
+**Grenzen:** Gemessen wird die HTTP-Ebene. TLS-Handshake/-Records und TCP/IP sind nicht enthalten; die Anzeige nennt
+zusätzlich einen Wert mit pauschal +25 % (Schätzung, nicht gemessen). Fehlgeschlagene Anfragen ohne Verbindung zählen nur
+die Request-Seite. Nicht erfasst: Kartenkacheln der Land-Rolle und die Zuschauer-WebView. **Nicht kompiliert/getestet.**
+
+## 6. Tracker-Session aufzeichnen (12.11.2026)
+
+`data/diagnostics/TrackerSessionLogger.kt`, Setup-Tab "Tracker-Session aufzeichnen", analog zum Diagnose-Log
+(`Erweiterung_Diagnose_Log.md`): CSV pro Aufnahme in `filesDir/trackerlog/trackerlog_<Zeitstempel>.csv`, Sofort-`flush()`,
+Teilen per `FileProvider` ("Session teilen"), "Ereignis markieren" für Notizen. Unterschiede zum Diagnose-Log: Die Aufnahme
+wird **explizit gestartet/beendet** (Standard **AUS**, weil Positionen anderer Boote enthalten sind), jeder Start legt eine
+neue Datei an, und es gibt eine Zeile pro Position statt pro 1-Hz-Tick.
+
+Spalten: `ts_iso, ts_epoch_ms, source, tracker_id, pkt_ts_ms, lat, lon, speed_ms, heading_deg, battery_pct, hdop, rssi_dbm,
+snr_db, gps_fix, accuracy_m, event`. `source` = `EIGEN` (eigene Position, alle 5 s, unabhängig vom Server-Upload),
+`TRACKER` (Relais-Paket, `tracker_id` = LoRa-ID) oder `EVENT` (Marker). Pakete ohne GPS-Fix werden mitgeschrieben
+(`gps_fix` = 0). `ts_*` = Empfangszeit am Handy, `pkt_ts_ms` = Zeit im Paket (GPS-Zeit des Trackers). Neue Spalten immer am
+Ende anhängen. Läuft auch ohne konfigurierten Tracker-Server; ein Reimport/Auswertungs-Tool gibt es dafür noch nicht.
+**Nicht kompiliert/getestet.**
+
+## 7. Bekannte Lücken / zu prüfen
 
 - GPS-Fix-Erkennung der Tracker (Abschnitt 3) gegen die Tracker-Firmware verifizieren.
 - **Pakete ohne GPS-Fix (Entscheidung 12.11.2026):** Das Gateway lädt sie unverändert mit Position (0, 0) hoch, die App

@@ -20,9 +20,10 @@ import java.util.concurrent.TimeUnit
  */
 data class GatewayUploadResult(val ok: Boolean, val message: String, val acceptedCount: Int = 0)
 
-class GatewayUploader {
+class GatewayUploader(usage: NetworkUsageCounter? = null) {
 
     private val http = OkHttpClient.Builder()
+        .apply { usage?.let { addInterceptor(it.interceptor) } }
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .writeTimeout(8, TimeUnit.SECONDS)
@@ -54,6 +55,7 @@ class GatewayUploader {
             val request = Request.Builder()
                 .url("$serverUrl/api/gateway/positions")
                 .header("x-gateway-token", token)
+                .tag(UsageCategory::class.java, UsageCategory.GATEWAY)
                 .post(body.toString().toRequestBody(json))
                 .build()
             try {

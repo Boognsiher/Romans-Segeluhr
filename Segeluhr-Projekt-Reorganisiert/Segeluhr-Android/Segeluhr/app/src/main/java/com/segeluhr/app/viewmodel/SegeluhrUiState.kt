@@ -179,6 +179,15 @@ data class SegeluhrUiState(
 
     // Zuschauer-Rolle (AppRole.SPECTATOR), siehe ui/screens/SpectatorScreen.kt.
     val spectatorUrl: String = "",
+
+    // Datenvolumen-Zähler (12.11.2026), siehe tracker/NetworkUsageCounter.kt.
+    val networkUsage: com.segeluhr.app.tracker.NetworkUsage = com.segeluhr.app.tracker.NetworkUsage(),
+
+    // Tracker-Session aufzeichnen (12.11.2026), siehe data/diagnostics/TrackerSessionLogger.kt.
+    // Standard AUS (enthaelt Positionen anderer Boote, wird bewusst explizit gestartet).
+    val trackerLogRecording: Boolean = false,
+    val trackerLogRowCount: Int = 0,
+    val trackerLogFileName: String? = null,
 )
 
 /** Letzter bekannter Stand EINES per Gateway empfangenen LoRa-Trackers (siehe [SegeluhrUiState.gatewayTrackers]). */
