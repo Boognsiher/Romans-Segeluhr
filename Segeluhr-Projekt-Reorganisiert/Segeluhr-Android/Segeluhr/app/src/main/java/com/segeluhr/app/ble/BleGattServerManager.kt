@@ -324,11 +324,15 @@ class BleGattServerManager(private val context: Context) {
         buoy1Set: Boolean, buoy2Set: Boolean, targetSet: Boolean,
         homeSet: Boolean, mark1Set: Boolean, mark2Set: Boolean,
         pinSet: Boolean, boatSet: Boolean,
+        leeBuoySet: Boolean = false, gateASet: Boolean = false, gateBSet: Boolean = false, finishBuoySet: Boolean = false,
     ) {
         val server = gattServer ?: return
         val characteristic = waypointsStatusCharacteristic ?: return
         if (connectedDevices.isEmpty()) return
-        characteristic.value = BleProtocol.encodeWaypointsStatus(buoy1Set, buoy2Set, targetSet, homeSet, mark1Set, mark2Set, pinSet, boatSet)
+        characteristic.value = BleProtocol.encodeWaypointsStatus(
+            buoy1Set, buoy2Set, targetSet, homeSet, mark1Set, mark2Set, pinSet, boatSet,
+            leeBuoySet, gateASet, gateBSet, finishBuoySet,
+        )
         for (device in connectedDevices) {
             server.notifyCharacteristicChanged(device, characteristic, false)
         }

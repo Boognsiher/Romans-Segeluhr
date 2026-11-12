@@ -100,11 +100,32 @@ object BleProtocol {
         const val BOAT: Int = 1 shl 7
     }
 
-    /** 1-Byte WaypointsStatusPacket, siehe [CHAR_WAYPOINTS_STATUS_UUID]/[WaypointSetFlag]. */
+    /**
+     * Zweites Flag-Byte (02.09.2026, siehe docs/Erweiterung_Competition_Kursmodell.md)
+     * — das erste Byte ([WaypointSetFlag]) hat mit 8 Wegpunkten keinen Platz
+     * mehr für die vier neuen Kurs-Wegpunkte (Lee-Boje/Gate A+B/Zielboje),
+     * die Romans echtes Kurs-Modell braucht. Rein additiv: Byte 1 unverändert,
+     * Byte 2 hängt dran — siehe [encodeWaypointsStatus].
+     */
+    object WaypointSetFlag2 {
+        const val LEE_BUOY: Int = 1 shl 0
+        const val GATE_A: Int = 1 shl 1
+        const val GATE_B: Int = 1 shl 2
+        const val FINISH_BUOY: Int = 1 shl 3
+    }
+
+    /**
+     * 2-Byte WaypointsStatusPacket, siehe [CHAR_WAYPOINTS_STATUS_UUID]/
+     * [WaypointSetFlag]/[WaypointSetFlag2]. War bis 02.09.2026 1 Byte —
+     * Watch-Firmware/-Apps müssen beim Decode auf den 2. Byte mit
+     * aktualisiert werden (Galaxy-Watch-App bereits erledigt, T-Watch Ultra
+     * noch offen, siehe docs/Erweiterung_Competition_Kursmodell.md).
+     */
     fun encodeWaypointsStatus(
         buoy1Set: Boolean, buoy2Set: Boolean, targetSet: Boolean,
         homeSet: Boolean, mark1Set: Boolean, mark2Set: Boolean,
         pinSet: Boolean, boatSet: Boolean,
+        leeBuoySet: Boolean = false, gateASet: Boolean = false, gateBSet: Boolean = false, finishBuoySet: Boolean = false,
     ): ByteArray {
         var flags = 0
         if (buoy1Set) flags = flags or WaypointSetFlag.BUOY1
@@ -115,7 +136,12 @@ object BleProtocol {
         if (mark2Set) flags = flags or WaypointSetFlag.COMPETITION_MARK2
         if (pinSet) flags = flags or WaypointSetFlag.PIN
         if (boatSet) flags = flags or WaypointSetFlag.BOAT
-        return byteArrayOf(flags.toByte())
+        var flags2 = 0
+        if (leeBuoySet) flags2 = flags2 or WaypointSetFlag2.LEE_BUOY
+        if (gateASet) flags2 = flags2 or WaypointSetFlag2.GATE_A
+        if (gateBSet) flags2 = flags2 or WaypointSetFlag2.GATE_B
+        if (finishBuoySet) flags2 = flags2 or WaypointSetFlag2.FINISH_BUOY
+        return byteArrayOf(flags.toByte(), flags2.toByte())
     }
 
     private const val HOME_FLAG_ACTIVE: Int = 1 shl 0
@@ -211,6 +237,14 @@ object BleProtocol {
         const val HOME: Int = 7
         const val COMPETITION_MARK1: Int = 8
         const val COMPETITION_MARK2: Int = 9
+        // NEU (02.09.2026, Romans echtes Kurs-Modell, siehe
+        // docs/Erweiterung_Competition_Kursmodell.md): Lee-Bereich-Varianten
+        // (Lee-Boje separat / Lee-Gate aus 2 Bojen) + Zielboje fürs
+        // Halbwind-Ziel, wenn die Lee-Boje-Variante "= Pin" gewählt ist.
+        const val LEE_BUOY: Int = 10
+        const val GATE_A: Int = 11
+        const val GATE_B: Int = 12
+        const val FINISH_BUOY: Int = 13
     }
 
     // Muster-Codes für CHAR_HAPTIC_UUID, 1:1 zu Abschnitt 7 der Spezifikation
@@ -353,6 +387,17 @@ object BleProtocol {
      * kann das Vorzeichen selbst auswerten (>0 = Pin bevorzugt, <0 = Boot
      * bevorzugt, 0 = neutral), analog zur App-Logik. Watch-Firmware muss
      * wieder mit aktualisiert werden.
+     *
+     * **02.09.2026, Kurs-Modell-Überarbeitung** (siehe
+     * docs/Erweiterung_Competition_Kursmodell.md): `competitionLeg`
+     * (=Ordinal von `CompetitionLeg`) bedeutet jetzt 0=UPWIND, 1=DOWNWIND,
+     * 2=FINISH — vorher war 1=REACH_TO_OFFSET, 2=DOWNWIND (das Reach-Bein
+     * ist im echten Kurs nur Teil der Rundung, keine eigene Etappe mehr).
+     * Grösse/restliche Felder unverändert. **T-Watch-Ultra-Firmware zeigt
+     * mit dieser Änderung falsche `legNames[]`-Texte an** (kennt die neue
+     * Bedeutung noch nicht, siehe Doku) — für den nächsten Wassertest ohne
+     * Ultra unkritisch, muss aber vor deren nächstem Einsatz im Competition-
+     * Modus nachgezogen werden.
      */
     fun encodeRaceStatus(
         raceStateOrdinal: Int,

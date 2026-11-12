@@ -35,6 +35,12 @@ private val TAB_TITLES = listOf("Nav", "Wind", "Heim", "CD", "Man", "Menu")
  * 14.08. Abend wieder gestrichen — Roman-Feedback: Display zu klein dafür.
  * Wegpunkte lassen sich hier nur noch "an der aktuellen Position" setzen,
  * wie auf der Ultra.
+ *
+ * **02.09.2026:** Tab-Wechsel per Wisch-Geste bleibt bestehen, ist im
+ * Wasserdicht-Modus (Touch deaktiviert) aber nicht nutzbar — die beiden
+ * LaunchedEffects unten koppeln den Pager zusätzlich an die physische
+ * Hardware-Taste (langer Druck = nächster Tab, siehe MainActivity.kt/
+ * SegeluhrWatchViewModel.kt).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

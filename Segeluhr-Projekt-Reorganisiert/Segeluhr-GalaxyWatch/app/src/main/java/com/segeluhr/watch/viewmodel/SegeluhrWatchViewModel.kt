@@ -12,7 +12,9 @@ import com.segeluhr.watch.ble.WatchBleForegroundService
 import com.segeluhr.watch.core.HapticPlayer
 import com.segeluhr.watch.data.WatchUiState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -91,12 +93,59 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
                 hapticPlayer.play(BleProtocol.HAPTIC_DONE2)
                 showOverlay("Bestätigt")
             }
+            // CD-Tab: Start/Sync/Reset je nach Rennstatus (aus dem Branch
+            // galaxy-watch-app-interface, 02.09.2026), nicht nur Start.
             _currentPage.value == CD_TAB_INDEX -> {
-                startCountdown()
                 hapticPlayer.play(BleProtocol.HAPTIC_DONE2)
-                showOverlay("Start!")
+                when (uiState.value.race?.raceStateOrdinal ?: 0) {
+                    0 -> { startCountdown(); showOverlay("Start!") }
+                    1 -> { syncCountdown(); showOverlay("Sync") }
+                    else -> { resetCountdown(); showOverlay("Reset") }
+                }
+            }
+            // Nav-Tab: Pin/Boot der Startlinie setzen (02.09.2026, Roman-Wunsch).
+            _currentPage.value == NAV_TAB_INDEX -> {
+                hapticPlayer.play(BleProtocol.HAPTIC_STEP1)
+                setStartLineWaypointHere()
             }
         }
+    }
+
+    /**
+     * Startlinie per Taste (02.09.2026, Roman-Wunsch): Pin/Boot werden laut
+     * Roman erfahrungsgemäss noch kurz vor dem Start final gelegt/
+     * korrigiert — anders als Marke1/Lee-Boje/Gate (die stehen laut Kurs-
+     * Modell schon vorher fest) brauchen sie deshalb eine eigene Tasten-
+     * Aktion, nicht nur Touch im Menu-Tab. Feste, zustandslose Regel statt
+     * Umschalter: Pin fehlt → Pin, sonst Boot fehlt → Boot, sonst (beide
+     * schon gesetzt) → wieder Pin (der wird laut Startlinie-Bias-Logik
+     * erfahrungsgemäss öfter nachjustiert als das Committee-Boot). Der
+     * CD-Tab-Taste-Hinweistext auf NavScreen.kt spiegelt dieselbe Regel.
+     */
+    private fun setStartLineWaypointHere() {
+        val wp = uiState.value.waypoints
+        val id = if (wp?.pinSet != true) BleProtocol.WaypointId.PIN else BleProtocol.WaypointId.BOAT
+        bleClient.sendCommand(BleProtocol.CMD_SET_WAYPOINT, id)
+        showOverlay(if (id == BleProtocol.WaypointId.PIN) "Pin gesetzt" else "Boot gesetzt")
+    }
+
+    // Auto-Fokus auf den Nav-Tab beim Wettfahrt-Start (02.09.2026,
+    // Roman-Wunsch): im Startmoment (0:00-Signal, StartCountdownEngine
+    // COUNTDOWN->RACE) sind beide Hände typischerweise am Boot beschäftigt
+    // - die App soll dann von selbst auf den Tab mit SOG/VMC/Manöver-Ampel
+    // springen, statt dass man das noch manuell nachholen muss. Reiner
+    // Zustandswechsel-Trigger (raceStateOrdinal 1->2), unabhängig davon, ob
+    // es sich um eine echte Competition oder einen freien Race-Timer
+    // handelt - beide feuern denselben onRaceStart() in StartCountdownEngine.
+    private var lastRaceStateOrdinal: Int? = null
+
+    private fun watchForRaceStart() {
+        bleClient.raceData.onEach { race ->
+            val prev = lastRaceStateOrdinal
+            val cur = race?.raceStateOrdinal
+            if (prev == 1 && cur == 2) _currentPage.value = NAV_TAB_INDEX
+            lastRaceStateOrdinal = cur
+        }.launchIn(viewModelScope)
     }
 
     // Kotlins combine() gibt es nur bis 5 Argumente auf einmal - deshalb in
@@ -129,6 +178,7 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
         bleClient.hapticEvents.onEach { hapticPlayer.play(it) }.launchIn(viewModelScope)
         WatchBleForegroundService.start(application)
         pollOwnBattery()
+        watchForRaceStart()
     }
 
     private fun pollOwnBattery() {
@@ -194,6 +244,7 @@ class SegeluhrWatchViewModel(application: Application) : AndroidViewModel(applic
     companion object {
         // Muss synchron zu SegelnApp.TAB_TITLES bleiben (Nav/Wind/Heim/CD/Man/Menu).
         const val TAB_COUNT = 6
+        const val NAV_TAB_INDEX = 0
         const val CD_TAB_INDEX = 3
     }
 }
