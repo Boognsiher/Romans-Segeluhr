@@ -454,6 +454,8 @@ Vereins-Kurs einstellen.
 
 ```
 Segeluhr-Android/Segeluhr/     Android-App (Kotlin/Compose)
+  app/                         Handy-App (GATT-Server)
+  wear/                        🔧 Galaxy-Watch-App (Wear OS, GATT-Client, ohne LoRa)
   docs/                        Erweiterungs-Dokumentation (Erweiterung_*.md)
 Segeluhr-Firmware/
   ECHT/                        Firmware für echten Segelbetrieb
