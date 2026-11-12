@@ -82,3 +82,8 @@ Setup-Tab ("wie viele Tracker senden gerade Daten").
   noch nicht gegen echten LoRa-Traffic mehrerer Boote verifiziert.
 - Zuschauer-WebView hat keinen eigenen Fehler-/Offline-Zustand (z.B. bei
   falschem Link) — zeigt einfach, was die WebView selbst anzeigt.
+- **GPS-Status pro Tracker (12.11.2026):** Die Übersicht färbte einen Tracker grün, sobald ein Paket ankam, auch ohne
+  GPS-Fix. Jetzt: grün = Paket + Fix, amber = Paket ohne Fix ("KEIN GPS"), grau = inaktiv; die Kopfzeile nennt "N davon
+  mit GPS". Fix abgeleitet aus Position ≠ (0,0) und bekanntem HDOP (`GatewayPacket.hasGpsFix`) — Annahme, gegen die
+  Tracker-Firmware zu prüfen. Pakete ohne Fix werden weiterhin hochgeladen (offen, siehe `Erweiterung_Geraete_Logik.md`).
+

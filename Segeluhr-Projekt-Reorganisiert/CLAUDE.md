@@ -47,3 +47,8 @@ verifiziert** — echte Segelbedingungen. Minimum pro Änderung: Stufe 1.
   Compile-Fehlern durch API-Versionskonflikte.
 
 ## Notizen
+
+- **Geräte-Rollen und Datenflüsse** (Handy = Hirn des eigenen Boots + Relais für fremde Tracker; Boots-Uhr, Land-Uhr,
+  RegattaMaster, LoRa-Tracker, Tracker-Server): zentrale Übersicht in
+  `Segeluhr-Android/Segeluhr/docs/Erweiterung_Geraete_Logik.md`. Dort auch die Ampel-Regeln für GPS-Gültigkeit.
+- "Master" = RegattaMaster (LoRa-Empfänger/BLE-Relais auf dem eigenen Boot), NICHT die geplante Mastuhr.

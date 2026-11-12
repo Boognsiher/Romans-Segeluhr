@@ -190,4 +190,7 @@ data class GatewayTrackerInfo(
     val batteryPct: Int?,
     val rssi: Int,
     val snrDb: Double,
+    /** GPS-Fix laut letztem Paket, siehe [com.segeluhr.app.ble.GatewayPacket.hasGpsFix]. */
+    val hasGpsFix: Boolean = true,
+    val hdop: Double? = null,
 )

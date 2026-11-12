@@ -618,11 +618,21 @@ private fun GatewayTrackersOverview(trackers: List<com.segeluhr.app.viewmodel.Ga
         Text("Noch keine Tracker-Pakete empfangen.", fontSize = 12.sp, color = TextDim)
         return
     }
-    val activeCount = trackers.count { now - it.lastSeenMs < GATEWAY_TRACKER_ACTIVE_MS }
+    val activeTrackers = trackers.filter { now - it.lastSeenMs < GATEWAY_TRACKER_ACTIVE_MS }
+    val activeCount = activeTrackers.size
+    val gpsCount = activeTrackers.count { it.hasGpsFix }
     Spacer(Modifier.height(10.dp))
+    // Dreistufig (12.11.2026): gruen = Pakete UND GPS-Fix bei allen aktiven,
+    // amber = Pakete kommen, aber mind. ein aktiver Tracker ohne GPS-Fix,
+    // grau = nichts aktiv. Vorher gruen schon bei blossem Paketempfang.
     Text(
-        "$activeCount von ${trackers.size} Trackern aktiv (Paket in den letzten ${GATEWAY_TRACKER_ACTIVE_MS / 1000}s)",
-        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (activeCount > 0) Green else TextDim,
+        "$activeCount von ${trackers.size} Trackern aktiv (Paket in den letzten ${GATEWAY_TRACKER_ACTIVE_MS / 1000}s), $gpsCount davon mit GPS",
+        fontSize = 13.sp, fontWeight = FontWeight.Bold,
+        color = when {
+            activeCount == 0 -> TextDim
+            gpsCount < activeCount -> Amber
+            else -> Green
+        },
     )
     Spacer(Modifier.height(6.dp))
     trackers.forEach { t ->
@@ -632,7 +642,15 @@ private fun GatewayTrackersOverview(trackers: List<com.segeluhr.app.viewmodel.Ga
             Modifier.fillMaxWidth().padding(vertical = 3.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("Tracker ${t.loraId}", fontSize = 12.sp, color = if (active) TextLight else TextDim)
+            Text(
+                "Tracker ${t.loraId}" + if (active && !t.hasGpsFix) " · KEIN GPS" else "",
+                fontSize = 12.sp,
+                color = when {
+                    !active -> TextDim
+                    !t.hasGpsFix -> Amber
+                    else -> Green
+                },
+            )
             Text(
                 "vor ${ageS}s" +
                     (t.batteryPct?.let { " · Akku $it%" } ?: "") +

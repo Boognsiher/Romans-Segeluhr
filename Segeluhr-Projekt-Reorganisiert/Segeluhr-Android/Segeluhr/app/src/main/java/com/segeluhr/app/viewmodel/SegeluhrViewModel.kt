@@ -142,6 +142,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
                 lastSeenMs = System.currentTimeMillis(),
                 lat = packet.lat, lon = packet.lon,
                 batteryPct = packet.batteryPct, rssi = packet.rssi, snrDb = packet.snrDb,
+                hasGpsFix = packet.hasGpsFix, hdop = packet.hdop,
             )
             _uiState.update {
                 it.copy(

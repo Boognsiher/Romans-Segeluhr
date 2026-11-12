@@ -22,7 +22,21 @@ data class GatewayPacket(
     val hdop: Double?,
     val rssi: Int,
     val snrDb: Double,
-)
+) {
+    /**
+     * Hat der Tracker beim Senden einen gueltigen GPS-Fix? (12.11.2026) Das
+     * 24-Byte-Paket hat KEIN explizites Fix-Flag - ein Tracker ohne Fix sendet
+     * trotzdem weiter Pakete (dann zuvor "aktiv"=gruen angezeigt, obwohl keine
+     * brauchbare Position drin war). Abgeleitet wird der Fix deshalb aus:
+     * - Position nicht (0,0) ("Null Island", typischer Leerwert ohne Fix)
+     * - HDOP bekannt (Wire-Wert 255 = unbekannt, siehe [GatewayPacketCodec.decode])
+     * ANNAHME, gegen protocol.h im Tracker-Repo zu verifizieren: ein Tracker
+     * ohne Fix setzt (0,0) und/oder HDOP 255. Falls er stattdessen die letzte
+     * bekannte Position weitersendet, bleibt das hier unerkannt.
+     */
+    val hasGpsFix: Boolean
+        get() = !(kotlin.math.abs(lat) < 1e-6 && kotlin.math.abs(lon) < 1e-6) && hdop != null
+}
 
 /**
  * Decodiert das 24-Byte-Binärpaket vom "RegattaMaster" (Little-Endian).
