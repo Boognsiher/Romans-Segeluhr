@@ -80,3 +80,7 @@ Zusaetzlich liefert jede `/api/*`-Antwort den Header `X-API-Version: <major>.<mi
 - Beim Config-Objekt eigene Felder frei erweiterbar; der Server speichert es unveraendert.
 - Die LoRa-Pakete der Segeluhr (`shared/LoRaPacket.h`, Boot-Uhr zu Land-Uhr, 31 Byte) sind **nicht** das Tracker-Funkpaket
   (`protocol.h`, 21 Byte, Magic `0xA7`) und davon unabhaengig.
+- **Position (0, 0) beim Gateway-Upload** (`POST /api/gateway/positions`): bedeutet "Tracker hat keinen GPS-Fix". Erwartetes
+  Serververhalten: Paket nicht als neue Position übernehmen, letzte gültige Position behalten (Boot bleibt auf der Karte
+  stehen). Im Tracker-Repo in `docs/GATEWAY_PROTOCOL.md` festzuhalten; Stand 12.11.2026 dort noch nicht umgesetzt.
+

@@ -101,8 +101,12 @@ weiter, bleibt das unerkannt.
 ## 5. Bekannte Lücken / zu prüfen
 
 - GPS-Fix-Erkennung der Tracker (Abschnitt 3) gegen die Tracker-Firmware verifizieren.
-- Das Gateway lädt aktuell auch Pakete **ohne** GPS-Fix hoch (z. B. Position 0,0 würde auf der Server-Karte erscheinen).
-  Entscheidung offen: vor dem Upload verwerfen oder mit Fix-Flag hochladen.
+- **Pakete ohne GPS-Fix (Entscheidung 12.11.2026):** Das Gateway lädt sie unverändert mit Position (0, 0) hoch, die App
+  filtert nichts. Der **Server** muss (0, 0) als "keine neue Position" behandeln und die zuletzt gültige Position des
+  Trackers beibehalten, sodass das Boot auf der Karte am letzten Ort stehen bleibt, bis wieder ein gültiges Paket kommt.
+  Das ist ein Vertrag mit dem Tracker-Repo (`docs/GATEWAY_PROTOCOL.md` dort ergänzen) und im Server **noch nicht
+  umgesetzt/verifiziert**; bis dahin erscheinen Boote ohne Fix bei (0, 0). Folge: Die App kann einen Tracker ohne Fix nur
+  an (0, 0)/HDOP erkennen, deshalb bleibt die Fix-Ableitung aus Abschnitt 3 wichtig.
 - `GatewayUploader` ist noch nicht live gegen den Server verifiziert (Server war beim Test offline).
 - "Aktiv"-Schwelle (10 s) und Batch-Intervall (4 s) sind Schätzwerte, nicht mit mehreren Booten getestet.
 - Galaxy-Watch-Tastenbedienung nach Branch-Merge nicht kompiliert/getestet (siehe `Erweiterung_GalaxyWatch_App.md`).

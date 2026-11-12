@@ -85,5 +85,5 @@ Setup-Tab ("wie viele Tracker senden gerade Daten").
 - **GPS-Status pro Tracker (12.11.2026):** Die Übersicht färbte einen Tracker grün, sobald ein Paket ankam, auch ohne
   GPS-Fix. Jetzt: grün = Paket + Fix, amber = Paket ohne Fix ("KEIN GPS"), grau = inaktiv; die Kopfzeile nennt "N davon
   mit GPS". Fix abgeleitet aus Position ≠ (0,0) und bekanntem HDOP (`GatewayPacket.hasGpsFix`) — Annahme, gegen die
-  Tracker-Firmware zu prüfen. Pakete ohne Fix werden weiterhin hochgeladen (offen, siehe `Erweiterung_Geraete_Logik.md`).
+  Tracker-Firmware zu prüfen. Pakete ohne Fix werden bewusst unverändert mit (0, 0) hochgeladen; der Server ersetzt (0, 0) durch die zuletzt gültige Position des Trackers (Entscheidung 12.11.2026, serverseitig noch umzusetzen, siehe `Erweiterung_Geraete_Logik.md`).
 
