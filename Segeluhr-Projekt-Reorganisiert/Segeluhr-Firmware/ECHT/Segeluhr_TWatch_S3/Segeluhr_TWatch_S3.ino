@@ -662,11 +662,21 @@ static void mainScreenUpdate() {
         lv_label_set_text(lblConnIndicator, "○ kein Empfang");
         lv_obj_set_style_text_color(lblConnIndicator, lv_color_hex(0xD03030), 0);
     } else {
-        lv_label_set_text(lblStatusBig, boatStateToDisplayText(lastPacket.state));
-        lv_obj_set_style_text_color(lblStatusBig, lv_color_hex(0x30D060), 0);
+        // Drei Stufen: Rot = kein LoRa-Signal (oben), Orange = Paket kommt,
+        // aber Boot hat KEINEN GPS-Fix (Position/SOG nicht verwertbar),
+        // Gruen = Paket kommt UND GPS-Fix gueltig.
+        const bool gpsOk = lastPacket.gpsValidFix != 0;
+        const uint32_t okColor = gpsOk ? 0x30D060 : 0xF0A020;
         unsigned long secsAgo = (millis() - lastPacketReceivedMillis) / 1000;
-        lv_label_set_text_fmt(lblConnIndicator, "● Empfang (%lus)", secsAgo);
-        lv_obj_set_style_text_color(lblConnIndicator, lv_color_hex(0x30D060), 0);
+        if (gpsOk) {
+            lv_label_set_text(lblStatusBig, boatStateToDisplayText(lastPacket.state));
+            lv_label_set_text_fmt(lblConnIndicator, "● Empfang + GPS (%lus)", secsAgo);
+        } else {
+            lv_label_set_text_fmt(lblStatusBig, "KEIN GPS\n(%s)", boatStateToDisplayText(lastPacket.state));
+            lv_label_set_text_fmt(lblConnIndicator, "● Empfang, kein GPS (%lus)", secsAgo);
+        }
+        lv_obj_set_style_text_color(lblStatusBig, lv_color_hex(okColor), 0);
+        lv_obj_set_style_text_color(lblConnIndicator, lv_color_hex(okColor), 0);
     }
 
     struct tm timeinfo;
