@@ -41,20 +41,38 @@ import java.io.InputStreamReader
  *   fehlen in der Zählung.
  * - Immer als DAY-Session importiert (kein Wettfahrt-Fenster aus einer
  *   losen CSV rekonstruierbar).
+ *
+ * **22.09.2026 Bugfix + Ergänzung** (siehe
+ * docs/Erweiterung_Windschaetzung_Robust.md): Spalten werden jetzt per Name
+ * statt per festem Index aufgelöst — die Index-Fassung wäre durch die neue
+ * `wind_sample_count`-Spalte im selben Commit kaputtgegangen (jede Spalte
+ * danach hätte sich um 1 verschoben). Ausserdem wird jetzt `isRacing`
+ * (Competition ODER Trainings-Racemode, aus `competition_active`/
+ * `train_mode`) an `tickContinuous()` weitergereicht, damit ein Reimport
+ * denselben Ausweich-/Bojenmanöver-Filter anwendet wie der Live-Betrieb.
  */
 object DiagnosticsLogImporter {
 
-    // Spalten-Indizes im DiagnosticsLogger-CSV-Header (siehe dort) — 0-basiert.
-    private const val COL_TS_EPOCH_MS = 1
-    private const val COL_LAT = 2
-    private const val COL_LON = 3
-    private const val COL_SOG_KN = 4
-    private const val COL_COG_DEG = 5
-    private const val COL_GPS_VALID = 6
-    private const val COL_WIND_DIR_DEG = 8
-    private const val COL_WATCH_CONNECTED = 39
-    private const val COL_OPERATION_MODE = 40
-    private const val MIN_COLUMNS = 41
+    // Spaltennamen im DiagnosticsLogger-CSV-Header (siehe dort). Bewusst per
+    // Name statt per festem Index aufgelöst (22.09.2026 umgestellt, siehe
+    // docs/Erweiterung_Windschaetzung_Robust.md) — die alte Index-Fassung
+    // brach beim Hinzufügen der neuen `wind_sample_count`-Spalte (jeder
+    // Index danach wäre um 1 verschoben gewesen), und genau dieses Muster
+    // ("neue Spalte in der Mitte eingefügt") ist seit Projektbeginn schon
+    // mehrmals vorgekommen. Per Name funktioniert unabhängig davon, ob eine
+    // CSV im alten oder neuen Format vorliegt (die beiden Logs vom 15./16.08.
+    // haben `wind_sample_count` z.B. noch nicht).
+    private const val COL_TS_EPOCH_MS = "ts_epoch_ms"
+    private const val COL_LAT = "lat"
+    private const val COL_LON = "lon"
+    private const val COL_SOG_KN = "sog_kn"
+    private const val COL_COG_DEG = "cog_deg"
+    private const val COL_GPS_VALID = "gps_valid"
+    private const val COL_WIND_DIR_DEG = "wind_dir_deg"
+    private const val COL_WATCH_CONNECTED = "watch_connected"
+    private const val COL_OPERATION_MODE = "operation_mode"
+    private const val COL_COMPETITION_ACTIVE = "competition_active"
+    private const val COL_TRAIN_MODE = "train_mode"
 
     private object NoOpHaptics : HapticFeedback {
         override fun step1() {}
@@ -75,6 +93,18 @@ object DiagnosticsLogImporter {
         } ?: return null
         if (lines.size < 2) return null // nur Kopfzeile oder leer
 
+        val header = parseCsvLine(lines[0])
+        val colIndex = header.withIndex().associate { (i, name) -> name to i }
+        val requiredCols = listOf(
+            COL_TS_EPOCH_MS, COL_LAT, COL_LON, COL_SOG_KN, COL_COG_DEG,
+            COL_GPS_VALID, COL_WIND_DIR_DEG, COL_WATCH_CONNECTED, COL_OPERATION_MODE,
+            COL_COMPETITION_ACTIVE, COL_TRAIN_MODE,
+        )
+        // Fehlt eine Pflichtspalte (z.B. eine ganz andere Datei), lieber sauber
+        // abbrechen als mit falschen/verschobenen Werten weiterrechnen.
+        if (requiredCols.any { it !in colIndex }) return null
+        val minColumns = requiredCols.maxOf { colIndex.getValue(it) } + 1
+
         val windEngine = WindEngine(
             vib = NoOpHaptics,
             status = StatusSink { _, _ -> },
@@ -87,16 +117,22 @@ object DiagnosticsLogImporter {
         for (line in lines.drop(1)) {
             if (line.isBlank()) continue
             val cols = parseCsvLine(line)
-            if (cols.size < MIN_COLUMNS) continue
-            val tsMs = cols[COL_TS_EPOCH_MS].toLongOrNull() ?: continue
-            val lat = cols[COL_LAT].toDoubleOrNull()
-            val lon = cols[COL_LON].toDoubleOrNull()
-            val sog = cols[COL_SOG_KN].toDoubleOrNull()
-            val cog = cols[COL_COG_DEG].toDoubleOrNull()
-            val valid = cols[COL_GPS_VALID] == "true"
-            val windDir = cols[COL_WIND_DIR_DEG].toDoubleOrNull()
-            val watchConnected = cols[COL_WATCH_CONNECTED] == "true"
-            val opMode = if (cols[COL_OPERATION_MODE] == "WITH_WATCH") OperationMode.WITH_WATCH else OperationMode.STANDALONE
+            if (cols.size < minColumns) continue
+            val tsMs = cols[colIndex.getValue(COL_TS_EPOCH_MS)].toLongOrNull() ?: continue
+            val lat = cols[colIndex.getValue(COL_LAT)].toDoubleOrNull()
+            val lon = cols[colIndex.getValue(COL_LON)].toDoubleOrNull()
+            val sog = cols[colIndex.getValue(COL_SOG_KN)].toDoubleOrNull()
+            val cog = cols[colIndex.getValue(COL_COG_DEG)].toDoubleOrNull()
+            val valid = cols[colIndex.getValue(COL_GPS_VALID)] == "true"
+            val windDir = cols[colIndex.getValue(COL_WIND_DIR_DEG)].toDoubleOrNull()
+            val watchConnected = cols[colIndex.getValue(COL_WATCH_CONNECTED)] == "true"
+            val opMode = if (cols[colIndex.getValue(COL_OPERATION_MODE)] == "WITH_WATCH") OperationMode.WITH_WATCH else OperationMode.STANDALONE
+            // isRacing (siehe WindEngine.isPlausibleRacingLeg-Doku): fürs Nachspielen
+            // exakt dasselbe Kriterium wie live in SegeluhrViewModel.tick() verwenden,
+            // sonst würde ein Reimport Ausweich-/Bojenmanöver während der Regatta
+            // anders (schlechter) filtern als es beim Original-Törn passiert ist.
+            val isRacing = cols[colIndex.getValue(COL_COMPETITION_ACTIVE)] == "true" ||
+                cols[colIndex.getValue(COL_TRAIN_MODE)] == "RACE"
 
             val fix = Fix(lat, lon, cog, sog, tsMs, null, valid)
 
@@ -104,7 +140,7 @@ object DiagnosticsLogImporter {
                 windEngine.restore(windDir, true)
                 windSeeded = true
             }
-            if (windSeeded) windEngine.tickContinuous(fix, target = null)
+            if (windSeeded) windEngine.tickContinuous(fix, target = null, isRacing = isRacing)
             summaryEngine.onTick(fix, watchConnected, opMode)
         }
 

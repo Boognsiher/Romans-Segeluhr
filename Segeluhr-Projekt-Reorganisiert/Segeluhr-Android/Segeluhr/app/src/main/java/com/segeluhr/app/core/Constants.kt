@@ -33,6 +33,25 @@ object Constants {
     const val TACK_SIGN_DEADZONE_DEG = 5.0
     const val WIND_LOG_INTERVAL_MS = 60_000L
     const val WIND_LOG_SIZE = 30
+
+    // Robuste, kontinuierliche Windschätzung (22.09.2026, siehe
+    // docs/Erweiterung_Windschaetzung_Robust.md) — windDir kommt nicht mehr
+    // aus einer einzelnen, fortlaufend verschobenen Zahl, sondern aus einem
+    // gewichteten Mittel über die letzten Messungen (WindEngine.windHistory).
+    /** Maximal so viele Samples im Puffer — ältere fallen zuerst raus. */
+    const val WIND_HISTORY_MAX_SAMPLES = 12
+    /** Samples älter als das gelten als überholt und werden verworfen (unabhängig von WIND_HISTORY_MAX_SAMPLES). */
+    const val WIND_HISTORY_MAX_AGE_MS = 45 * 60 * 1000L
+    /** Zusätzlich zum Basisgewicht verliert jedes Sample mit dieser Halbwertszeit an Einfluss — sorgt dafür, dass sich eine echte, anhaltende Winddrehung durchsetzt statt für immer von alten Messungen ausgebremst zu werden. */
+    const val WIND_HISTORY_DECAY_HALFLIFE_MS = 15 * 60 * 1000L
+    /** Explizite Amwind-Kalibrierung (bewusst gehaltenes Zwei-Schläge-Manöver) — höchstes Vertrauen. */
+    const val WIND_SAMPLE_WEIGHT_EXPLICIT_CALIB = 1.0
+    /** Bisektor aus einer beim normalen Segeln erkannten Wende/Halse (siehe tickContinuous) — kein bewusst gehaltenes Kalibriermanöver, deshalb geringeres Gewicht. */
+    const val WIND_SAMPLE_WEIGHT_MANEUVER = 0.6
+    /** Direkte Kurs-Verschiebung auf demselben Bug (bisheriger "Shift"-Pfad) — eigene Beobachtungsart, eigenes Gewicht. */
+    const val WIND_SAMPLE_WEIGHT_SHIFT_OBSERVATION = 0.8
+    /** Eine erkannte Wende/Halse liefert nur dann ein Kalibrier-Sample, wenn der Kurs davor und danach nicht länger als das hier auseinanderliegt — sonst könnte der Wind zwischen beiden Legs selbst schon gedreht haben (siehe Doku, "Wichtiger Fallstrick"). */
+    const val MANEUVER_SAMPLE_MAX_GAP_MS = 3 * 60 * 1000L
     const val TRAIN_MIN_INTERVAL_MS = 20_000L
     const val TRAIN_MAX_INTERVAL_MS = 60_000L
     const val TRAIN_MANEUVER_TIMEOUT_MS = 60_000L
