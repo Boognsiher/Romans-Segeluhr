@@ -22,6 +22,7 @@ gerade läuft, was Baustelle und was nur Test ist.
 | `Segeluhr_Basis_Solo` | (für Ultra gedacht) | 🗄️ | — | nur lokal vorhanden, nie auf echter Hardware getestet |
 | `Segeluhr_Mastuhr` (NEU) | Eigenbau: Waveshare ESP32-S3-Touch-LCD-3.49 (integriertes Display+RTC+18650-Akkuhalter+Audio), BLE-only | 📋 | — | **13.08.2026 Konzept-Phase**: fest am Mast montiertes Gerät, Gehäuse per 3D-Druck in Eigenregie. Ursprünglich als eigenständiges GPS+LoRa-Gerät geplant (~CHF 240–260), **13.08. Abend radikal vereinfacht** (Roman-Wunsch): kein GPS, kein LoRa mehr — reine BLE-Anzeige fürs Handy, architektonisch dieselbe Rolle wie die T-Watch S3 heute (kein eigenes GPS, alle Daten per BLE). **13.08. Abend Board-Wahl finalisiert**: Waveshare ESP32-S3-Touch-LCD-3.49 (Roman-Fund) als Standard-Empfehlung statt LilyGO T-Display-S3 — bringt RTC/18650-Akkuhalter/Audio-Codec+Lautsprecher/IMU bereits eingebaut mit, kein LilyGO-Bezug, löst nebenbei die offene Ton-Frage aus `Erweiterung_S3_Ton_QuickMessages.md`. Display ist ein schmaler 172×640-Streifen statt Breitformat — UI-Neuentwurf nötig, kein Copy-Paste der bestehenden LVGL-Tabs. Neue Kostenschätzung ~CHF 85–135. Kommerzielle Alternativen (Sailmon MAX €899, Velocitek ProStart $795, Raymarine Tacktick ~$400–500) geprüft und verworfen zugunsten der Eigenkonstruktion (Integration ins bestehende BLE/LoRa-System). Details: `docs/Erweiterung_Mastuhr.md`. Noch keine Zeile Code, kein Bauteil bestellt. |
 | Windschätzung (robust/kontinuierlich) | – (reine Software, `WindEngine`) | 🔧 | — | **22.09.2026 Konzept-Phase** (Speed-Dip-Hypothese für wind-unabhängige Wende/Halse-Erkennung gegen die 15./16.08.-Diagnose-Logs geprüft, Skript `docs/diagnose-logs/tack_gybe_speed_check.py` — Ergebnis uneinheitlich, zusätzlich fragwürdige Ground Truth wegen des erst 17.08. gefixten Windshift-Bugs in genau diesen Logs, daher NICHT umgesetzt). **22.09.2026 implementiert** (vor dem Segelwochenende, Roman-Wunsch): `windDir` kommt jetzt aus einem Ringpuffer gewichteter Samples (`WindEngine.windHistory`) statt einer fortlaufend verschobenen Einzelzahl — jede erkannte Wende/Halse beim normalen Segeln liefert automatisch ein weiteres Sample (Bisektor-Trick löst die 180°-Mehrdeutigkeit ohne Wende/Halse-Klassifikation), der explizite Kalibrierlauf bleibt nur noch für den allerersten Wert der Session nötig. Neue "Vertrauen"-Anzeige im Wind-Tab + `wind_sample_count`-Spalte im Diagnose-Log. **Keine Watch-/Firmware-Änderung nötig** (BLE-Wind-Characteristic unverändert). **22.09.2026 Nachtrag (Roman-Frage zu Regatta-Ausweich-/Bojenmanövern):** neuer Filter `WindEngine.isPlausibleRacingLeg()` verwirft während Competition/Trainings-Racemode Legs, deren Kurswinkel weder nahe am Wende- noch am Vorwind-Winkel liegt (Halbwindkurse/Ausweichen/Dial-up) — verhindert, dass solche Legs die Windschätzung verfälschen oder eine falsche "Wind-Shift"-Meldung mitten im Ausweichmanöver auslösen. Dabei nebenbei einen Bug im CSV-Reimport (`DiagnosticsLogImporter.kt`) gefunden+gefixt: feste Spalten-Indizes wären durch die neue `wind_sample_count`-Spalte verschoben gewesen, jetzt auf Namens-Auflösung umgestellt. Details: `docs/Erweiterung_Windschaetzung_Robust.md`. **Nicht kompiliert** — diese Umgebung hat kein Android-SDK/keinen Netzwerkzugriff auf die Google/Maven-Repos, nur manuell gegengelesen. **Vor dem Wochenende in Android Studio kompilieren + kurz antesten.** |
+| **Regatta-Tracker-Anbindung** (NEU, Android-App + Server `Roemis-Regatta-Tracker`) | Handy | 🔧 | 28.10.2026 (Build+Install verifiziert), 11.11.2026 (Neuinstallation nach Gerätewechsel/-reset; Gateway+Zuschauer-Rolle kompiliert) | App sendet GPS alle 5 s an den Tracker-Server (Offline-Puffer) und kann Konfiguration (Wegpunkte, Seegrenze, Boots-Profile, Betriebsmodus) dort ablegen/laden. Setup-Tab "Regatta-Tracker", siehe docs/Erweiterung_Regatta_Tracker.md. **28.10. kompiliert (`assembleDebug` BUILD SUCCESSFUL, lokaler Gradle-Build, siehe [[gradle-local-compile-setup]]) + per `adb install -r` aufs Handy installiert, App startet ohne `AndroidRuntime`-Fatal.** Funktionaler Test der Tracker-Anbindung selbst (GPS-Upload, Konfig-Ablage/-Laden) noch offen. **11.11.2026: aus demselben Stand (Commit `be76b75`) neu gebaut + per `adb install -r` neu installiert** (`local.properties` fehlte in dieser Umgebung, neu angelegt mit `sdk.dir`), App startet ohne `AndroidRuntime`-Fatal. **11.11.2026, grosse Ergänzung: Gateway-Rolle für LoRa-Tracker anderer Boote + dritte Start-Rolle "Zuschauer"** (Roman-Vorgabe, siehe docs/Erweiterung_Regatta_Tracker_Gateway.md) — `assembleDebug` BUILD SUCCESSFUL. **11.11.2026 abends: erfolgreich mit echter Hardware getestet** (1 LoRa-Tracker + 1 RegattaMaster-Board) — dabei MTU-Bug gefunden+gefixt (siehe unten), Tracker sendet seitdem zuverlässig alle ~2s gültige Positionen, die die App korrekt decodiert.
 
 ## 13.08.2026 Abend: Startlinie-Bias dokumentiert + Bugfix + BLE-Anbindung
 
@@ -163,6 +164,97 @@ in mehreren Runden nachgebessert, alle Fixes **auf Hardware verifiziert**:
 Details/Volltext aller vier Bugfixes: `docs/Erweiterung_Tages_Auswertung.md`
 Abschnitt "Nachtrag 17.08.2026". **Noch offen**: Wettfahrt-Session-Grenzen
 (Countdown-Start→Ende) weiterhin nicht auf Hardware getestet.
+
+## 28.10.2026: Regatta-Tracker-Build auf Hardware installiert
+
+Branch `claude/youthful-keller-qsxb9f` (Commit `be76b75`, Regatta-Tracker-
+Anbindung vom 17.08., zu diesem Zeitpunkt noch nicht gemergt in `main`)
+lokal gebaut: `assembleDebug` BUILD SUCCESSFUL (lokaler Gradle-8.7-Build
+ohne `gradlew`, siehe [[gradle-local-compile-setup]]), per `adb install -r`
+über die bestehende App installiert (gleicher Debug-Keystore, Signatur
+passte, bestehende Daten — Room-DB/DataStore — blieben erhalten). App
+startet ohne `AndroidRuntime`-Fatal. **Nur Build+Install verifiziert**,
+die eigentliche Regatta-Tracker-Funktion (GPS-Upload an den Server,
+Konfig-Ablage/-Laden) noch nicht gezielt angetestet.
+
+## 13.09.2026: Bugfix "Log trackt nicht mit, wenn nur das Handy ohne Uhr mit ist"
+
+Roman-Meldung: beim Segeln nur mit dem Handy (Betriebsmodus "Ohne Uhr",
+`OperationMode.STANDALONE`) bricht das GPS-Log ab, sobald das Handy z.B. in
+der wasserdichten Tasche steckt und das Display ausgeht.
+
+**Ursache gefunden**: `SegeluhrForegroundService` (hält GPS am Laufen, auch
+wenn die App im Hintergrund ist/das Display aus ist — sonst drosselt/stoppt
+Android FusedLocationProviderClient-Updates) wurde bisher NUR im
+`WITH_WATCH`-Modus gestartet (`setOperationMode()`/`resumeBackgroundWork()`/
+initialer Start beim App-Launch, alle drei an `OperationMode.WITH_WATCH`
+geknüpft) — historisch, weil der Dienst ursprünglich reine "BLE-Bridge zur
+Uhr" war. Im "Ohne Uhr"-Modus lief GPS nur noch über den an die
+Activity/ViewModel-Lebensdauer gebundenen `viewModelScope`-Job, ohne
+Foreground-Exemption und ohne Wake Lock — genau das reisst ab, sobald die
+App in den Hintergrund geht bzw. das Gerät in Doze/App-Standby wechselt.
+Nebenbefund: der Setup-Schalter "Display wach halten" war seit seiner
+Einführung komplett wirkungslos (kein `PowerManager.WakeLock` im Code
+gefunden, nur ein persistiertes UI-Flag ohne jeden Seiteneffekt).
+
+**Fix** (`ble/SegeluhrForegroundService.kt`, `viewmodel/SegeluhrViewModel.kt`,
+`ui/screens/SetupScreen.kt`):
+- Foreground-Service läuft jetzt in BEIDEN Betriebsmodi — Start/Stopp nur
+  noch über `resumeBackgroundWork()`/`pauseBackgroundWork()` (App-Stopp,
+  Land-Rolle), nicht mehr zusätzlich an den Modus gekoppelt. GATT-
+  Advertising ist laut eigener Doku ohnehin für Dauerbetrieb ausgelegt
+  ("dauerhaft advertisen, geringer Verbrauch"), macht also auch ohne Uhr
+  nichts kaputt (Watch kann sich jederzeit dazu verbinden).
+- Notification-Text ("GPS-Tracking läuft (ohne Uhr)" vs. "GPS wird an die
+  T-Watch übertragen") folgt jetzt live dem tatsächlichen Modus statt fest
+  auf die BLE-Bridge-Formulierung zu verweisen.
+- "Display wach halten" (Setup-Tab, umbenannt zu "GPS-Tracking robust
+  halten") hält jetzt tatsächlich einen `PARTIAL_WAKE_LOCK`, solange der
+  Dienst läuft — Bildschirm bleibt bewusst aus, nur die CPU bleibt für den
+  1Hz-Tick wach.
+
+**Nur der Fix selbst** (kein Android-SDK/Netzwerkzugriff auf Googles Maven
+in dieser Umgebung, daher nicht kompiliert) — Verifikation auf Hardware
+(insb. echter Segeltörn nur mit Handy, Display aus, längere Dauer) noch
+offen.
+
+## 11.11.2026: Regatta-Tracker-Gateway + Zuschauer-Rolle
+
+Roman-Vorgabe (detaillierte Spezifikation für die BLE-Gateway-Funktion
+mitgeliefert): die Segeluhr-App soll zusätzlich die Rolle des "Gateways"
+für ein bestehendes LoRa-Tracking-System anderer Boote übernehmen — siehe
+`docs/Erweiterung_Regatta_Tracker_Gateway.md` für alle Details.
+
+- **Gateway**: `ble/GatewayClient.kt` (BLE-Central zum "RegattaMaster"-Board,
+  nach dem Muster von `LandUhrClient`) + `ble/GatewayPacket.kt` (24-Byte-
+  Binärprotokoll-Decoder) + `data/db/GatewayQueueDb.kt` (persistente
+  Warteschlange, Room-DB-Version 2→3) + `tracker/GatewayUploader.kt`
+  (`POST /api/gateway/positions`, eigenes `x-gateway-token`). Setup-Tab-
+  Sektion "Regatta-Tracker-Gateway": Token, Ein/Aus-Schalter,
+  BLE-Verbindungsstatus.
+- **Status-Übersicht pro Tracker** (zusätzlicher Roman-Wunsch): zeigt live
+  "N von M Trackern aktiv" sowie je Tracker zuletzt-gesehen-vor-Xs, Akku,
+  RSSI — rein In-Memory im ViewModel (`gatewayTrackerStatuses`), kein
+  Room-Zugriff nötig für die reine Anzeige.
+- **Dritte Start-Rolle "Zuschauer"** (zusätzlicher Roman-Wunsch): neue
+  `AppRole.SPECTATOR`, `ui/screens/SpectatorScreen.kt` bettet die
+  bestehende Live-Karten-Webseite des Tracker-Servers per WebView ein
+  (Link einmalig eingegeben, in DataStore gemerkt). Kein eigener GPS/BLE-
+  Code nötig, verhält sich wie die Land-Rolle bzgl. pausierter
+  Hintergrundarbeit.
+
+**11.11.2026 abends: mit echter Hardware getestet** (1 LoRa-Tracker + 1
+RegattaMaster-Board, live per Logcat über WLAN-ADB begleitet). Dabei Bug
+gefunden+gefixt: Default-ATT-MTU (23 Byte) schnitt das 24-Byte-Paket auf
+20 Byte ab (BLE-Notifies werden nicht automatisch über mehrere Pakete
+verteilt) — `GatewayClient` fordert jetzt per `requestMtu(185)` ein
+größeres MTU an, bevor `discoverServices()` läuft (verhandelt wurde 64,
+reicht locker). Seitdem empfängt/decodiert die App zuverlässig alle ~2s
+gültige Positionspakete. Erfolgreiche Pakete werden jetzt auch geloggt
+(vorher nur Fehler sichtbar — hat die Fehlersuche unnötig erschwert).
+Server-Upload (`GatewayUploader`) noch nicht live verifiziert, da der
+Tracker-Server während des Tests offline war — Pakete liegen bis dahin in
+der persistenten Queue.
 
 ## Bekannte offene Punkte
 

@@ -139,4 +139,49 @@ data class SegeluhrUiState(
     // stopApp() gebaut, null solange kein Bericht ansteht. Zeigt der
     // SessionReportDialog an; dismissSessionReport() setzt wieder auf null.
     val sessionReport: SessionReport? = null,
+
+    // Regatta-Tracker-Anbindung (Erweiterung, siehe docs/Erweiterung_Regatta_Tracker.md).
+    // Das Token bleibt bewusst im SettingsRepository und taucht hier nicht auf.
+    val trackerServerUrl: String = "",
+    val trackerId: String = "",
+    val trackerEnabled: Boolean = false,
+    val trackerStatus: String = "",
+    // Positionen, die wegen fehlender Verbindung noch auf das Senden warten.
+    val trackerPending: Int = 0,
+    // true während Konfig hoch-/runterladen läuft (sperrt die beiden Buttons).
+    val trackerConfigBusy: Boolean = false,
+
+    // Regatta-Tracker-Gateway (Erweiterung, siehe
+    // docs/Erweiterung_Regatta_Tracker_Gateway.md) — reicht LoRa-Positionen
+    // ANDERER Boote vom "RegattaMaster"-Board weiter. Das Gateway-Token
+    // bleibt bewusst im SettingsRepository, taucht hier nicht auf.
+    val gatewayEnabled: Boolean = false,
+    // true sobald ein Token gespeichert ist (das Token selbst taucht hier nicht auf).
+    val gatewayConfigured: Boolean = false,
+    val gatewayConnectionState: com.segeluhr.app.ble.GatewayConnectionState =
+        com.segeluhr.app.ble.GatewayConnectionState.DISCONNECTED,
+    val gatewayStatus: String = "",
+    // Insgesamt seit App-Start empfangene (gültige) LoRa-Pakete.
+    val gatewayPacketCount: Int = 0,
+    // Positionen, die noch auf das Senden an den Server warten.
+    val gatewayQueuePending: Int = 0,
+    // Status-Übersicht: ein Eintrag pro seit App-Start gesehenem LoRa-Tracker
+    // (Roman-Wunsch "wieviele Tracker senden Daten"), neueste Meldung zuerst.
+    // Rein In-Memory im ViewModel geführt (nicht in der Room-Queue - die ist
+    // nur der Upload-Puffer, hier geht's um die Anzeige).
+    val gatewayTrackers: List<GatewayTrackerInfo> = emptyList(),
+
+    // Zuschauer-Rolle (AppRole.SPECTATOR), siehe ui/screens/SpectatorScreen.kt.
+    val spectatorUrl: String = "",
+)
+
+/** Letzter bekannter Stand EINES per Gateway empfangenen LoRa-Trackers (siehe [SegeluhrUiState.gatewayTrackers]). */
+data class GatewayTrackerInfo(
+    val loraId: Int,
+    val lastSeenMs: Long,
+    val lat: Double,
+    val lon: Double,
+    val batteryPct: Int?,
+    val rssi: Int,
+    val snrDb: Double,
 )

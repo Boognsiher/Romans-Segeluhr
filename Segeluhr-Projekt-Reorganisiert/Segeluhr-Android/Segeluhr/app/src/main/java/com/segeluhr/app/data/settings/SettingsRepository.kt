@@ -9,6 +9,7 @@ import com.segeluhr.app.core.LakeCircle
 import com.segeluhr.app.data.model.AppRole
 import com.segeluhr.app.data.model.BoatProfile
 import com.segeluhr.app.data.model.OperationMode
+import com.segeluhr.app.tracker.TrackerSettings
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -60,7 +61,36 @@ class SettingsRepository(private val context: Context) {
         val WAKE_LOCK_ENABLED = booleanPreferencesKey("wake_lock_enabled")
         val OPERATION_MODE = stringPreferencesKey("operation_mode")
         val APP_ROLE = stringPreferencesKey("app_role")
+
+        // Regatta-Tracker-Anbindung, siehe docs/Erweiterung_Regatta_Tracker.md
+        val TRACKER_URL = stringPreferencesKey("tracker_url")
+        val TRACKER_ID = stringPreferencesKey("tracker_id")
+        val TRACKER_TOKEN = stringPreferencesKey("tracker_token")
+        val TRACKER_ENABLED = booleanPreferencesKey("tracker_enabled")
+
+        // Gateway-Rolle für LoRa-Tracker anderer Boote, siehe
+        // docs/Erweiterung_Regatta_Tracker_Gateway.md. Nutzt bewusst dieselbe
+        // TRACKER_URL (ein Server für beides) - nur ein eigenes Secret
+        // (x-gateway-token statt Bearer), da Gateway-Zugang unabhängig vom
+        // eigenen Tracker-Zugang vergeben wird.
+        val GATEWAY_TOKEN = stringPreferencesKey("gateway_token")
+        val GATEWAY_ENABLED = booleanPreferencesKey("gateway_enabled")
+
+        // Zuschauer-Rolle (AppRole.SPECTATOR) - Link zur Live-Karten-Webseite.
+        val SPECTATOR_URL = stringPreferencesKey("spectator_url")
     }
+
+    /** Wegpunkt-Schlüssel (wie in setWaypoint/clearWaypoint) -> DataStore-Keys, für Konfig-Export/-Import. */
+    private val waypointKeys: Map<String, Pair<Preferences.Key<Double>, Preferences.Key<Double>>> = mapOf(
+        "pin" to (Keys.PIN_LAT to Keys.PIN_LON),
+        "boat" to (Keys.BOAT_LAT to Keys.BOAT_LON),
+        "target" to (Keys.TARGET_LAT to Keys.TARGET_LON),
+        "buoy1" to (Keys.BUOY1_LAT to Keys.BUOY1_LON),
+        "buoy2" to (Keys.BUOY2_LAT to Keys.BUOY2_LON),
+        "home" to (Keys.HOME_LAT to Keys.HOME_LON),
+        "competitionMark1" to (Keys.COMPETITION_MARK1_LAT to Keys.COMPETITION_MARK1_LON),
+        "competitionMark2" to (Keys.COMPETITION_MARK2_LAT to Keys.COMPETITION_MARK2_LON),
+    )
 
     data class Waypoints(
         val pin: GeoPoint?, val boat: GeoPoint?, val target: GeoPoint?,
@@ -361,12 +391,134 @@ class SettingsRepository(private val context: Context) {
     val appRoleFlow: Flow<AppRole> = context.dataStore.data.map { p ->
         when (p[Keys.APP_ROLE]) {
             AppRole.SHORE.name -> AppRole.SHORE
+            AppRole.SPECTATOR.name -> AppRole.SPECTATOR
             else -> AppRole.SAILOR // Default: bisheriges Verhalten, niemand faellt versehentlich in den Land-Modus
         }
     }
 
     suspend fun setAppRole(role: AppRole) {
         context.dataStore.edit { it[Keys.APP_ROLE] = role.name }
+    }
+
+    // ---- Zuschauer-Rolle (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md) ----
+    // Nur ein gemerkter Link zur Live-Karten-Webseite des Tracker-Servers -
+    // bewusst getrennt von TRACKER_URL/TRACKER_ID (das ist der eigene
+    // Positions-Upload, hier geht's nur um die vom Server servierte Seite).
+
+    val spectatorUrlFlow: Flow<String> = context.dataStore.data.map { p -> p[Keys.SPECTATOR_URL].orEmpty() }
+
+    suspend fun setSpectatorUrl(url: String) {
+        context.dataStore.edit { it[Keys.SPECTATOR_URL] = url }
+    }
+
+    // ---- Regatta-Tracker (siehe docs/Erweiterung_Regatta_Tracker.md) ----
+
+    val trackerSettingsFlow: Flow<TrackerSettings> = context.dataStore.data.map { p ->
+        TrackerSettings(
+            serverUrl = p[Keys.TRACKER_URL].orEmpty(),
+            trackerId = p[Keys.TRACKER_ID].orEmpty(),
+            token = p[Keys.TRACKER_TOKEN].orEmpty(),
+            enabled = p[Keys.TRACKER_ENABLED] ?: false,
+        )
+    }
+
+    /** Speichert Server/ID/Token aus dem Tracker-Link; [TrackerSettings.enabled] bleibt unverändert. */
+    suspend fun setTrackerCredentials(serverUrl: String, trackerId: String, token: String) {
+        context.dataStore.edit { p ->
+            p[Keys.TRACKER_URL] = serverUrl; p[Keys.TRACKER_ID] = trackerId; p[Keys.TRACKER_TOKEN] = token
+        }
+    }
+
+    suspend fun setTrackerEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.TRACKER_ENABLED] = enabled }
+    }
+
+    suspend fun clearTracker() {
+        context.dataStore.edit { p ->
+            p.remove(Keys.TRACKER_URL); p.remove(Keys.TRACKER_ID); p.remove(Keys.TRACKER_TOKEN)
+            p.remove(Keys.TRACKER_ENABLED)
+        }
+    }
+
+    // ---- Regatta-Tracker-Gateway (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md) ----
+    // Eigenes Token, aber dieselbe Server-URL wie trackerSettingsFlow.serverUrl.
+
+    data class GatewaySettings(val token: String = "", val enabled: Boolean = false) {
+        val configured: Boolean get() = token.isNotBlank()
+    }
+
+    val gatewaySettingsFlow: Flow<GatewaySettings> = context.dataStore.data.map { p ->
+        GatewaySettings(token = p[Keys.GATEWAY_TOKEN].orEmpty(), enabled = p[Keys.GATEWAY_ENABLED] ?: false)
+    }
+
+    suspend fun setGatewayToken(token: String) {
+        context.dataStore.edit { it[Keys.GATEWAY_TOKEN] = token }
+    }
+
+    suspend fun setGatewayEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.GATEWAY_ENABLED] = enabled }
+    }
+
+    suspend fun clearGateway() {
+        context.dataStore.edit { p -> p.remove(Keys.GATEWAY_TOKEN); p.remove(Keys.GATEWAY_ENABLED) }
+    }
+
+    // ---- Konfiguration auf dem Tracker-Server ablegen / von dort laden ----
+    // Enthält bewusst NUR geräteunabhängige Einrichtung (Wegpunkte, See-Grenze,
+    // Boots-Profile, Betriebsmodus, Display-wach). NICHT enthalten: Windrichtung
+    // (tagesaktuell), Rolle (pro Handy), Tracker-Zugangsdaten.
+
+    /** Aktueller Konfig-Stand als JSON (Format siehe docs/Erweiterung_Regatta_Tracker.md). */
+    suspend fun exportConfigJson(): JSONObject {
+        val p = context.dataStore.data.first()
+        val wp = JSONObject()
+        waypointKeys.forEach { (name, keys) ->
+            val lat = p[keys.first]; val lon = p[keys.second]
+            if (lat != null && lon != null) wp.put(name, JSONObject().put("lat", lat).put("lon", lon))
+        }
+        wp.put("lakeCircles", JSONArray(serializeLakeCircles(parseLakeCircles(p[Keys.LAKE_CIRCLES_JSON]))))
+        val profiles = boatProfilesFlow.first()
+        return JSONObject().apply {
+            put("app", "segeluhr")
+            put("version", 1)
+            put("waypoints", wp)
+            put("boatProfiles", JSONArray(serializeBoatProfiles(profiles.profiles)))
+            put("activeBoatProfileId", profiles.activeProfileId)
+            put("wakeLockEnabled", p[Keys.WAKE_LOCK_ENABLED] ?: false)
+            put("operationMode", p[Keys.OPERATION_MODE] ?: OperationMode.STANDALONE.name)
+        }
+    }
+
+    /**
+     * Ersetzt die lokale Konfiguration durch [config] (Format wie [exportConfigJson]).
+     * Wegpunkte, die in [config] fehlen, werden lokal gelöscht (Server-Stand ist maßgeblich).
+     * Wirft [IllegalArgumentException], wenn es keine Segeluhr-Konfiguration ist — dann bleibt alles unverändert.
+     * Der Betriebsmodus wird NICHT hier gesetzt (Foreground-Service-Steuerung liegt im ViewModel).
+     */
+    suspend fun importConfigJson(config: JSONObject) {
+        require(config.optString("app") == "segeluhr") { "Keine Segeluhr-Konfiguration" }
+        val wp = config.optJSONObject("waypoints")
+        val profiles = parseBoatProfiles(config.optJSONArray("boatProfiles")?.toString())
+        context.dataStore.edit { p ->
+            waypointKeys.forEach { (name, keys) ->
+                val o = wp?.optJSONObject(name)
+                if (o != null && o.has("lat") && o.has("lon")) {
+                    p[keys.first] = o.getDouble("lat"); p[keys.second] = o.getDouble("lon")
+                } else {
+                    p.remove(keys.first); p.remove(keys.second)
+                }
+            }
+            val circles = wp?.optJSONArray("lakeCircles")?.toString()
+            if (circles != null) p[Keys.LAKE_CIRCLES_JSON] = serializeLakeCircles(parseLakeCircles(circles))
+            else p.remove(Keys.LAKE_CIRCLES_JSON)
+            if (profiles.isNotEmpty()) {
+                p[Keys.BOAT_PROFILES_JSON] = serializeBoatProfiles(profiles)
+                val active = config.optString("activeBoatProfileId")
+                if (profiles.any { it.id == active }) p[Keys.ACTIVE_BOAT_PROFILE_ID] = active
+                else p[Keys.ACTIVE_BOAT_PROFILE_ID] = profiles.first().id
+            }
+            if (config.has("wakeLockEnabled")) p[Keys.WAKE_LOCK_ENABLED] = config.optBoolean("wakeLockEnabled")
+        }
     }
 
     suspend fun currentWaypoints(): Waypoints = waypointsFlow.first()

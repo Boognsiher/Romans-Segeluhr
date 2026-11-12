@@ -3,9 +3,12 @@ package com.segeluhr.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Sailing
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,6 +43,7 @@ fun RolePickerScreen(
         Modifier
             .fillMaxSize()
             .background(BgDark)
+            .verticalScroll(rememberScrollState())
             .padding(20.dp),
         verticalArrangement = Arrangement.Center,
     ) {
@@ -64,10 +68,23 @@ fun RolePickerScreen(
             highlighted = lastRole == AppRole.SHORE,
             onClick = { onPick(AppRole.SHORE) },
         )
+        Spacer(Modifier.height(16.dp))
+        RoleCard(
+            icon = Icons.Filled.Visibility,
+            title = "Zuschauer",
+            description = "Live-Karte aller Boote ansehen (Webseite des Regatta-Trackers)",
+            highlighted = lastRole == AppRole.SPECTATOR,
+            onClick = { onPick(AppRole.SPECTATOR) },
+        )
 
         Text(
-            "Zuletzt genutzt: ${if (lastRole == AppRole.SAILOR) "Auf dem Boot" else "An Land"} — " +
-                "später jederzeit im Setup-Tab umschaltbar.",
+            "Zuletzt genutzt: ${
+                when (lastRole) {
+                    AppRole.SAILOR -> "Auf dem Boot"
+                    AppRole.SHORE -> "An Land"
+                    AppRole.SPECTATOR -> "Zuschauer"
+                }
+            } — später jederzeit im Setup-Tab umschaltbar.",
             color = TextDim, fontSize = 11.sp, modifier = Modifier.padding(top = 24.dp),
         )
     }

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -22,6 +23,7 @@ import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.ui.components.SectionCard
 import com.segeluhr.app.ui.components.WaypointRow
 import com.segeluhr.app.ui.theme.Amber
+import com.segeluhr.app.ui.theme.Green
 import com.segeluhr.app.ui.theme.Red
 import com.segeluhr.app.ui.theme.Teal
 import com.segeluhr.app.ui.theme.TextDim
@@ -49,6 +51,16 @@ fun SetupScreen(
     onStartApp: () -> Unit,
     // NEU (12.08.2026, siehe docs/Erweiterung_Boje_Kartenauswahl.md)
     onSetWaypointFromMap: (String) -> Unit,
+    // NEU: Regatta-Tracker-Anbindung (siehe docs/Erweiterung_Regatta_Tracker.md)
+    onSetTrackerLink: (String) -> Unit,
+    onTrackerEnabledChanged: (Boolean) -> Unit,
+    onClearTracker: () -> Unit,
+    onUploadTrackerConfig: () -> Unit,
+    onDownloadTrackerConfig: () -> Unit,
+    // NEU: Regatta-Tracker-Gateway (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md)
+    onSetGatewayToken: (String) -> Unit,
+    onGatewayEnabledChanged: (Boolean) -> Unit,
+    onClearGateway: () -> Unit,
 ) {
     Column(
         Modifier
@@ -166,6 +178,7 @@ fun SetupScreen(
                 val roles = listOf(
                     AppRole.SAILOR to "Auf dem Boot",
                     AppRole.SHORE to "An Land",
+                    AppRole.SPECTATOR to "Zuschauer",
                 )
                 roles.forEach { (role, label) ->
                     val active = state.appRole == role
@@ -183,7 +196,8 @@ fun SetupScreen(
             Text(
                 "\"An Land\" zeigt statt der Segel-Tabs nur eine Karte mit der zuletzt " +
                     "per LoRa empfangenen Boot-Position (verbindet sich per Bluetooth mit " +
-                    "der Land-Uhr, nicht mit dem Boot direkt). Zurück geht's im Karten-Screen selbst.",
+                    "der Land-Uhr, nicht mit dem Boot direkt). \"Zuschauer\" zeigt die Live-" +
+                    "Karten-Webseite des Regatta-Tracker-Servers. Zurück geht's im jeweiligen Screen selbst.",
                 fontSize = 12.sp, color = TextDim,
             )
         }
@@ -195,7 +209,8 @@ fun SetupScreen(
                         "(kein zusätzlicher Akkuverbrauch im Hintergrund). \"Start\" nimmt " +
                         "wieder genau dort auf."
                 } else {
-                    "GPS läuft aktuell durchgehend, solange die App offen ist — bei Pausen " +
+                    "GPS läuft durchgehend im Hintergrund (auch bei ausgeschaltetem Display, " +
+                        "z.B. Handy in der Tasche), egal ob mit oder ohne Uhr — bei Pausen " +
                         "(z.B. Mittagspause am Steg) hier stoppen, um Akku zu sparen."
                 },
                 fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(bottom = 10.dp),
@@ -236,7 +251,8 @@ fun SetupScreen(
             Spacer(Modifier.height(10.dp))
             val explanation = when (state.operationMode) {
                 OperationMode.STANDALONE ->
-                    "Das Handy vibriert selbst (Standalone) und rechnet alles lokal — die Uhr wird nicht gebraucht."
+                    "Das Handy vibriert selbst (Standalone) und rechnet alles lokal — die Uhr wird nicht gebraucht. " +
+                        "GPS/Log laufen auch hier im Hintergrund weiter (Benachrichtigung \"Segeluhr — Tracking aktiv\")."
                 OperationMode.WITH_WATCH ->
                     if (state.watchConnected) {
                         "✅ Uhr verbunden — GPS und Vibrationsmuster-Kommandos werden per BLE an die T-Watch Ultra gesendet. Das Handy selbst vibriert nicht."
@@ -250,14 +266,21 @@ fun SetupScreen(
             )
         }
 
-        SectionCard("Bildschirm") {
+        SectionCard("Tracking im Hintergrund") {
             Row(
                 Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Display wach halten")
+                Text("GPS-Tracking robust halten")
                 Switch(checked = state.wakeLockEnabled, onCheckedChange = onWakeLockChanged)
             }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Hält die CPU wach (Bildschirm bleibt aus), damit das GPS-Log auch bei " +
+                    "ausgeschaltetem Display zuverlässig weiterläuft, z.B. Handy in " +
+                    "wasserdichter Tasche am Körper. Kostet etwas mehr Akku.",
+                fontSize = 12.sp, color = TextDim,
+            )
         }
 
         SectionCard("GPS") {
@@ -281,6 +304,151 @@ fun SetupScreen(
                     Text("Bluetooth-Berechtigung erlauben (für \"An Land\")")
                 }
             }
+        }
+
+        SectionCard("Regatta-Tracker") {
+            val connected = state.trackerId.isNotBlank()
+            var linkInput by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+            if (!connected) {
+                Text(
+                    "Tracker-Link aus dem Admin-Bereich des Trackers einfügen (https://…/t/<id>?token=…). " +
+                        "Danach sendet die App ihre Position selbst — kein zweites Handy-Browserfenster nötig.",
+                    fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(bottom = 8.dp),
+                )
+                OutlinedTextField(
+                    value = linkInput,
+                    onValueChange = { linkInput = it },
+                    label = { Text("Tracker-Link") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { onSetTrackerLink(linkInput); linkInput = "" },
+                    enabled = linkInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Verbinden") }
+            } else {
+                Text(
+                    "Verbunden: ${state.trackerServerUrl.substringAfter("://")} · Tracker ${state.trackerId}",
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text("Position senden")
+                        Text(
+                            "Alle 5 s an den Tracker-Server, auch bei ausgeschaltetem Display " +
+                                "(Foreground-Service). Nicht bei \"Stopp\" im App-Betrieb.",
+                            fontSize = 11.sp, color = TextDim,
+                        )
+                    }
+                    Switch(checked = state.trackerEnabled, onCheckedChange = onTrackerEnabledChanged)
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = onUploadTrackerConfig,
+                        enabled = !state.trackerConfigBusy,
+                        colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Konfig hochladen") }
+                    OutlinedButton(
+                        onClick = onDownloadTrackerConfig,
+                        enabled = !state.trackerConfigBusy,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Konfig laden") }
+                }
+                Text(
+                    "Konfig = Wegpunkte, Seegrenze, Boots-Profile, Betriebsmodus. \"Laden\" ersetzt die lokalen Werte.",
+                    fontSize = 11.sp, color = TextDim, modifier = Modifier.padding(top = 6.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onClearTracker,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Red),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Verbindung entfernen") }
+            }
+            if (state.trackerStatus.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                val failed = state.trackerStatus.contains("fehlgeschlagen") || state.trackerStatus.contains("nicht erkannt")
+                Text(
+                    state.trackerStatus + if (state.trackerPending > 0) " · ${state.trackerPending} Positionen warten" else "",
+                    fontSize = 12.sp, color = if (failed) Amber else TextDim,
+                )
+            }
+        }
+
+        SectionCard("Regatta-Tracker-Gateway") {
+            var tokenInput by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+            Text(
+                "Verbindet sich per Bluetooth mit dem \"RegattaMaster\"-Board, das LoRa-" +
+                    "Positionen ANDERER Boote sammelt, und reicht sie an denselben Tracker-" +
+                    "Server weiter (eigenes Gateway-Token vom Server-Betreiber, braucht einen " +
+                    "verbundenen Tracker oben für die Server-Adresse).",
+                fontSize = 12.sp, color = TextDim, modifier = Modifier.padding(bottom = 8.dp),
+            )
+            if (!state.gatewayConfigured) {
+                OutlinedTextField(
+                    value = tokenInput,
+                    onValueChange = { tokenInput = it },
+                    label = { Text("Gateway-Token") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { onSetGatewayToken(tokenInput); tokenInput = "" },
+                    enabled = tokenInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal, contentColor = Color(0xFF04201C)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Token speichern") }
+            } else {
+                Row(
+                    Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Token gespeichert", fontSize = 13.sp)
+                    OutlinedButton(
+                        onClick = onClearGateway,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Red),
+                    ) { Text("Entfernen") }
+                }
+            }
+            if (state.trackerId.isBlank()) {
+                Text(
+                    "Erst oben unter \"Regatta-Tracker\" verbinden (Server-Adresse fehlt sonst).",
+                    fontSize = 11.sp, color = Amber, modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text("Weiterleiten aktiv")
+                    Text(
+                        gatewayConnectionLabel(state.gatewayConnectionState),
+                        fontSize = 11.sp, color = TextDim,
+                    )
+                }
+                Switch(checked = state.gatewayEnabled, onCheckedChange = onGatewayEnabledChanged)
+            }
+            if (state.gatewayStatus.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                val failed = state.gatewayStatus.contains("fehlgeschlagen")
+                Text(
+                    state.gatewayStatus + if (state.gatewayQueuePending > 0) " · ${state.gatewayQueuePending} Positionen warten" else "",
+                    fontSize = 12.sp, color = if (failed) Amber else TextDim,
+                )
+            }
+            GatewayTrackersOverview(state.gatewayTrackers)
         }
 
         SectionCard("Diagnose-Log") {
@@ -365,3 +533,60 @@ fun SetupScreen(
 }
 
 private fun fmt(p: GeoPoint?): String = if (p == null) "nicht gesetzt" else "%.5f, %.5f".format(p.lat, p.lon)
+
+private fun gatewayConnectionLabel(s: com.segeluhr.app.ble.GatewayConnectionState): String = when (s) {
+    com.segeluhr.app.ble.GatewayConnectionState.DISCONNECTED -> "Keine Verbindung zum RegattaMaster"
+    com.segeluhr.app.ble.GatewayConnectionState.SCANNING -> "Suche RegattaMaster (Bluetooth)..."
+    com.segeluhr.app.ble.GatewayConnectionState.CONNECTING -> "Verbinde mit RegattaMaster..."
+    com.segeluhr.app.ble.GatewayConnectionState.CONNECTED -> "Verbunden mit RegattaMaster"
+}
+
+// Wie lange ein Tracker als "aktiv" gilt, ohne ein neues Paket empfangen zu
+// haben (Master sendet laut Protokoll mehrmals/Sekunde - 10s lässt kurze
+// Funklöcher zu, ohne stale Trackerdaten als aktiv zu zeigen).
+private const val GATEWAY_TRACKER_ACTIVE_MS = 10_000L
+
+/**
+ * Status-Übersicht "wie viele Tracker senden Daten" (Roman-Wunsch), siehe
+ * SegeluhrUiState.gatewayTrackers. Eigener 1s-Ticker (wie LandUhrScreen)
+ * statt den ViewModel-Tick zu nutzen - läuft nur, während diese Section
+ * sichtbar ist, und braucht keinen eigenen State im ViewModel.
+ */
+@Composable
+private fun GatewayTrackersOverview(trackers: List<com.segeluhr.app.viewmodel.GatewayTrackerInfo>) {
+    var now by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    if (trackers.isEmpty()) {
+        Spacer(Modifier.height(10.dp))
+        Text("Noch keine Tracker-Pakete empfangen.", fontSize = 12.sp, color = TextDim)
+        return
+    }
+    val activeCount = trackers.count { now - it.lastSeenMs < GATEWAY_TRACKER_ACTIVE_MS }
+    Spacer(Modifier.height(10.dp))
+    Text(
+        "$activeCount von ${trackers.size} Trackern aktiv (Paket in den letzten ${GATEWAY_TRACKER_ACTIVE_MS / 1000}s)",
+        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (activeCount > 0) Green else TextDim,
+    )
+    Spacer(Modifier.height(6.dp))
+    trackers.forEach { t ->
+        val ageS = (now - t.lastSeenMs) / 1000
+        val active = ageS * 1000 < GATEWAY_TRACKER_ACTIVE_MS
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Tracker ${t.loraId}", fontSize = 12.sp, color = if (active) TextLight else TextDim)
+            Text(
+                "vor ${ageS}s" +
+                    (t.batteryPct?.let { " · Akku $it%" } ?: "") +
+                    " · ${t.rssi} dBm",
+                fontSize = 12.sp, color = if (active) TextDim else TextDim.copy(alpha = 0.6f),
+            )
+        }
+    }
+}

@@ -19,8 +19,14 @@ enum class OperationMode { STANDALONE, WITH_WATCH }
  * docs/Erweiterung_Landuhr_Kartenansicht.md. Bewusst als komplett eigener
  * Umschalter statt als dritter OperationMode-Wert, weil beide Rollen
  * technisch nichts miteinander zu tun haben (Server- vs. Client-BLE-Rolle).
+ *
+ * SPECTATOR = dritte Rolle (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md):
+ * reine Zuschauer-Ansicht, bettet die Live-Karten-Webseite des Roemis-
+ * Regatta-Tracker-Servers per WebView ein (ui/screens/SpectatorScreen.kt).
+ * Kein GPS/BLE/Tick-Loop nötig, verhält sich wie SHORE bezüglich
+ * [com.segeluhr.app.viewmodel.SegeluhrViewModel.setAppRole] (Hintergrundarbeit pausiert).
  */
-enum class AppRole { SAILOR, SHORE }
+enum class AppRole { SAILOR, SHORE, SPECTATOR }
 
 enum class RaceState { MENU, COUNTDOWN, RACE }
 
