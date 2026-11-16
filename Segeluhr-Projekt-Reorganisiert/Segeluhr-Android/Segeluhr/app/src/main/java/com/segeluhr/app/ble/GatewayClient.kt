@@ -198,7 +198,7 @@ class GatewayClient(private val context: Context, private val onPacket: (Gateway
             return
         }
         packetCount++
-        Log.d(TAG, "Paket #$packetCount von LoRa-ID ${packet.loraId}: lat=${packet.lat} lon=${packet.lon} batt=${packet.batteryPct}%")
+        Log.d(TAG, "Paket #$packetCount von LoRa-ID ${packet.loraId}: lat=${packet.lat} lon=${packet.lon} batt=${packet.batteryPct}% rssi=${packet.rssi}dBm snr=${packet.snrDb}dB")
         onPacket(packet)
     }
 }
