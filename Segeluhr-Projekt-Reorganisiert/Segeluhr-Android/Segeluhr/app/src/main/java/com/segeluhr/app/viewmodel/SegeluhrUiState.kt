@@ -179,4 +179,5 @@ data class GatewayTrackerInfo(
     val batteryPct: Int?,
     val rssi: Int,
     val snrDb: Double,
+    val hdop: Double?,
 )

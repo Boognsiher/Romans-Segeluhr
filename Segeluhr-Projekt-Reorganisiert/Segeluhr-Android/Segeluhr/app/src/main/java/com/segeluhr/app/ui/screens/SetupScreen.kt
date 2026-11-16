@@ -546,6 +546,21 @@ private fun gatewayConnectionLabel(s: com.segeluhr.app.ble.GatewayConnectionStat
 // Funklöcher zu, ohne stale Trackerdaten als aktiv zu zeigen).
 private const val GATEWAY_TRACKER_ACTIVE_MS = 10_000L
 
+/** Grobe Einordnung der horizontalen GPS-Genauigkeit (HDOP), Standard-Daumenregel. */
+private fun hdopQualityLabel(hdop: Double): String = when {
+    hdop <= 2.0 -> "gut"
+    hdop <= 5.0 -> "mäßig"
+    hdop <= 10.0 -> "schwach"
+    else -> "schlecht"
+}
+
+private fun hdopQualityColor(hdop: Double?): Color = when {
+    hdop == null -> Red
+    hdop <= 2.0 -> Green
+    hdop <= 5.0 -> Amber
+    else -> Red
+}
+
 /**
  * Status-Übersicht "wie viele Tracker senden Daten" (Roman-Wunsch), siehe
  * SegeluhrUiState.gatewayTrackers. Eigener 1s-Ticker (wie LandUhrScreen)
@@ -581,12 +596,19 @@ private fun GatewayTrackersOverview(trackers: List<com.segeluhr.app.viewmodel.Ga
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text("Tracker ${t.loraId}", fontSize = 12.sp, color = if (active) TextLight else TextDim)
-            Text(
-                "vor ${ageS}s" +
-                    (t.batteryPct?.let { " · Akku $it%" } ?: "") +
-                    " · ${t.rssi} dBm",
-                fontSize = 12.sp, color = if (active) TextDim else TextDim.copy(alpha = 0.6f),
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    "vor ${ageS}s" +
+                        (t.batteryPct?.let { " · Akku $it%" } ?: "") +
+                        " · ${t.rssi} dBm",
+                    fontSize = 12.sp, color = if (active) TextDim else TextDim.copy(alpha = 0.6f),
+                )
+                Text(
+                    t.hdop?.let { hdop -> "HDOP %.1f (%s)".format(hdop, hdopQualityLabel(hdop)) } ?: "kein GPS-Fix",
+                    fontSize = 11.sp,
+                    color = if (!active) TextDim.copy(alpha = 0.6f) else hdopQualityColor(t.hdop),
+                )
+            }
         }
     }
 }
