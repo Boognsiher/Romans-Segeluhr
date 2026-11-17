@@ -41,6 +41,18 @@ class GatewayUploader(usage: NetworkUsageCounter? = null) {
                         put(
                             JSONObject().apply {
                                 put("id", p.loraId)
+                                if (p.heartbeat) {
+                                    // Lebenszeichen ohne GPS-Fix (17.11.2026): der Server laesst die Position unveraendert und merkt sich nur
+                                    // Status (Akku, Empfang, GPS-Zustand, zuletzt gehoert). Siehe docs/GATEWAY_PROTOCOL.md im Regatta-Repo.
+                                    put("fix", false)
+                                    put("seenTs", p.timestampMs)
+                                    p.batteryFraction?.let { put("battery", it) }
+                                    p.rssi?.let { put("rssi", it) }
+                                    p.snrDb?.let { put("snr", it) }
+                                    p.gpsState?.let { put("gpsState", it) }
+                                    p.sats?.let { put("sats", it) }
+                                    return@apply
+                                }
                                 put("lat", p.lat)
                                 put("lon", p.lon)
                                 put("ts", p.timestampMs)
@@ -63,7 +75,11 @@ class GatewayUploader(usage: NetworkUsageCounter? = null) {
                     val text = resp.body?.string().orEmpty()
                     val parsed = try { JSONObject(text) } catch (e: Exception) { null }
                     if (resp.isSuccessful) {
-                        GatewayUploadResult(true, "OK", parsed?.optInt("accepted", positions.size) ?: positions.size)
+                        GatewayUploadResult(
+                            true, "OK",
+                            // Antwort: "accepted" = Positionen, "heartbeats" = Lebenszeichen ohne Fix (17.11.2026)
+                            parsed?.let { it.optInt("accepted", 0) + it.optInt("heartbeats", 0) } ?: positions.size,
+                        )
                     } else {
                         val err = parsed?.optString("error").orEmpty().ifBlank { "HTTP ${resp.code}" }
                         GatewayUploadResult(false, err)

@@ -48,9 +48,12 @@ interface ManeuverDao {
 // "gateway_positions"-Tabelle, persistente Warteschlange für per LoRa/BLE
 // vom RegattaMaster empfangene Fremdboot-Positionen. Gleiche destruktive
 // Migration wie oben - die Queue ist ohnehin nur Zwischenspeicher.
+// Version 4 (17.11.2026): gateway_positions bekommt Spalten fuer Lebenszeichen ohne GPS-Fix (heartbeat, gpsState, sats, rssi, snrDb).
+// Hier eine ECHTE Migration (ALTER TABLE), weil in der Warteschlange noch nicht hochgeladene Fremdboot-Positionen liegen koennen,
+// die ein destruktiver Neuaufbau verlieren wuerde; fallbackToDestructiveMigration bleibt fuer die uebrigen Spruenge bestehen.
 @Database(
     entities = [ManeuverEntity::class, SessionEntity::class, GatewayPositionEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -61,13 +64,23 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
 
+        private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE gateway_positions ADD COLUMN heartbeat INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE gateway_positions ADD COLUMN gpsState INTEGER")
+                db.execSQL("ALTER TABLE gateway_positions ADD COLUMN sats INTEGER")
+                db.execSQL("ALTER TABLE gateway_positions ADD COLUMN rssi INTEGER")
+                db.execSQL("ALTER TABLE gateway_positions ADD COLUMN snrDb REAL")
+            }
+        }
+
         fun getInstance(context: android.content.Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "segeluhr.db",
-                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_3_4).fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
     }
 }

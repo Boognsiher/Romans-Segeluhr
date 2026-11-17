@@ -22,6 +22,17 @@ data class GatewayPacket(
     val hdop: Double?,
     val rssi: Int,
     val snrDb: Double,
+    /**
+     * Lebenszeichen eines Trackers OHNE GPS-Fix (17.11.2026): Die Tracker-Firmware sendet ohne Fix alle ~10 s ein Paket mit
+     * lat = lon = Int.MIN_VALUE (-2147483648) und GPS-Zeit 0 (siehe protocol.h im Roemis-Regatta-Tracker-Repo, PKT_NOFIX_COORD).
+     * Akku, RSSI und SNR sind gueltig, lat/lon/timestampMs/speedMs NICHT (hier 0.0/0/null). Vorher verwarf der Codec solche Pakete
+     * wegen "Lat ausserhalb -90..90" als ungueltig - Tracker ohne Fix blieben deshalb in der Uebersicht und auf dem Server unsichtbar.
+     */
+    val isHeartbeat: Boolean = false,
+    /** Nur beim Lebenszeichen: 0 = GPS-Modul stumm (keine Daten), 1 = Daten aber keine Satelliten, 2 = Satelliten sichtbar (Suche). */
+    val gpsState: Int? = null,
+    /** Nur beim Lebenszeichen: Anzahl sichtbarer Satelliten. */
+    val sats: Int? = null,
 ) {
     /**
      * Hat der Tracker beim Senden einen gueltigen GPS-Fix? (12.11.2026) Das
@@ -33,9 +44,11 @@ data class GatewayPacket(
      * ANNAHME, gegen protocol.h im Tracker-Repo zu verifizieren: ein Tracker
      * ohne Fix setzt (0,0) und/oder HDOP 255. Falls er stattdessen die letzte
      * bekannte Position weitersendet, bleibt das hier unerkannt.
+     * 17.11.2026 geprueft: Die Firmware sendet ohne Fix KEIN (0,0), sondern das explizite Lebenszeichen ([isHeartbeat]);
+     * (0,0)/HDOP bleiben nur als zusaetzliche Absicherung drin.
      */
     val hasGpsFix: Boolean
-        get() = !(kotlin.math.abs(lat) < 1e-6 && kotlin.math.abs(lon) < 1e-6) && hdop != null
+        get() = !isHeartbeat && !(kotlin.math.abs(lat) < 1e-6 && kotlin.math.abs(lon) < 1e-6) && hdop != null
 }
 
 /**
@@ -54,14 +67,36 @@ object GatewayPacketCodec {
         val id = buf.get().toInt() and 0xFF
         val epochSec = buf.int.toLong() and 0xFFFFFFFFL
         val centisec = buf.get().toInt() and 0xFF
-        val lat = buf.int / 1e6
-        val lon = buf.int / 1e6
+        val latRaw = buf.int
+        val lonRaw = buf.int
         val speedCms = buf.short.toInt() and 0xFFFF
         val headingDeg10 = buf.short.toInt() and 0xFFFF
         val battPct = buf.get().toInt() and 0xFF
         val hdop10 = buf.get().toInt() and 0xFF
         val rssi = buf.short.toInt()
         val snr4 = buf.get().toInt()
+
+        // Lebenszeichen ohne Fix (siehe GatewayPacket.isHeartbeat): lat = lon = Int.MIN_VALUE. In "Geschwindigkeit" steht dann der
+        // GPS-Zustand: Hochbyte = Zustand (0 stumm, 1 keine Satelliten, 2 Suche), Tiefbyte = Satelliten.
+        if (latRaw == Int.MIN_VALUE && lonRaw == Int.MIN_VALUE) {
+            return GatewayPacket(
+                loraId = id,
+                timestampMs = 0L,
+                lat = 0.0,
+                lon = 0.0,
+                speedMs = null,
+                headingDeg = null,
+                batteryPct = if (battPct == 255) null else battPct,
+                hdop = null,
+                rssi = rssi,
+                snrDb = snr4 / 4.0,
+                isHeartbeat = true,
+                gpsState = (speedCms ushr 8) and 0xFF,
+                sats = speedCms and 0xFF,
+            )
+        }
+        val lat = latRaw / 1e6
+        val lon = lonRaw / 1e6
 
         if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) return null
 

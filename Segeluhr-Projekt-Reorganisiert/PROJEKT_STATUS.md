@@ -218,6 +218,25 @@ in dieser Umgebung, daher nicht kompiliert) — Verifikation auf Hardware
 (insb. echter Segeltörn nur mit Handy, Display aus, längere Dauer) noch
 offen.
 
+## 17.11.2026: Gateway versteht Lebenszeichen ohne GPS-Fix (Stufe 1 NICHT geprueft)
+
+**Problem:** Die Regatta-Tracker-Firmware sendet seit dem 12.11. ohne GPS-Fix alle ~10 s ein Lebenszeichen (Akku, GPS-Zustand) mit
+lat = lon = -2147483648 und GPS-Zeit 0. `GatewayPacketCodec.decode()` verwarf solche Pakete wegen "Lat ausserhalb -90..90"; Tracker ohne Fix
+waren in der Uebersicht und auf dem Server unsichtbar (am 17.11. nur 1 von 3 Trackern sichtbar). Die frueher getroffene Annahme "Tracker
+ohne Fix sendet (0,0)" war falsch: Vor dem 12.11. sendete die Firmware ohne Fix gar nichts.
+
+**Geaendert** (Details und Protokoll: `Roemis-Regatta-Tracker/docs/GATEWAY_PROTOCOL.md`):
+- `GatewayPacket`/`GatewayPacketCodec`: neues Feld `isHeartbeat`, GPS-Zustand `gpsState` (0 stumm, 1 keine Satelliten, 2 Suche) und `sats`.
+- `GatewayQueueDb`: neue Spalten (heartbeat, gpsState, sats, rssi, snrDb), DB-Version 3 -> 4 mit echter Migration.
+- `GatewayUploader`: Lebenszeichen gehen als `{id, fix:false, seenTs, battery, rssi, snr, gpsState, sats}` an `/api/gateway/positions`.
+- Setup-Tab: "kein GPS-Fix - GPS-Modul stumm / keine Satelliten / Suche, n Sat."; "aktiv"-Schwelle 10 s -> 30 s (sonst flackern Tracker, weil
+  Lebenszeichen nur alle ~10-12 s kommen).
+- Session-Mitschnitt: Lebenszeichen als Zeile mit Ereignis `OHNE_FIX gpsState=.. sats=..`.
+
+**Verifikation:** 1. Kompiliert: NEIN (kein Android-SDK in der Cloud-Umgebung). 2. Auf Hardware getestet: NEIN. 3. Auf dem Wasser: NEIN.
+Voraussetzungen fuer einen Test: Server mit Lebenszeichen-Unterstuetzung (Roemis-Regatta-Tracker, Stand 17.11.2026) und Tracker/Master mit
+Firmware vom 17.11.2026 (Startzeile im seriellen Monitor: "Firmware <Datum> ... (Lebenszeichen ohne Fix)").
+
 ## 11.11.2026: Regatta-Tracker-Gateway + Zuschauer-Rolle
 
 Roman-Vorgabe (detaillierte Spezifikation für die BLE-Gateway-Funktion

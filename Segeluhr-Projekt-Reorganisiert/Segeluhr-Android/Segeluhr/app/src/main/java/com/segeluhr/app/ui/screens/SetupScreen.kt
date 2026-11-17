@@ -699,7 +699,7 @@ private fun gatewayConnectionLabel(s: com.segeluhr.app.ble.GatewayConnectionStat
 // Wie lange ein Tracker als "aktiv" gilt, ohne ein neues Paket empfangen zu
 // haben (Master sendet laut Protokoll mehrmals/Sekunde - 10s lässt kurze
 // Funklöcher zu, ohne stale Trackerdaten als aktiv zu zeigen).
-private const val GATEWAY_TRACKER_ACTIVE_MS = 10_000L
+private const val GATEWAY_TRACKER_ACTIVE_MS = 30_000L   // 17.11.2026: 10 s -> 30 s, Lebenszeichen ohne Fix kommen nur alle ~10-12 s
 
 /** Grobe Einordnung der horizontalen GPS-Genauigkeit (HDOP), Standard-Daumenregel. */
 private fun hdopQualityLabel(hdop: Double): String = when {
@@ -777,7 +777,13 @@ private fun GatewayTrackersOverview(trackers: List<com.segeluhr.app.viewmodel.Ga
                     fontSize = 12.sp, color = if (active) TextDim else TextDim.copy(alpha = 0.6f),
                 )
                 Text(
-                    t.hdop?.let { hdop -> "HDOP %.1f (%s)".format(hdop, hdopQualityLabel(hdop)) } ?: "kein GPS-Fix",
+                    t.hdop?.let { hdop -> "HDOP %.1f (%s)".format(hdop, hdopQualityLabel(hdop)) } ?: when (t.gpsState) {
+                        // Lebenszeichen ohne Fix (17.11.2026): GPS-Zustand aus dem Paket
+                        0 -> "kein GPS-Fix · GPS-Modul stumm"
+                        1 -> "kein GPS-Fix · keine Satelliten"
+                        2 -> "kein GPS-Fix · Suche, ${t.sats ?: 0} Sat."
+                        else -> "kein GPS-Fix"
+                    },
                     fontSize = 11.sp,
                     color = if (!active) TextDim.copy(alpha = 0.6f) else hdopQualityColor(t.hdop),
                 )

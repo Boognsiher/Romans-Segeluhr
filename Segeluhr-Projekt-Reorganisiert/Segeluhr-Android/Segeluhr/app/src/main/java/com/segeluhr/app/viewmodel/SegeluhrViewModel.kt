@@ -148,12 +148,16 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
             db.gatewayQueueDao().insert(packet.toEntity())
             db.gatewayQueueDao().trimTo(GATEWAY_MAX_QUEUE)
             val pending = db.gatewayQueueDao().count()
+            // Lebenszeichen ohne Fix tragen keine Position: letzte bekannte Position behalten (17.11.2026).
+            val prev = gatewayTrackerStatuses[packet.loraId]
             gatewayTrackerStatuses[packet.loraId] = GatewayTrackerInfo(
                 loraId = packet.loraId,
                 lastSeenMs = System.currentTimeMillis(),
-                lat = packet.lat, lon = packet.lon,
+                lat = if (packet.isHeartbeat) (prev?.lat ?: 0.0) else packet.lat,
+                lon = if (packet.isHeartbeat) (prev?.lon ?: 0.0) else packet.lon,
                 batteryPct = packet.batteryPct, rssi = packet.rssi, snrDb = packet.snrDb,
                 hasGpsFix = packet.hasGpsFix, hdop = packet.hdop,
+                gpsState = packet.gpsState, sats = packet.sats,
             )
             _uiState.update {
                 it.copy(

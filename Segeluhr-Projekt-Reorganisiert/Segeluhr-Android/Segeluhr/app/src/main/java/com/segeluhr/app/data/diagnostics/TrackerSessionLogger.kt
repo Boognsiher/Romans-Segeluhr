@@ -72,10 +72,13 @@ class TrackerSessionLogger(private val context: Context) {
     /** Position eines fremden LoRa-Trackers (aus dem Relais). */
     @Synchronized
     fun logTracker(p: GatewayPacket) = writeRow(
-        source = "TRACKER", id = p.loraId.toString(), pktTs = p.timestampMs,
-        lat = p.lat, lon = p.lon, speedMs = p.speedMs, heading = p.headingDeg,
+        source = "TRACKER", id = p.loraId.toString(), pktTs = if (p.isHeartbeat) null else p.timestampMs,
+        lat = if (p.isHeartbeat) null else p.lat, lon = if (p.isHeartbeat) null else p.lon,
+        speedMs = p.speedMs, heading = p.headingDeg,
         batteryPct = p.batteryPct, hdop = p.hdop, rssi = p.rssi, snr = p.snrDb,
-        gpsFix = p.hasGpsFix, accuracy = null, event = "",
+        gpsFix = p.hasGpsFix, accuracy = null,
+        // Lebenszeichen ohne Fix (17.11.2026): GPS-Zustand (0 stumm, 1 keine Satelliten, 2 Suche) und Satelliten im Ereignisfeld
+        event = if (p.isHeartbeat) "OHNE_FIX gpsState=${p.gpsState} sats=${p.sats}" else "",
     )
 
     /** Eigene Position (Handy-GPS). */
