@@ -202,4 +202,7 @@ data class GatewayTrackerInfo(
     /** GPS-Fix laut letztem Paket, siehe [com.segeluhr.app.ble.GatewayPacket.hasGpsFix]. */
     val hasGpsFix: Boolean = true,
     val hdop: Double? = null,
+    /** Nur wenn das letzte Paket ein Lebenszeichen ohne Fix war: 0 GPS stumm, 1 keine Satelliten, 2 Suche. */
+    val gpsState: Int? = null,
+    val sats: Int? = null,
 )

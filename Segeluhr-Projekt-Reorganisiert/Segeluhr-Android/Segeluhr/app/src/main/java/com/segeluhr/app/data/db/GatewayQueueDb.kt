@@ -21,13 +21,20 @@ data class GatewayPositionEntity(
     val headingDeg: Double?,
     val batteryFraction: Double?,
     val accuracyM: Double?,
+    /** Lebenszeichen ohne GPS-Fix (17.11.2026, DB-Version 4): lat/lon sind dann Platzhalter, timestampMs = Empfangszeit am Handy. */
+    val heartbeat: Boolean = false,
+    val gpsState: Int? = null,
+    val sats: Int? = null,
+    val rssi: Int? = null,
+    val snrDb: Double? = null,
 )
 
 fun GatewayPacket.toEntity() = GatewayPositionEntity(
     loraId = loraId,
     lat = lat,
     lon = lon,
-    timestampMs = timestampMs,
+    // Lebenszeichen tragen keine GPS-Zeit (0) - dann gilt die Empfangszeit am Handy, der Server nimmt sie als "zuletzt gehoert".
+    timestampMs = if (isHeartbeat) System.currentTimeMillis() else timestampMs,
     headingDeg = headingDeg,
     // Byte-Protokoll liefert 0..100 (Prozent), Server-Payload erwartet 0..1 -
     // siehe GatewayPacketCodec-Klassendoku, bewusst erst hier umgerechnet statt
@@ -35,6 +42,11 @@ fun GatewayPacket.toEntity() = GatewayPositionEntity(
     batteryFraction = batteryPct?.let { it / 100.0 },
     // HDOP * 5 als grobe Meter-Näherung, wie im Gateway-Protokoll vorgeschlagen.
     accuracyM = hdop?.let { it * 5.0 },
+    heartbeat = isHeartbeat,
+    gpsState = gpsState,
+    sats = sats,
+    rssi = rssi,
+    snrDb = snrDb,
 )
 
 @Dao

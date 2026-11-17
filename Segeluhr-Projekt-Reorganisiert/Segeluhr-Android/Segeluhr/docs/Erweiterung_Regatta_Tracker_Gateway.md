@@ -89,4 +89,8 @@ Setup-Tab ("wie viele Tracker senden gerade Daten").
 - **Datenvolumen-Zähler und Session-Mitschnitt (12.11.2026):** siehe `Erweiterung_Geraete_Logik.md` Abschnitte 5.3 und 6.
   Der Relais-Upload ist als Kategorie "Relais" im Zähler ausgewiesen; jedes empfangene Tracker-Paket kann in die
   Session-CSV geschrieben werden.
-
+- **Lebenszeichen ohne GPS-Fix (17.11.2026):** Die Tracker senden ohne Fix alle ~10 s ein Paket mit lat = lon = `Int.MIN_VALUE` und GPS-Zeit 0;
+  in "Geschwindigkeit" steht der GPS-Zustand (Hochbyte: 0 stumm, 1 keine Satelliten, 2 Suche; Tiefbyte: Satelliten). Der Codec erkennt das
+  (`GatewayPacket.isHeartbeat`), die Queue speichert es (DB-Version 4), der Upload sendet `{id, fix:false, seenTs, battery, rssi, snr, gpsState, sats}`;
+  der Server behaelt die letzte Position und merkt sich nur den Status. Das ersetzt die frueher dokumentierte Annahme "(0, 0) wird hochgeladen
+  und serverseitig ersetzt" - die gab es in der Firmware nie. Die "aktiv"-Schwelle ist jetzt 30 s. **Noch nicht kompiliert und nicht getestet.**
