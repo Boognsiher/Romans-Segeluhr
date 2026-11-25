@@ -469,6 +469,27 @@ Vereins-Kurs einstellen.
   zwischen `clearIrqStatus()` und `esp_deep_sleep_start()` sind der
   wahrscheinlichste Bereich).
 
+## 24.11.2026: Bug gefunden — Absturz bei frischer Installation (fehlende Laufzeit-Berechtigungen)
+
+Beim Einrichten eines neuen Test-Laptops (Windows, Android Studio + adb neu
+installiert, Samsung-Handy `SM_S931B` frisch mit der App bespielt) stürzte
+die App beim allerersten Start sofort ab: `SegeluhrForegroundService`
+(`android:foregroundServiceType="location|connectedDevice"`) wird offenbar
+unmittelbar beim App-Start gestartet, **bevor** die Laufzeit-Berechtigungen
+(Bluetooth Connect/Advertise/Scan, Standort, Benachrichtigungen) vom Nutzer
+erteilt wurden — auf einer komplett frischen Installation sind diese alle
+noch `granted=false`, der `startForeground()`-Aufruf wirft dann eine
+`SecurityException`/`ForegroundServiceStartNotAllowedException`
+(`SegeluhrForegroundService.kt:80`), die App crasht in einer Schleife und
+zeigt gar keine UI. Auf bisherigen Testgeräten nie aufgefallen, weil dort
+die Berechtigungen schon länger erteilt waren. **Workaround angewendet**
+(nur für den Test, kein Code-Fix): Berechtigungen per
+`adb shell pm grant` von Hand erteilt, danach lief die App normal.
+**Nicht gefixt** — Code sollte den Foreground-Service erst starten,
+nachdem alle benötigten Berechtigungen bestätigt sind (bzw. den
+Berechtigungsdialog zuerst zeigen), sonst crasht jede Neuinstallation auf
+einem Gerät ohne vorher erteilte Berechtigungen.
+
 ## Ordnerstruktur
 
 ```
