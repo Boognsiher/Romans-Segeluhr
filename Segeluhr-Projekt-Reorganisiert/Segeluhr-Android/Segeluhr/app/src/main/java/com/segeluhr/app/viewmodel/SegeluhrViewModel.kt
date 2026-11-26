@@ -125,6 +125,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private val trackerBuffer = ArrayDeque<TrackerPosition>()
     private var lastTrackerSampleMs = 0L
     private var trackerSendJob: Job? = null
+    // 26.11.2026: Liefert der RegattaMaster die Position des eigenen Boots selbst (T-Beam mit OWN_TRACKER_ID, Pakete mit RSSI 0 und SNR 0, siehe
+    // master.cpp im Roemis-Regatta-Tracker-Repo), laeuft der Handy-Positionsupload NICHT zusaetzlich. Sonst landen zwei Quellen in derselben Spur
+    // (gemessen: Handy alle 5 s mit Geschwindigkeit, Master jede Sekunde) und die Linie zackt. Zeitpunkt des letzten solchen Pakets.
+    @Volatile private var lastMasterOwnPacketMs = 0L
 
     // Regatta-Tracker-Gateway (siehe docs/Erweiterung_Regatta_Tracker_Gateway.md)
     // — reicht LoRa-Positionen ANDERER Boote vom "RegattaMaster"-Board per BLE
@@ -140,6 +144,10 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private val gatewayTrackerStatuses = linkedMapOf<Int, GatewayTrackerInfo>()
 
     private val gatewayClient = GatewayClient(application) { packet ->
+        // Eigene Position vom Master (kein echter LoRa-Empfang: RSSI und SNR sind 0): Handy-Positionsupload pausieren.
+        if (!packet.isHeartbeat && packet.hasGpsFix && packet.rssi == 0 && packet.snrDb == 0.0) {
+            lastMasterOwnPacketMs = System.currentTimeMillis()
+        }
         viewModelScope.launch {
             if (trackerSessionLogger.isRecording) {
                 trackerSessionLogger.logTracker(packet)
@@ -971,6 +979,13 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         val lat = fix.lat ?: return
         val lon = fix.lon ?: return
         val now = System.currentTimeMillis()
+        // Master liefert die eigene Position (siehe lastMasterOwnPacketMs): Handy sendet nicht. Faellt der Master aus (z.B. GPS-Zeit des
+        // T-Beams noch nicht verlaesslich, die Firmware haelt Positionen dann zurueck), springt der Handy-Upload nach MASTER_OWN_TIMEOUT_MS von selbst wieder an.
+        if (now - lastMasterOwnPacketMs < MASTER_OWN_TIMEOUT_MS) {
+            val text = "Pausiert: Master liefert die Position des eigenen Boots"
+            if (_uiState.value.trackerStatus != text) setTrackerStatus(text)
+            return
+        }
         if (now - lastTrackerSampleMs < TRACKER_SEND_INTERVAL_MS) return
         lastTrackerSampleMs = now
 
@@ -1468,6 +1483,7 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
     private companion object {
         /** Wie oft eine Position an den Tracker-Server geht (wie die Web-Tracker-Seite). */
         const val TRACKER_SEND_INTERVAL_MS = 5000L
+        const val MASTER_OWN_TIMEOUT_MS = 15_000L   // so lange gilt der Master als Quelle der eigenen Position, nachdem sein letztes Paket kam
         /** Max. Positionen im Offline-Puffer (~16 Min bei 5 s). */
         const val TRACKER_MAX_BUFFER = 200
 

@@ -469,6 +469,14 @@ Vereins-Kurs einstellen.
   zwischen `clearIrqStatus()` und `esp_deep_sleep_start()` sind der
   wahrscheinlichste Bereich).
 
+## 26.11.2026: Handy-Positionsupload pausiert, wenn der Master die eigene Position liefert (Stufe 1 NICHT geprueft)
+
+Anlass: Auswertung der Tracker-Exporte vom 25./26.11. Die Spur des Boots "Master" enthielt zwei Quellen (Handy alle 5 s, T-Beam-Master jede Sekunde). Aenderung in
+`SegeluhrViewModel.kt` (`lastMasterOwnPacketMs`, `MASTER_OWN_TIMEOUT_MS`, Pruefung in `maybeSendTrackerPosition`), Beschreibung in `docs/Erweiterung_Regatta_Tracker.md`.
+- **1. Kompiliert:** NEIN (in der Cloud-Umgebung fehlt das Android-SDK). Eine kleine Aenderung (ein `@Volatile`-Feld, zwei Abfragen, eine Konstante); lokal `./gradlew compileDebugKotlin`.
+- **2. Auf Hardware getestet:** NEIN.
+- **3. Auf dem Wasser verifiziert:** NEIN.
+
 ## 24.11.2026: Bug gefunden — Absturz bei frischer Installation (fehlende Laufzeit-Berechtigungen)
 
 Beim Einrichten eines neuen Test-Laptops (Windows, Android Studio + adb neu
