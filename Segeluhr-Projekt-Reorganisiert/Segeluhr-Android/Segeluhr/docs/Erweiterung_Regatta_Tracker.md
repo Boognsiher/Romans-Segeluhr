@@ -84,3 +84,14 @@ Zusaetzlich liefert jede `/api/*`-Antwort den Header `X-API-Version: <major>.<mi
   Serververhalten: Paket nicht als neue Position übernehmen, letzte gültige Position behalten (Boot bleibt auf der Karte
   stehen). Im Tracker-Repo in `docs/GATEWAY_PROTOCOL.md` festzuhalten; Stand 12.11.2026 dort noch nicht umgesetzt.
 
+
+## Master liefert die eigene Position: Handy-Upload pausiert (26.11.2026)
+
+Ein RegattaMaster mit `OWN_TRACKER_ID` (T-Beam-GPS, siehe `firmware/src/master.cpp` im Tracker-Repo) schickt die Position des **eigenen Boots** per BLE ans Handy,
+und das Gateway reicht sie wie jedes andere Paket an den Server weiter. Lief gleichzeitig der Handy-Positionsupload (`POST /api/trackers/<id>/position`), standen
+zwei Quellen in derselben Spur (Messung vom 25./26.11.: Handy alle 5 s mit Geschwindigkeit, Master jede Sekunde), die Linie zackte und die Historie hatte doppelte Punkte.
+
+**Regel:** Kommen Pakete des Masters mit gültigem Fix und **RSSI 0 und SNR 0** (kein echter LoRa-Empfang, so markiert der Master seine eigenen Pakete), pausiert der
+Handy-Positionsupload (`maybeSendTrackerPosition`, Status "Pausiert: Master liefert die Position des eigenen Boots"). Bleibt das Master-Paket länger als 15 s aus
+(`MASTER_OWN_TIMEOUT_MS`), zum Beispiel weil der T-Beam nach einem Kaltstart noch keine verlässliche GPS-Zeit hat und die Firmware die Position zurückhält, springt der
+Handy-Upload von selbst wieder an. Die Handy-GPS für die Boot-Logik (Wind, Wettfahrt, Heimweg) läuft unverändert weiter; nur der Upload an den Server ruht.
