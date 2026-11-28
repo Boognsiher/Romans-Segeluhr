@@ -1,12 +1,18 @@
 package com.segeluhr.app.ble
 
+import android.Manifest
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import com.segeluhr.app.data.model.OperationMode
 import com.segeluhr.app.data.settings.SettingsRepository
 import com.segeluhr.app.location.LocationProvider
@@ -53,8 +59,35 @@ class SegeluhrForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "segeluhr_ble_bridge"
         private const val NOTIFICATION_ID = 42
+        private const val TAG = "SegeluhrFgService"
 
+        /** Standort (fein oder grob) erteilt - Voraussetzung fuer den FGS-Typ "location" und fuer GPS. */
+        fun hasLocationPermission(context: Context): Boolean =
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+        /**
+         * BLE-Bridge erlaubt (API 31+: CONNECT fuer den GATT-Server, ADVERTISE fuers Advertising; darunter keine Laufzeit-Berechtigung).
+         * Voraussetzung fuer den FGS-Typ "connectedDevice" und fuer bleManager.start().
+         */
+        fun hasBluetoothPermission(context: Context): Boolean =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S || (
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
+                )
+
+        /**
+         * Bugfix 28.11.2026 (Absturz bei frischer Installation, PROJEKT_STATUS 24.11.): Ab Android 14 verlangt startForeground() fuer jeden
+         * FGS-Typ die passende Laufzeit-Berechtigung, sonst SecurityException und Absturzschleife - noch bevor der Berechtigungsdialog
+         * erscheinen kann. Deshalb hier nur starten, wenn mindestens Standort ODER Bluetooth erteilt ist. Die Pruefung muss VOR
+         * startForegroundService() liegen: Nach diesem Aufruf muss startForeground() innerhalb weniger Sekunden folgen, sonst stuerzt die
+         * App mit ForegroundServiceDidNotStartInTimeException ab. Nach erteilten Berechtigungen ruft MainActivity start() erneut auf.
+         */
         fun start(context: Context) {
+            if (!hasLocationPermission(context) && !hasBluetoothPermission(context)) {
+                Log.i(TAG, "Dienst nicht gestartet: weder Standort- noch Bluetooth-Berechtigung erteilt")
+                return
+            }
             val intent = Intent(context, SegeluhrForegroundService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -77,25 +110,49 @@ class SegeluhrForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification(OperationMode.STANDALONE))
-        bleManager.start()
-        locationProvider.fixFlow()
-            .onEach { fix -> bleManager.notifyGpsFix(fix) }
-            .launchIn(scope)
-        // Notification-Text an den tatsächlichen Modus anpassen, live bei
-        // Umschalten im Setup-Tab (Service selbst läuft in beiden Modi
-        // unverändert weiter, siehe Klassenkommentar).
-        settingsRepo.operationModeFlow
-            .onEach { mode ->
-                val manager = getSystemService(NotificationManager::class.java)
-                manager.notify(NOTIFICATION_ID, buildNotification(mode))
-            }
-            .launchIn(scope)
-        settingsRepo.wakeLockEnabledFlow
-            .onEach { enabled -> setWakeLockHeld(enabled) }
-            .launchIn(scope)
+        // (28.11.2026) Nur die FGS-Typen anfordern, deren Berechtigung erteilt ist: ohne Bluetooth laeuft GPS trotzdem im Hintergrund
+        // ("Ohne Uhr"), ohne Standort trotzdem die BLE-Bridge. Ohne Typ-Angabe nimmt Android alle Typen aus dem Manifest
+        // (location|connectedDevice) und wirft bei einer fehlenden Berechtigung eine SecurityException.
+        val location = hasLocationPermission(this)
+        val bluetooth = hasBluetoothPermission(this)
+        var types = 0
+        if (location) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        if (bluetooth) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        if (types == 0) {
+            // Nur moeglich, wenn eine Berechtigung zwischen start() und hier entzogen wurde, oder beim Neustart durch das System (START_STICKY).
+            Log.w(TAG, "Keine Berechtigung mehr fuer den Vordergrunddienst - beende ihn")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(OperationMode.STANDALONE), types)
+        // start() kann mehrfach kommen (App-Start, Rollenwechsel, nach erteilten Berechtigungen): Ablaeufe nur einmal starten,
+        // sonst laufen GPS-Abfragen und Sammler doppelt.
+        if (bluetooth) bleManager.start()            // hat selbst einen Schutz gegen doppeltes Starten
+        if (location && locationJob == null) {
+            locationJob = locationProvider.fixFlow()
+                .onEach { fix -> bleManager.notifyGpsFix(fix) }
+                .launchIn(scope)
+        }
+        if (!settingsCollectorsStarted) {
+            settingsCollectorsStarted = true
+            // Notification-Text an den tatsächlichen Modus anpassen, live bei
+            // Umschalten im Setup-Tab (Service selbst läuft in beiden Modi
+            // unverändert weiter, siehe Klassenkommentar).
+            settingsRepo.operationModeFlow
+                .onEach { mode ->
+                    val manager = getSystemService(NotificationManager::class.java)
+                    manager.notify(NOTIFICATION_ID, buildNotification(mode))
+                }
+                .launchIn(scope)
+            settingsRepo.wakeLockEnabledFlow
+                .onEach { enabled -> setWakeLockHeld(enabled) }
+                .launchIn(scope)
+        }
         return START_STICKY
     }
+
+    private var locationJob: Job? = null
+    private var settingsCollectorsStarted = false
 
     override fun onDestroy() {
         setWakeLockHeld(false)

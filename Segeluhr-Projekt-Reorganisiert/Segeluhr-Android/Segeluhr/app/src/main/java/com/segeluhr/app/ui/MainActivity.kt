@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
+import com.segeluhr.app.ble.SegeluhrForegroundService
 import com.segeluhr.app.data.model.AppRole
 import com.segeluhr.app.ui.screens.*
 import com.segeluhr.app.ui.theme.SegeluhrTheme
@@ -107,6 +108,9 @@ class MainActivity : ComponentActivity() {
         if (results.containsKey(Manifest.permission.BLUETOOTH_SCAN)) {
             viewModel.onBluetoothScanPermissionResult(results[Manifest.permission.BLUETOOTH_SCAN] == true)
         }
+        // (28.11.2026) Der Dienst wurde beim App-Start ohne Berechtigungen bewusst nicht gestartet (siehe SegeluhrForegroundService.start) -
+        // jetzt nachholen, mit den Typen, die erteilt wurden.
+        viewModel.onPermissionsResult()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -114,6 +118,13 @@ class MainActivity : ComponentActivity() {
 
         checkLocationPermission()
         viewModel.onBluetoothScanPermissionResult(hasBluetoothScanPermission())
+        // (28.11.2026) Bei frischer Installation fehlen alle Berechtigungen: gleich beim Start fragen statt erst ueber den Knopf im
+        // Setup-Tab (den man vorher nie zu sehen bekam, weil die App abstuerzte). Nicht bei jeder Drehung des Bildschirms erneut.
+        if (savedInstanceState == null &&
+            (!SegeluhrForegroundService.hasLocationPermission(this) || !SegeluhrForegroundService.hasBluetoothPermission(this))
+        ) {
+            requestAllPermissions()
+        }
 
         setContent {
             SegeluhrTheme {

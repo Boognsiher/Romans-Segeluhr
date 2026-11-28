@@ -469,6 +469,29 @@ Vereins-Kurs einstellen.
   zwischen `clearIrqStatus()` und `esp_deep_sleep_start()` sind der
   wahrscheinlichste Bereich).
 
+## 28.11.2026: Fix Absturz bei frischer Installation (Bug vom 24.11.) - Stufe 1 und 2 geprueft
+
+Aenderungen:
+- `SegeluhrForegroundService.start()` startet den Dienst nur, wenn Standort ODER Bluetooth (CONNECT+ADVERTISE) erteilt ist; die Pruefung liegt
+  bewusst VOR `startForegroundService()` (sonst `ForegroundServiceDidNotStartInTimeException`).
+- `onStartCommand` fordert nur die erlaubten FGS-Typen an (`ServiceCompat.startForeground` mit location und/oder connectedDevice); BLE-Bridge nur
+  mit Bluetooth-, GPS nur mit Standort-Berechtigung. So laeuft GPS "Ohne Uhr" auch, wenn Bluetooth abgelehnt wird (der urspruengliche Vorschlag
+  haette dann weiter in `bleManager.start()` -> `openGattServer` abstuerzen koennen).
+- Mehrfaches `start()` startet GPS-Sammler und Einstellungs-Sammler nicht mehr doppelt (vorher bei jedem Aufruf ein weiterer Sammler).
+- `MainActivity` fragt fehlende Berechtigungen gleich beim Start an; nach der Antwort startet `SegeluhrViewModel.onPermissionsResult()` den Dienst
+  (nur Boots-Rolle, nicht nach manuellem Stopp).
+
+Pruefstufen:
+- **1. Kompiliert:** JA (`assembleDebug`, keine neuen Warnungen).
+- **2. Auf Hardware getestet:** JA (SM-S931B, Android 17). Statt Neuinstallation (haette die App-Daten geloescht) per `pm revoke` alle
+  Laufzeit-Berechtigungen entzogen = gleiche Lage wie frisch installiert:
+  - ohne Berechtigungen: kein Absturz, Dienst bewusst nicht gestartet (Log), Berechtigungsdialog erscheint;
+  - alles erlaubt: Dienst startet im selben Prozess, Typen location+connectedDevice (0x18);
+  - nur Standort, Bluetooth fehlt: Dienst mit Typ location (0x08), kein Absturz; danach Bluetooth erlaubt -> gleicher Prozess, 0x18.
+  - NICHT geprueft: dass der Doppelstart-Schutz wirkt (der Fused-Provider fasst Anfragen derselben App zusammen, per dumpsys nicht zaehlbar);
+    Bluetooth abgelehnt bei laufender Uhr-Verbindung.
+- **3. Auf dem Wasser verifiziert:** NEIN.
+
 ## 26.11.2026: Handy-Positionsupload pausiert, wenn der Master die eigene Position liefert (Stufe 1 und 2 am 28.11. geprueft)
 
 Anlass: Auswertung der Tracker-Exporte vom 25./26.11. Die Spur des Boots "Master" enthielt zwei Quellen (Handy alle 5 s, T-Beam-Master jede Sekunde). Aenderung in
@@ -499,7 +522,7 @@ nachdem alle benötigten Berechtigungen bestätigt sind (bzw. den
 Berechtigungsdialog zuerst zeigen), sonst crasht jede Neuinstallation auf
 einem Gerät ohne vorher erteilte Berechtigungen.
 
-**Ergaenzung 28.11.2026: reproduziert, Ursache bestaetigt, weiterhin NICHT gefixt.** Frische Installation auf SM-S931B: Absturzschleife mit
+**Ergaenzung 28.11.2026: reproduziert, Ursache bestaetigt - am selben Tag gefixt, siehe Eintrag "28.11.2026: Fix Absturz bei frischer Installation".** Frische Installation auf SM-S931B: Absturzschleife mit
 `SecurityException: Starting FGS with type connectedDevice ... requires ... any of [BLUETOOTH_ADVERTISE, BLUETOOTH_CONNECT, BLUETOOTH_SCAN, ...]`
 bei `SegeluhrForegroundService.kt:80` (`startForeground`). Ausloeser: Der `init`-Block von `SegeluhrViewModel` startet den Dienst bedingungslos
 (`SegeluhrViewModel.kt:261`, ebenso `resumeBackgroundWork()`), die Berechtigungen werden aber erst ueber den Knopf im Setup-Tab angefragt
