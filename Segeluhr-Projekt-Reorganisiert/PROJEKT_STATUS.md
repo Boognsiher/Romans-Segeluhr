@@ -469,12 +469,13 @@ Vereins-Kurs einstellen.
   zwischen `clearIrqStatus()` und `esp_deep_sleep_start()` sind der
   wahrscheinlichste Bereich).
 
-## 26.11.2026: Handy-Positionsupload pausiert, wenn der Master die eigene Position liefert (Stufe 1 NICHT geprueft)
+## 26.11.2026: Handy-Positionsupload pausiert, wenn der Master die eigene Position liefert (Stufe 1 und 2 am 28.11. geprueft)
 
 Anlass: Auswertung der Tracker-Exporte vom 25./26.11. Die Spur des Boots "Master" enthielt zwei Quellen (Handy alle 5 s, T-Beam-Master jede Sekunde). Aenderung in
 `SegeluhrViewModel.kt` (`lastMasterOwnPacketMs`, `MASTER_OWN_TIMEOUT_MS`, Pruefung in `maybeSendTrackerPosition`), Beschreibung in `docs/Erweiterung_Regatta_Tracker.md`.
-- **1. Kompiliert:** NEIN (in der Cloud-Umgebung fehlt das Android-SDK). Eine kleine Aenderung (ein `@Volatile`-Feld, zwei Abfragen, eine Konstante); lokal `./gradlew compileDebugKotlin`.
-- **2. Auf Hardware getestet:** NEIN.
+- **1. Kompiliert:** JA (28.11.2026, lokal unter Windows): `compileDebugKotlin` und `assembleDebug` ohne Fehler und ohne Code-Korrektur. Gebaut mit Gradle 8.7 direkt aus `~/.gradle/wrapper/dists` (im Projekt liegt keine `gradlew.bat`, nur `gradle/wrapper/gradle-wrapper.properties`) und dem JBR 21 von Android Studio als `JAVA_HOME`.
+- **2. Auf Hardware getestet:** JA, eingeschraenkt (28.11.2026, Samsung SM-S931B, Android 17): installiert, App startet, `SegeluhrForegroundService` laeuft (Typen location+connectedDevice), kein Absturz, keine App-Fehler im Logcat. Die neue Logik selbst (Pause des Handy-Uploads bei Master-Paketen) wurde NICHT ausgeloest, weil kein Master/LoRa in Reichweite war.
+  Hinweis zur Installation: Die App auf dem Handy war mit dem Debug-Schluessel des anderen Laptops signiert (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). Daher: App-Daten per `adb exec-out run-as com.segeluhr.app tar` gesichert (Backup + alte APK in `C:\Users\thurn\Segeluhr-Backup-2026-11-28`), deinstalliert, neu installiert, Daten per `run-as tar xf` zurueckgespielt, Berechtigungen per `pm grant` erteilt (wegen des Bugs vom 24.11., siehe unten).
 - **3. Auf dem Wasser verifiziert:** NEIN.
 
 ## 24.11.2026: Bug gefunden — Absturz bei frischer Installation (fehlende Laufzeit-Berechtigungen)
@@ -497,6 +498,16 @@ die Berechtigungen schon länger erteilt waren. **Workaround angewendet**
 nachdem alle benötigten Berechtigungen bestätigt sind (bzw. den
 Berechtigungsdialog zuerst zeigen), sonst crasht jede Neuinstallation auf
 einem Gerät ohne vorher erteilte Berechtigungen.
+
+**Ergaenzung 28.11.2026: reproduziert, Ursache bestaetigt, weiterhin NICHT gefixt.** Frische Installation auf SM-S931B: Absturzschleife mit
+`SecurityException: Starting FGS with type connectedDevice ... requires ... any of [BLUETOOTH_ADVERTISE, BLUETOOTH_CONNECT, BLUETOOTH_SCAN, ...]`
+bei `SegeluhrForegroundService.kt:80` (`startForeground`). Ausloeser: Der `init`-Block von `SegeluhrViewModel` startet den Dienst bedingungslos
+(`SegeluhrViewModel.kt:261`, ebenso `resumeBackgroundWork()`), die Berechtigungen werden aber erst ueber den Knopf im Setup-Tab angefragt
+(`MainActivity.requestAllPermissions`), und diese UI erscheint wegen des Absturzes nie. Vorschlag kleinster Fix: in `SegeluhrForegroundService.start()`
+nur starten, wenn BLUETOOTH_CONNECT (API 31+) und ACCESS_FINE_LOCATION erteilt sind (sonst still zurueckkehren), und im `permissionLauncher`-Callback
+der `MainActivity` den Dienst nach erteilten Berechtigungen starten. Zusaetzlich `requestAllPermissions()` beim ersten Start automatisch aufrufen,
+wenn Berechtigungen fehlen. Die Pruefung darf NICHT in `onStartCommand` sitzen: Nach `startForegroundService()` muss `startForeground()` innerhalb weniger
+Sekunden kommen, sonst stuerzt die App mit `ForegroundServiceDidNotStartInTimeException` ab.
 
 ## Ordnerstruktur
 
