@@ -313,6 +313,17 @@ class SegeluhrViewModel(application: Application) : AndroidViewModel(application
         _uiState.update { it.copy(bluetoothScanPermissionGranted = granted) }
     }
 
+    /**
+     * (28.11.2026) Nach dem Berechtigungsdialog: Dienst (nach)starten. Beim App-Start ohne Berechtigungen hat
+     * SegeluhrForegroundService.start() bewusst nichts gestartet (sonst Absturz unter Android 14). Gleiche Bedingung wie
+     * setAppRole/stopApp: nur in der Boots-Rolle und wenn der Nutzer nicht manuell gestoppt hat. Mehrfaches start() ist unschaedlich.
+     */
+    fun onPermissionsResult() {
+        if (_uiState.value.appRole == AppRole.SAILOR && !_uiState.value.appStopped) {
+            SegeluhrForegroundService.start(getApplication())
+        }
+    }
+
     fun onLocationPermissionResult(granted: Boolean) {
         _uiState.update { it.copy(locationPermissionGranted = granted) }
         if (granted && !_uiState.value.appStopped) startGps()
